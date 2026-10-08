@@ -283,9 +283,11 @@ fn toggle_sort(sort: &mut Vec<(String, i8)>, key: &str, shift: bool) {
     }
 }
 
-/// ボックス一覧の列(編集・削除の列を除く)
+/// ボックス一覧の列
 #[derive(Clone, Copy, PartialEq)]
 enum Col {
+    /// 選択・編集・削除・固定/除外の列(いつも先頭で、入れ替えない)
+    Op,
     Index,
     Name,
     Memo,
@@ -347,6 +349,7 @@ impl Col {
     /// 並べ替え・列の並びの保存に使うキー(本家と同じ)
     fn key(self) -> String {
         match self {
+            Col::Op => "edit".into(),
             Col::Index => "index".into(),
             Col::Name => "name".into(),
             Col::Memo => "memo".into(),
@@ -372,6 +375,7 @@ impl Col {
 
     fn title(self, setting: &ListSetting) -> String {
         match self {
+            Col::Op => String::new(),
             Col::Index => "No".into(),
             Col::Name => "名前".into(),
             Col::Memo => "メモ".into(),
@@ -403,6 +407,7 @@ impl Col {
     /// 列の幅(width は覚えている幅。無ければ最初の幅)
     fn width(self, width: Option<f32>, setting: &ListSetting) -> Column {
         let (initial, min) = match self {
+            Col::Op => (86.0, 86.0),
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
             Col::Memo => (120.0, 40.0),
@@ -426,6 +431,37 @@ impl Col {
     fn tall_header(self, setting: &ListSetting) -> bool {
         self.title(setting).contains('\n') || matches!(self, Col::FoodNum(_))
     }
+}
+
+/// 本家 sortable-table の fixColumn(操作列を除く列の数 n)を当てはめた、左に固定する列の数。
+/// 本家はサブスキル5つで1列なので、続けて並んだサブスキルの列は1列と数える
+fn fixed_count(columns: &[Col], n: usize) -> usize {
+    let mut count = 0;
+    for (k, c) in columns.iter().enumerate() {
+        let joined = matches!(c, Col::Sub(_)) && k > 0 && matches!(columns[k - 1], Col::Sub(_));
+        if !joined {
+            if count == n {
+                return k;
+            }
+            count += 1;
+        }
+    }
+    columns.len()
+}
+
+/// 表の中での操作(描画後にまとめて反映する)
+enum TableEvent {
+    /// 並べ替え(列のキー, Shift)
+    Sort(String, bool),
+    /// 測った列の幅
+    Width(String, f32),
+    /// 列の入れ替え(動かす列, 入れる先の列, 先の列の後ろか)
+    Move(Col, Col, bool),
+    ResetOrder,
+    SelectAll(bool),
+    Toggle(usize),
+    Action(RowAction),
+    Cell(CellEdit),
 }
 
 /// 列の並びと幅の保存場所(本家に無い項目なので、設定ではなくウインドウ位置と同じ window.ron に入れる)
@@ -541,6 +577,10 @@ pub struct BoxView {
     selected: HashSet<usize>,
     /// 削除の確認(メッセージ, 消すボックス位置)
     confirm_delete: Option<(String, Vec<usize>)>,
+    /// 一覧の縦のスクロール位置(左右の表で揃える)
+    scroll_offset: f32,
+    /// マウスが乗っている行(左右の表で揃える)
+    hover_row: Option<usize>,
 }
 
 /// 一覧の操作列でのクリック
@@ -737,19 +777,11 @@ impl BoxView {
     fn table(&mut self, ui: &mut egui::Ui, shared: &mut Shared, setting: &ListSetting, rows: Vec<usize>) {
         let m = master();
         let mut sort = sort_info(shared);
-        let mut sort_changed = false;
-        let mut action: Option<RowAction> = None;
-        let mut toggle_select: Option<usize> = None;
-        let mut select_all: Option<bool> = None;
         let selectable: Vec<usize> = rows.iter().copied().filter(|&i| !shared.box_file.list[i].favorite).collect();
-        let mut edits: Vec<CellEdit> = Vec::new();
         let levels = shared.config.select_evaluate.enabled_levels();
         let all = Col::all(setting, &levels);
         let mut order = column_order(ui.ctx(), &all);
         let columns = order.clone();
-        // 列の入れ替え(動かす列, 入れる先の列, 先の列の後ろか)、並びを最初に戻す
-        let mut moved: Option<(Col, Col, bool)> = None;
-        let mut reset_order = false;
         // 表は列の幅を位置ごとに覚えるので、並びが変わったら別の表として作り直し、
         // 測っておいた各列の幅を最初の幅として渡す
         let mut widths = column_widths(ui.ctx());
@@ -771,263 +803,341 @@ impl BoxView {
             })
             .collect();
 
-        // 列が画面に収まらないときは横にスクロールする
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            // 文字の上をクリックしても行を選べるよう、文字の選択はしない
-            ui.style_mut().interaction.selectable_labels = false;
+        // 本家 sortable-table の fixColumn: 左の列は固定し、残りの列だけ横にスクロールする。
+        // egui の表には列の固定が無いので、左右2つの表を並べて縦のスクロール位置を揃える
+        let fixed = fixed_count(&columns, if setting.fix_score { 9 } else { 3 });
+        let mut left = vec![Col::Op];
+        left.extend_from_slice(&columns[..fixed]);
+        let scrolled = &columns[fixed..];
+
+        let sort_mark = |key: &str| match sort.iter().position(|(k, _)| k == key) {
+            // 並べ替え中の列には ▲(昇順)/▼(降順) と、条件が複数なら優先順を付ける
+            Some(n) => {
+                let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
+                if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
+            }
+            None => String::new(),
+        };
+        let selected = &self.selected;
+        let results = &self.results;
+        let list = &shared.box_file.list;
+        let config = &shared.config;
+
+        let header_cell = |ui: &mut egui::Ui, col: Col| -> Vec<TableEvent> {
+            let mut ev = Vec::new();
+            let key = col.key();
+            if col == Col::Op {
+                // 並べ替えのクリックはマス全体で受け、上に置く全選択のチェックボックスを優先する
+                let r = ui
+                    .interact(ui.max_rect(), egui::Id::new(("box_sort", &key)), egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("この列でソートするとPTシミュへの固定/除外でソートできます。");
+                if r.clicked() {
+                    ev.push(TableEvent::Sort(key.clone(), ui.input(|i| i.modifiers.shift)));
+                }
+                // 表示中の行(お気に入りを除く)をまとめて選ぶ。本家にはない
+                let n = selectable.iter().filter(|i| selected.contains(i)).count();
+                let mut all = n > 0 && n == selectable.len();
+                let checkbox = egui::Checkbox::without_text(&mut all).indeterminate(n > 0 && n < selectable.len());
+                if ui.add_enabled(!selectable.is_empty(), checkbox).on_hover_text("表示中のポケモンをすべて選択/解除").clicked() {
+                    ev.push(TableEvent::SelectAll(n < selectable.len()));
+                }
+                ui.add(egui::Label::new(egui::RichText::new(sort_mark(&key)).strong()).selectable(false));
+                return ev;
+            }
+            let title = col.title(setting);
+            let mark = sort_mark(&key);
+            if let Col::FoodNum(n) = col {
+                ui.vertical(|ui| {
+                    food_icon::food_icon(ui, &m.foods[n].name, 20.0);
+                    ui.add(egui::Label::new(egui::RichText::new(mark.clone()).strong()).selectable(false));
+                });
+            } else {
+                ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+            }
+            // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
+            let rect = ui.max_rect();
+            let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
+            r = if r.dragged() { r.on_hover_cursor(egui::CursorIcon::Grabbing) } else { r.on_hover_cursor(egui::CursorIcon::PointingHand) };
+            if let Some(help) = detail_help(&title) {
+                r = r.on_hover_text(help);
+            }
+            r = r.on_hover_text("クリックで並べ替え(昇順→降順→解除)\nShift+クリックで条件を追加\nドラッグで列を入れ替え");
+            if r.clicked() {
+                ev.push(TableEvent::Sort(key.clone(), ui.input(|i| i.modifiers.shift)));
+            }
+            r.context_menu(|ui| {
+                if ui.button("列の並びを最初に戻す").clicked() {
+                    ev.push(TableEvent::ResetOrder);
+                    ui.close();
+                }
+            });
+
+            // ドラッグ中は列名をマウスの横に出す
+            r.dnd_set_drag_payload(col);
+            if r.dragged()
+                && let Some(pos) = ui.ctx().pointer_interact_pos()
+            {
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("box_col_drag")));
+                let galley = painter.layout_no_wrap(title.replace('\n', ""), egui::TextStyle::Body.resolve(ui.style()), ui.visuals().strong_text_color());
+                let text_rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 8.0), galley.size()).expand(4.0);
+                painter.rect_filled(text_rect, 4.0, ui.visuals().selection.bg_fill);
+                painter.galley(text_rect.min + egui::vec2(4.0, 4.0), galley, ui.visuals().strong_text_color());
+            }
+            // 落とす先: マスの右半分なら後ろ、左半分なら前に入れる線を出す
+            if let Some(pos) = ui.ctx().pointer_interact_pos()
+                && rect.contains(pos)
+                && let Some(src) = egui::DragAndDrop::payload::<Col>(ui.ctx())
+                && *src != col
+            {
+                let after = pos.x > rect.center().x;
+                let x = if after { rect.right() } else { rect.left() };
+                ui.painter().with_clip_rect(rect.expand(4.0)).vline(x, rect.y_range(), egui::Stroke::new(3.0, ui.visuals().selection.stroke.color));
+                if ui.input(|i| i.pointer.any_released())
+                    && let Some(src) = egui::DragAndDrop::take_payload::<Col>(ui.ctx())
+                {
+                    ev.push(TableEvent::Move(*src, col, after));
+                }
+            }
+            ev
+        };
+
+        let body_cell = |ui: &mut egui::Ui, col: Col, i: usize, result: Option<&BoxResult>, require: Option<&RequireInfo>| -> Option<TableEvent> {
+            let p = &list[i];
+            match col {
+                Col::Op => {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let mut checked = selected.contains(&i);
+                    if ui.add_enabled(!p.favorite, egui::Checkbox::without_text(&mut checked)).clicked() {
+                        return Some(TableEvent::Toggle(i));
+                    }
+                    if icon_button(ui, Icon::Edit, egui::Color32::from_gray(0x88)).on_hover_text("編集").clicked() {
+                        return Some(TableEvent::Action(RowAction::Edit(i)));
+                    }
+                    let delete_color = if p.favorite { egui::Color32::from_gray(0xcc) } else { egui::Color32::from_gray(0x88) };
+                    if icon_button(ui, Icon::Delete, delete_color).on_hover_text("削除").clicked() && !p.favorite {
+                        return Some(TableEvent::Action(RowAction::Delete(i)));
+                    }
+                    let (icon, color) = match p.fix {
+                        Some(1.0) => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
+                        Some(-1.0) => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
+                        _ => (Icon::Fix, egui::Color32::from_gray(0x88)),
+                    };
+                    let r = icon_button(ui, icon, color).on_hover_text("チームのシミュレーションで固定・除外する設定\nクリックで 固定→除外→解除、右クリックで解除");
+                    if r.clicked() {
+                        return Some(TableEvent::Action(RowAction::Fix(i, None)));
+                    }
+                    if r.secondary_clicked() {
+                        return Some(TableEvent::Action(RowAction::Fix(i, Some(None))));
+                    }
+                }
+                Col::Index => {
+                    ui.label(format!("{}", i + 1));
+                }
+                Col::Name => name_cell(ui, p, result, setting.memo),
+                Col::Memo => {
+                    ui.label(egui::RichText::new(p.memo.clone().unwrap_or_default()).size(11.0));
+                }
+                Col::Lv => {
+                    ui.label(format!("{}", p.lv));
+                }
+                Col::SkillLv => {
+                    // 本家と同じく補正後のスキルLv
+                    if let Some(r) = result {
+                        ui.label(r.pokemon.fixed_skill_lv.to_string());
+                    }
+                }
+                Col::Food => food_icon::food_list(ui, p),
+                Col::Sub(slot) => {
+                    let Some(name) = p.sub_skill_list.get(slot) else { return None };
+                    let text = if setting.sub_skill_short { m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?") } else { name.as_str() };
+                    // まだ解放されていないサブスキルは薄く表示する
+                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(text) } else { egui::RichText::new(text).weak() };
+                    ui.label(text).on_hover_text(name);
+                }
+                Col::Nature => nature_label(ui, &p.nature),
+                Col::Score => {
+                    if let Some(r) = result {
+                        ui.label(fmt_fixed(r.pokemon.score, 1));
+                    }
+                }
+                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail),
+                Col::Candy(0) => {
+                    if let Some(b) = m.pokemon(&p.name) {
+                        let mut v = config.candy.bag.get(&b.candy_name).copied();
+                        if style::opt_number(ui, &format!("box_candy_{i}"), &mut v, false, 50.0, "") {
+                            return Some(TableEvent::Cell(CellEdit::Candy(b.candy_name.clone(), v)));
+                        }
+                    }
+                }
+                Col::Candy(1) => {
+                    let mut v = p.training;
+                    if style::opt_number(ui, &format!("box_training_{i}"), &mut v, false, 50.0, "") {
+                        return Some(TableEvent::Cell(CellEdit::Training(i, v)));
+                    }
+                }
+                Col::Candy(2) => {
+                    let mut v = p.next_exp;
+                    if style::opt_number(ui, &format!("box_next_exp_{i}"), &mut v, false, 50.0, "") {
+                        return Some(TableEvent::Cell(CellEdit::NextExp(i, v)));
+                    }
+                }
+                Col::Candy(n) => {
+                    if let Some(v) = require.and_then(|r| require_value(r, n)) {
+                        right(ui, fmt_fixed(v, 0));
+                    }
+                }
+                Col::Base(n) => {
+                    let b = m.pokemon(&p.name)?;
+                    match n {
+                        0 => {
+                            ui.label(b.no.to_string());
+                        }
+                        1 => {
+                            let list = result.map_or(&b.after_list, |r| &r.pokemon.after_list);
+                            let text = match list.len() {
+                                0 => String::new(),
+                                1 => list[0].clone(),
+                                _ => format!("{}等", list[0]),
+                            };
+                            ui.label(egui::RichText::new(text).size(11.0)).on_hover_text(list.join("、"));
+                        }
+                        2 => {
+                            ui.label(&m.berries[b.berry].name);
+                        }
+                        _ => {
+                            ui.label(&m.pokemon_skill(b).name);
+                        }
+                    }
+                }
+                Col::FoodNum(n) => {
+                    if let Some(r) = result {
+                        right(ui, fmt_fixed(r.pokemon.food_count.get(n).copied().unwrap_or(0.0), 1));
+                    }
+                }
+                Col::Detail(n) => {
+                    let (_, _, fmt, get) = DETAIL_COLUMNS[n];
+                    if let Some(r) = result {
+                        right(ui, fmt_value(get(&r.pokemon), fmt));
+                    }
+                }
+            }
+            None
+        };
+
+        let mut events: Vec<TableEvent> = Vec::new();
+        let hover = self.hover_row;
+        let mut new_hover = None;
+        let offset = self.scroll_offset;
+        // 1つの表を描き、縦のスクロール位置を返す。last は右側(残りの幅を埋め、縦のスクロールバーを出す)
+        let mut draw = |ui: &mut egui::Ui, salt: &str, cols: &[Col], last: bool| -> f32 {
             let mut table = TableBuilder::new(ui)
-                .id_salt(("box_table2", order_salt))
+                .id_salt((salt, &order_salt))
                 .striped(true)
                 .resizable(true)
                 .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .vertical_scroll_offset(offset)
+                .scroll_bar_visibility(if last { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::AlwaysHidden });
+            for &c in cols {
                 // 本家と同じく先頭は選択・編集・削除・固定/除外の列
-                .column(Column::exact(86.0).resizable(false));
-            for c in &columns {
-                table = table.column(c.width(widths.get(&c.key()).copied(), setting));
+                table = table.column(if c == Col::Op { Column::exact(86.0).resizable(false) } else { c.width(widths.get(&c.key()).copied(), setting) });
             }
-            table
-                .column(Column::remainder())
+            if last {
+                table = table.column(Column::remainder());
+            }
+            let out = table
                 .header(if tall_header { 40.0 } else { 22.0 }, |mut header| {
-                    header.col(|ui| {
-                        let key = "edit";
-                        let mark = match sort.iter().position(|(k, _)| k == key) {
-                            Some(n) => {
-                                let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
-                                if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
-                            }
-                            None => String::new(),
-                        };
-                        // 並べ替えのクリックはマス全体で受け、上に置く全選択のチェックボックスを優先する
-                        let r = ui
-                            .interact(ui.max_rect(), egui::Id::new(("box_sort", key)), egui::Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .on_hover_text("この列でソートするとPTシミュへの固定/除外でソートできます。");
-                        if r.clicked() {
-                            toggle_sort(&mut sort, key, ui.input(|i| i.modifiers.shift));
-                            sort_changed = true;
-                        }
-                        // 表示中の行(お気に入りを除く)をまとめて選ぶ。本家にはない
-                        let n = selectable.iter().filter(|i| self.selected.contains(i)).count();
-                        let mut all = n > 0 && n == selectable.len();
-                        let checkbox = egui::Checkbox::without_text(&mut all).indeterminate(n > 0 && n < selectable.len());
-                        if ui.add_enabled(!selectable.is_empty(), checkbox).on_hover_text("表示中のポケモンをすべて選択/解除").clicked() {
-                            select_all = Some(n < selectable.len());
-                        }
-                        ui.add(egui::Label::new(egui::RichText::new(mark).strong()).selectable(false));
-                    });
-                    for &col in &columns {
+                    for &col in cols {
                         // header.col が返すのは中身の大きさなので、マスの幅はマスの中で測る
                         let mut cell_width = None;
                         header.col(|ui| {
                             cell_width = Some(ui.max_rect().width());
-                            let key = col.key();
-                            let title = col.title(setting);
-                            // 並べ替え中の列には ▲(昇順)/▼(降順) と、条件が複数なら優先順を付ける
-                            let mark = match sort.iter().position(|(k, _)| *k == key) {
-                                Some(n) => {
-                                    let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
-                                    if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
-                                }
-                                None => String::new(),
-                            };
-                            if let Col::FoodNum(n) = col {
-                                ui.vertical(|ui| {
-                                    food_icon::food_icon(ui, &m.foods[n].name, 20.0);
-                                    ui.add(egui::Label::new(egui::RichText::new(mark.clone()).strong()).selectable(false));
-                                });
-                            } else {
-                                ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
-                            }
-                            // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
-                            let rect = ui.max_rect();
-                            let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
-                            r = if r.dragged() { r.on_hover_cursor(egui::CursorIcon::Grabbing) } else { r.on_hover_cursor(egui::CursorIcon::PointingHand) };
-                            if let Some(help) = detail_help(&title) {
-                                r = r.on_hover_text(help);
-                            }
-                            r = r.on_hover_text("クリックで並べ替え(昇順→降順→解除)\nShift+クリックで条件を追加\nドラッグで列を入れ替え");
-                            if r.clicked() {
-                                toggle_sort(&mut sort, &key, ui.input(|i| i.modifiers.shift));
-                                sort_changed = true;
-                            }
-                            r.context_menu(|ui| {
-                                if ui.button("列の並びを最初に戻す").clicked() {
-                                    reset_order = true;
-                                    ui.close();
-                                }
-                            });
-
-                            // ドラッグ中は列名をマウスの横に出す
-                            r.dnd_set_drag_payload(col);
-                            if r.dragged()
-                                && let Some(pos) = ui.ctx().pointer_interact_pos()
-                            {
-                                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("box_col_drag")));
-                                let galley = painter.layout_no_wrap(title.replace('\n', ""), egui::TextStyle::Body.resolve(ui.style()), ui.visuals().strong_text_color());
-                                let text_rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 8.0), galley.size()).expand(4.0);
-                                painter.rect_filled(text_rect, 4.0, ui.visuals().selection.bg_fill);
-                                painter.galley(text_rect.min + egui::vec2(4.0, 4.0), galley, ui.visuals().strong_text_color());
-                            }
-                            // 落とす先: マスの右半分なら後ろ、左半分なら前に入れる線を出す
-                            if let Some(pos) = ui.ctx().pointer_interact_pos()
-                                && rect.contains(pos)
-                                && let Some(src) = egui::DragAndDrop::payload::<Col>(ui.ctx())
-                                && *src != col
-                            {
-                                let after = pos.x > rect.center().x;
-                                let x = if after { rect.right() } else { rect.left() };
-                                ui.painter().with_clip_rect(rect.expand(4.0)).vline(x, rect.y_range(), egui::Stroke::new(3.0, ui.visuals().selection.stroke.color));
-                                if ui.input(|i| i.pointer.any_released())
-                                    && let Some(src) = egui::DragAndDrop::take_payload::<Col>(ui.ctx())
-                                {
-                                    moved = Some((*src, col, after));
-                                }
-                            }
+                            events.extend(header_cell(ui, col));
                         });
-                        if let Some(w) = cell_width {
-                            widths.insert(col.key(), w);
+                        if let Some(w) = cell_width
+                            && col != Col::Op
+                        {
+                            events.push(TableEvent::Width(col.key(), w));
                         }
                     }
-                    header.col(|_| {});
+                    if last {
+                        header.col(|_| {});
+                    }
                 })
                 .body(|body| {
-                    body.heterogeneous_rows(heights.into_iter(), |mut row| {
-                        let i = rows[row.index()];
-                        let p = &shared.box_file.list[i];
-                        let result = self.results.get(i).and_then(|r| r.as_ref());
-                        let require = setting.candy.then(|| calc_require_info(p, result.and_then(|r| r.pokemon.nature).map(|n| &m.natures[n]), &shared.config.candy));
-                        let selected = self.selected.contains(&i);
-                        row.set_selected(selected);
-                        row.col(|ui| {
-                            ui.spacing_mut().item_spacing.x = 4.0;
-                            let mut checked = selected;
-                            if ui.add_enabled(!p.favorite, egui::Checkbox::without_text(&mut checked)).clicked() {
-                                toggle_select = Some(i);
-                            }
-                            if icon_button(ui, Icon::Edit, egui::Color32::from_gray(0x88)).on_hover_text("編集").clicked() {
-                                action = Some(RowAction::Edit(i));
-                            }
-                            let delete_color = if p.favorite { egui::Color32::from_gray(0xcc) } else { egui::Color32::from_gray(0x88) };
-                            if icon_button(ui, Icon::Delete, delete_color).on_hover_text("削除").clicked() && !p.favorite {
-                                action = Some(RowAction::Delete(i));
-                            }
-                            let (icon, color) = match p.fix {
-                                Some(1.0) => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
-                                Some(-1.0) => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
-                                _ => (Icon::Fix, egui::Color32::from_gray(0x88)),
-                            };
-                            let r = icon_button(ui, icon, color).on_hover_text("チームのシミュレーションで固定・除外する設定\nクリックで 固定→除外→解除、右クリックで解除");
-                            if r.clicked() {
-                                action = Some(RowAction::Fix(i, None));
-                            }
-                            if r.secondary_clicked() {
-                                action = Some(RowAction::Fix(i, Some(None)));
-                            }
-                        });
-                        for &col in &columns {
-                            row.col(|ui| match col {
-                                Col::Index => {
-                                    ui.label(format!("{}", i + 1));
-                                }
-                                Col::Name => name_cell(ui, p, result, setting.memo),
-                                Col::Memo => {
-                                    ui.label(egui::RichText::new(p.memo.clone().unwrap_or_default()).size(11.0));
-                                }
-                                Col::Lv => {
-                                    ui.label(format!("{}", p.lv));
-                                }
-                                Col::SkillLv => {
-                                    // 本家と同じく補正後のスキルLv
-                                    if let Some(r) = result {
-                                        ui.label(r.pokemon.fixed_skill_lv.to_string());
-                                    }
-                                }
-                                Col::Food => food_icon::food_list(ui, p),
-                                Col::Sub(slot) => {
-                                    let Some(name) = p.sub_skill_list.get(slot) else { return };
-                                    let text = if setting.sub_skill_short { m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?") } else { name.as_str() };
-                                    // まだ解放されていないサブスキルは薄く表示する
-                                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(text) } else { egui::RichText::new(text).weak() };
-                                    ui.label(text).on_hover_text(name);
-                                }
-                                Col::Nature => nature_label(ui, &p.nature),
-                                Col::Score => {
-                                    if let Some(r) = result {
-                                        ui.label(fmt_fixed(r.pokemon.score, 1));
-                                    }
-                                }
-                                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail),
-                                Col::Candy(0) => {
-                                    let base = m.pokemon(&p.name);
-                                    if let Some(b) = base {
-                                        let mut v = shared.config.candy.bag.get(&b.candy_name).copied();
-                                        if style::opt_number(ui, &format!("box_candy_{i}"), &mut v, false, 50.0, "") {
-                                            edits.push(CellEdit::Candy(b.candy_name.clone(), v));
-                                        }
-                                    }
-                                }
-                                Col::Candy(1) => {
-                                    let mut v = p.training;
-                                    if style::opt_number(ui, &format!("box_training_{i}"), &mut v, false, 50.0, "") {
-                                        edits.push(CellEdit::Training(i, v));
-                                    }
-                                }
-                                Col::Candy(2) => {
-                                    let mut v = p.next_exp;
-                                    if style::opt_number(ui, &format!("box_next_exp_{i}"), &mut v, false, 50.0, "") {
-                                        edits.push(CellEdit::NextExp(i, v));
-                                    }
-                                }
-                                Col::Candy(n) => {
-                                    if let Some(v) = require.as_ref().and_then(|r| require_value(r, n)) {
-                                        right(ui, fmt_fixed(v, 0));
-                                    }
-                                }
-                                Col::Base(n) => {
-                                    let Some(b) = m.pokemon(&p.name) else { return };
-                                    match n {
-                                        0 => {
-                                            ui.label(b.no.to_string());
-                                        }
-                                        1 => {
-                                            let list = result.map_or(&b.after_list, |r| &r.pokemon.after_list);
-                                            let text = match list.len() {
-                                                0 => String::new(),
-                                                1 => list[0].clone(),
-                                                _ => format!("{}等", list[0]),
-                                            };
-                                            ui.label(egui::RichText::new(text).size(11.0)).on_hover_text(list.join("、"));
-                                        }
-                                        2 => {
-                                            ui.label(&m.berries[b.berry].name);
-                                        }
-                                        _ => {
-                                            ui.label(&m.pokemon_skill(b).name);
-                                        }
-                                    }
-                                }
-                                Col::FoodNum(n) => {
-                                    if let Some(r) = result {
-                                        right(ui, fmt_fixed(r.pokemon.food_count.get(n).copied().unwrap_or(0.0), 1));
-                                    }
-                                }
-                                Col::Detail(n) => {
-                                    let (_, _, fmt, get) = DETAIL_COLUMNS[n];
-                                    if let Some(r) = result {
-                                        right(ui, fmt_value(get(&r.pokemon), fmt));
-                                    }
-                                }
-                            });
+                    body.heterogeneous_rows(heights.iter().copied(), |mut row| {
+                        let n = row.index();
+                        let i = rows[n];
+                        let result = results.get(i).and_then(|r| r.as_ref());
+                        let require = setting.candy.then(|| calc_require_info(&list[i], result.and_then(|r| r.pokemon.nature).map(|n| &m.natures[n]), &config.candy));
+                        row.set_selected(selected.contains(&i));
+                        // もう片方の表でマウスが乗っている行も強調する
+                        if hover == Some(n) {
+                            row.set_hovered(true);
                         }
-                        row.col(|_| {});
+                        for &col in cols {
+                            row.col(|ui| events.extend(body_cell(ui, col, i, result, require.as_ref())));
+                        }
+                        if last {
+                            row.col(|_| {});
+                        }
+                        let r = row.response();
+                        if r.hovered() {
+                            new_hover = Some(n);
+                        }
                         // 行のクリックで選択を切り替える(本家 clickRow)
-                        if row.response().clicked() && !p.favorite {
-                            toggle_select = Some(i);
+                        if r.clicked() && !list[i].favorite {
+                            events.push(TableEvent::Toggle(i));
                         }
                     });
                 });
-        });
+            out.state.offset.y
+        };
+
+        // 文字の上をクリックしても行を選べるよう、文字の選択はしない
+        ui.style_mut().interaction.selectable_labels = false;
+        let (left_offset, right_offset) = ui
+            .horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                let l = ui.vertical(|ui| draw(ui, "box_table_left", &left, false)).inner;
+                // 列が画面に収まらないときは横にスクロールする
+                let r = egui::ScrollArea::horizontal().id_salt("box_table_right_scroll").show(ui, |ui| ui.vertical(|ui| draw(ui, "box_table_right", scrolled, true)).inner).inner;
+                (l, r)
+            })
+            .inner;
+        // 動かした方の表に合わせる(もう片方は次の描画で追いつく)
+        let new_offset = if right_offset != offset { right_offset } else { left_offset };
+        if new_offset != offset || new_hover != self.hover_row {
+            ui.ctx().request_repaint();
+        }
+        self.scroll_offset = new_offset;
+        self.hover_row = new_hover;
+
+        let mut sort_changed = false;
+        let mut moved: Option<(Col, Col, bool)> = None;
+        let mut reset_order = false;
+        let mut action: Option<RowAction> = None;
+        let mut toggle_select: Option<usize> = None;
+        let mut select_all: Option<bool> = None;
+        let mut edits: Vec<CellEdit> = Vec::new();
+        for e in events {
+            match e {
+                TableEvent::Sort(key, shift) => {
+                    toggle_sort(&mut sort, &key, shift);
+                    sort_changed = true;
+                }
+                TableEvent::Width(key, w) => {
+                    widths.insert(key, w);
+                }
+                TableEvent::Move(src, dst, after) => moved = Some((src, dst, after)),
+                TableEvent::ResetOrder => reset_order = true,
+                TableEvent::SelectAll(v) => select_all = Some(v),
+                TableEvent::Toggle(i) => toggle_select = Some(i),
+                TableEvent::Action(a) => action = Some(a),
+                TableEvent::Cell(c) => edits.push(c),
+            }
+        }
 
         if let Some((src, dst, after)) = moved {
             order.retain(|c| *c != src);
@@ -1446,9 +1556,7 @@ fn display_setting(ui: &mut egui::Ui, shared: &mut Shared) {
 
             th(ui, "表示設定");
             ui.vertical(|ui| {
-                ui.add_enabled_ui(false, |ui| {
-                    ui.checkbox(&mut s.fix_score, "スコアまで列固定").on_disabled_hover_text("未対応です");
-                });
+                changed |= ui.checkbox(&mut s.fix_score, "スコアまで列固定").changed();
                 ui.horizontal(|ui| {
                     ui.label("1ページ表示件数");
                     changed |= style::opt_number(ui, "box_page_unit", &mut s.page_unit, false, 50.0, "");
