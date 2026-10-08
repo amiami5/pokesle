@@ -10,6 +10,7 @@ use pokesle_core::box_sim::BoxResult;
 use pokesle_core::data::master;
 use pokesle_core::evaluate_table::EvalLv;
 use pokesle_core::exp::{calc_require_info, RequireInfo};
+use pokesle_core::js::to_fixed;
 use pokesle_core::sim_pokemon::{BoxPokemon, SimPokemon};
 use pokesle_core::team_sim::simulate_box;
 use serde::{Deserialize, Serialize};
@@ -492,9 +493,9 @@ enum CellEdit {
 /// 厳選の値の表示(本家 evaluate-result.vue)
 fn eval_text(v: f64, key: &str, value: bool) -> String {
     if !value {
-        format!("{:.1}%", v * 100.0)
+        format!("{}%", to_fixed(v * 100.0, 1))
     } else if key != "energy" {
-        format!("{v:.1}")
+        to_fixed(v, 1)
     } else {
         fmt_num(v)
     }
@@ -850,7 +851,10 @@ impl BoxView {
                                     ui.label(format!("{}", p.lv));
                                 }
                                 Col::SkillLv => {
-                                    ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
+                                    // 本家と同じく補正後のスキルLv
+                                    if let Some(r) = result {
+                                        ui.label(r.pokemon.fixed_skill_lv.to_string());
+                                    }
                                 }
                                 Col::Food => food_icon::food_list(ui, p),
                                 Col::Sub(slot) => {
@@ -1005,7 +1009,8 @@ impl BoxView {
             "name" => text(&p.name),
             "memo" => text(p.memo.as_deref().unwrap_or("")),
             "lv" => num(Some(p.lv)),
-            "skillLv" => num(p.skill_lv),
+            // 本家と同じく補正後のスキルLv
+            "skillLv" => num(result.map(|r| r.pokemon.fixed_skill_lv)),
             "foodNameList" => text(&p.food_list.join(",")),
             "natureName" => text(&p.nature),
             "score" => num(result.map(|r| r.pokemon.score)),

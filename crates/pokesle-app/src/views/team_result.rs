@@ -5,6 +5,7 @@
 use eframe::egui;
 use pokesle_core::config::Config;
 use pokesle_core::data::master;
+use pokesle_core::js::to_fixed;
 use pokesle_core::sim_pokemon::SimPokemon;
 use pokesle_core::team_sim::{TeamMember, TeamResult};
 
@@ -411,7 +412,7 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
     group(ui, "スキル", cells);
 
     let nonzero = |x: f64| x != 0.0 && !x.is_nan();
-    let mut cells = per(&|t| num(1, pokemon(t).map(|p| p.skill_per_day).filter(|x| nonzero(*x)).map(|x| format!("{x:.1}")).unwrap_or_default()));
+    let mut cells = per(&|t| num(1, pokemon(t).map(|p| p.skill_per_day).filter(|x| nonzero(*x)).map(|x| to_fixed(x, 1)).unwrap_or_default()));
     cells.push(empty(1));
     group(ui, "スキル回数", cells);
 
@@ -441,7 +442,7 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
             num(1, round_str(team.cooking_list.iter().map(|c| c.energy).sum())),
         ],
     );
-    table.row(ui, None, vec![th(2, "残り食材"), num(n + 1, pokesle_core::js::to_fixed(team.remain_food_energy, 1))]);
+    table.row(ui, None, vec![th(2, "残り食材"), num(n + 1, to_fixed(team.remain_food_energy, 1))]);
 
     let span = n + 1;
     let fb = 1.0 + config.simulation.field_bonus / 100.0;
@@ -459,21 +460,21 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
             })];
             cells.extend(members.iter().map(|t| {
                 let v = t.food_count().get(fi).copied().unwrap_or(0.0);
-                num(1, if nonzero(v) { format!("{v:.1}") } else { String::new() })
+                num(1, if nonzero(v) { to_fixed(v, 1) } else { String::new() })
             }));
             let get = |l: &[f64]| l.get(fi).copied().unwrap_or(0.0);
             let (default, add, use_, total) = (get(&team.default_food_num), get(&team.add_food_num), get(&team.use_food_num), get(&team.food_num));
             cells.push(td(1, move |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 3.0;
-                    ui.label(format!("{default:.1}"));
+                    ui.label(to_fixed(default, 1));
                     if nonzero(add) {
-                        ui.label(egui::RichText::new(format!("+ {add:.1}")).color(egui::Color32::from_rgb(0xd4, 0x00, 0x63)));
+                        ui.label(egui::RichText::new(format!("+ {}", to_fixed(add, 1))).color(egui::Color32::from_rgb(0xd4, 0x00, 0x63)));
                     }
                     if nonzero(use_) {
-                        ui.label(egui::RichText::new(format!("- {use_:.1}")).color(egui::Color32::from_rgb(0x00, 0x0f, 0x9b)));
+                        ui.label(egui::RichText::new(format!("- {}", to_fixed(use_, 1))).color(egui::Color32::from_rgb(0x00, 0x0f, 0x9b)));
                     }
-                    ui.label(format!("= {total:.1}"));
+                    ui.label(format!("= {}", to_fixed(total, 1)));
                 });
             }));
             table.row(ui, Some((if fi == 0 { "食材" } else { "" }, fi == 0)), cells);

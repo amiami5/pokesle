@@ -36,7 +36,8 @@ pub fn fmt_fixed(x: f64, digits: usize) -> String {
     if !x.is_finite() {
         return "-".into();
     }
-    let s = format!("{:.*}", digits, x.abs());
+    // 丸めは JS の toFixed と同じ(同じ距離なら大きい方へ)
+    let s = pokesle_core::js::to_fixed(x.abs(), digits);
     let (int, frac) = s.split_once('.').map_or((s.as_str(), None), |(i, f)| (i, Some(f)));
     let neg = x < 0.0 && s.chars().any(|c| c.is_ascii_digit() && c != '0');
     let mut out = String::new();
