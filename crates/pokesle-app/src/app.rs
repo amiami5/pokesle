@@ -26,17 +26,15 @@ enum Tab {
     Credit,
 }
 
-/// ヘッダーのグループ(本家 app.vue)。(見出し, [(画面, 表示名, 実装済みか)])
-/// (画面, 表示名, 実装済みか)
-type NavItem = (Tab, &str, bool);
+/// ヘッダーのリンク(画面, 表示名, 実装済みか)
+type NavItem = (Tab, &'static str, bool);
 
+/// ヘッダーのグループ(本家 app.vue)。(見出し, リンク)
 const NAV: [(&str, &[NavItem]); 4] = [
-    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック
-リスト", true), (Tab::Summary, "サマリー", false)]),
+    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", false)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", false)]),
     ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", false)]),
-    ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料
-クレジット", true)]),
+    ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料\nクレジット", true)]),
 ];
 
 /// 各画面で共有するデータ
