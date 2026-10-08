@@ -7,7 +7,7 @@ use pokesle_core::config::Config;
 use pokesle_core::evaluate_table::EvaluateTable;
 use serde_json::Value;
 
-fn dir() -> PathBuf {
+pub fn dir() -> PathBuf {
     let dir = directories::ProjectDirs::from("", "", "pokesle-rs")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));

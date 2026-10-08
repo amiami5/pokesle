@@ -43,7 +43,8 @@ impl PokemonEdit {
         let mut result = EditResult::None;
         let mut open = true;
         let title = if self.index.is_some() { "ポケモンを編集" } else { "ポケモンを追加" };
-        egui::Window::new(title).open(&mut open).collapsible(false).resizable(true).default_width(520.0).show(ctx, |ui| {
+        // 追加と編集でタイトルが違っても同じ位置を使う
+        egui::Window::new(title).id(egui::Id::new("pokemon_edit")).open(&mut open).collapsible(false).resizable(true).default_width(520.0).show(ctx, |ui| {
             egui::Grid::new("edit_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 // ポケモン名(日本語入力での検索)
                 ui.label("ポケモン");

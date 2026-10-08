@@ -2,7 +2,7 @@
 
 このファイルは `cargo about generate about.hbs > THIRD_PARTY_LICENSES.md` で生成しています。
 
-- MIT License (121)
+- MIT License (124)
 - Apache License 2.0 (10)
 - Boost Software License 1.0 (2)
 - ISC License (1)
@@ -1751,6 +1751,42 @@ DEALINGS IN THE SOFTWARE.
 ## MIT License
 
 使用しているクレート:
+- ron 0.12.2 (https://github.com/ron-rs/ron)
+
+```
+Copyright (c) 2017 RON developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+```
+
+---
+
+## MIT License
+
+使用しているクレート:
 - fearless_simd 0.4.1 (https://github.com/linebender/fearless_simd)
 - kurbo 0.13.1 (https://github.com/linebender/kurbo)
 - peniko 0.6.1 (https://github.com/linebender/peniko)
@@ -2719,6 +2755,7 @@ SOFTWARE.
 
 使用しているクレート:
 - adler2 2.0.1 (https://github.com/oyvindln/adler2)
+- enumn 0.1.14 (https://github.com/dtolnay/enumn)
 - itoa 1.0.18 (https://github.com/dtolnay/itoa)
 - once_cell 1.21.4 (https://github.com/matklad/once_cell)
 - pin-project-lite 0.2.17 (https://github.com/taiki-e/pin-project-lite)
@@ -2733,6 +2770,7 @@ SOFTWARE.
 - syn 3.0.6 (https://github.com/dtolnay/syn)
 - thiserror-impl 2.0.21 (https://github.com/dtolnay/thiserror)
 - thiserror 2.0.21 (https://github.com/dtolnay/thiserror)
+- typeid 1.0.3 (https://github.com/dtolnay/typeid)
 - unicode-ident 1.0.26 (https://github.com/dtolnay/unicode-ident)
 - zmij 1.0.23 (https://github.com/dtolnay/zmij)
 
