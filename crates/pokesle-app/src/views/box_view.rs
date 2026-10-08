@@ -1,4 +1,4 @@
-//! ボックス画面: 一覧・追加/編集・TSV取り込み・概算・厳選テーブル作成
+//! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算・厳選テーブル作成
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
@@ -21,6 +21,7 @@ pub struct BoxView {
     import_open: bool,
     import_text: String,
     import_message: String,
+    export_text: String,
     simulate_job: Option<Job<Vec<BoxResult>>>,
     table_job: Option<Job<EvaluateTable>>,
     /// ボックス位置 → 概算結果(いつ育モードを除く)
@@ -36,7 +37,7 @@ impl BoxView {
             if ui.button("＋ 追加").clicked() {
                 self.edit = Some(PokemonEdit::new(None, None));
             }
-            if ui.button("TSVから取り込み").clicked() {
+            if ui.button("TSVの取り込み・書き出し").clicked() {
                 self.import_open = true;
             }
             ui.separator();
@@ -233,30 +234,104 @@ impl BoxView {
             return;
         }
         let mut open = true;
-        egui::Window::new("TSVから取り込み").open(&mut open).default_width(640.0).show(ctx, |ui| {
-            ui.label("スプレッドシート等からコピーした TSV を貼り付けてください。今のボックスは置き換えられます。");
-            ui.label("列: 名前 / Lv / スキルLv / 食材1～3 / サブスキル1～5 / せいかく / 色違い / 固定 / 睡眠時間 / … (本家と同じ並び)");
-            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                ui.add(egui::TextEdit::multiline(&mut self.import_text).desired_width(f32::INFINITY).desired_rows(12).code_editor());
+        egui::Window::new("TSVの取り込み・書き出し").id(egui::Id::new("tsv_window")).open(&mut open).default_width(900.0).show(ctx, |ui| {
+            let mut cols = TsvColumns::from_config(&shared.config);
+            egui::CollapsingHeader::new("列番号設定").default_open(true).show(ui, |ui| {
+                ui.label("列番号を空にすると取り込み・書き出しの対象外になります。取り込み時はその情報が欠けるので注意してください。");
+                if tsv_columns_ui(ui, &mut cols) {
+                    cols.save_to_config(&mut shared.config);
+                    shared.save_config();
+                }
             });
-            ui.horizontal(|ui| {
-                if ui.button("取り込む").clicked() {
-                    let list = box_io::import_tsv(&self.import_text, &TsvColumns::from_config(&shared.config));
-                    if list.is_empty() {
-                        self.import_message = "取り込めるポケモンがありませんでした".into();
-                    } else {
+            ui.separator();
+
+            ui.columns(2, |c| {
+                let ui = &mut c[0];
+                ui.horizontal(|ui| {
+                    if ui.button("書き出す").clicked() {
+                        self.export_text = box_io::export_tsv(&shared.box_file.list, &cols);
+                    }
+                });
+                egui::ScrollArea::vertical().id_salt("export").max_height(360.0).show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut self.export_text).desired_width(f32::INFINITY).desired_rows(16).code_editor());
+                });
+
+                let ui = &mut c[1];
+                // 貼り付けた内容を今の列設定で読んだときの件数
+                let lines = self.import_text.lines().filter(|l| !l.trim().is_empty()).count();
+                let readable = if lines == 0 { 0 } else { box_io::import_tsv(&self.import_text, &cols).len() };
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(readable > 0, egui::Button::new("取り込む")).on_hover_text("今のボックスは置き換えられます").clicked() {
+                        let list = box_io::import_tsv(&self.import_text, &cols);
                         self.import_message = format!("{}匹を取り込みました", list.len());
                         shared.box_file.list = list;
                         shared.save_box();
                         self.results.clear();
                         self.import_text.clear();
+                    } else if lines > 0 {
+                        let text = format!("{lines}行中 {readable}匹を読み込めます");
+                        if readable < lines {
+                            ui.colored_label(ui.visuals().warn_fg_color, text).on_hover_text("読めない行は名前・Lv・食材・サブスキル・せいかくを確認するか、列番号設定を見直してください");
+                        } else {
+                            ui.label(text);
+                        }
+                    } else {
+                        ui.label(&self.import_message);
                     }
-                }
-                ui.label(&self.import_message);
+                });
+                egui::ScrollArea::vertical().id_salt("import").max_height(360.0).show(ui, |ui| {
+                    ui.add(egui::TextEdit::multiline(&mut self.import_text).hint_text("スプレッドシート等からコピーした TSV を貼り付け").desired_width(f32::INFINITY).desired_rows(16).code_editor());
+                });
             });
         });
         if !open {
             self.import_open = false;
         }
     }
+}
+
+/// 列番号の入力欄(本家と同じ項目)。変更があれば true
+fn tsv_columns_ui(ui: &mut egui::Ui, cols: &mut TsvColumns) -> bool {
+    cols.food_list.resize(3, None);
+    cols.sub_skill_list.resize(5, None);
+    let [f1, f2, f3] = &mut cols.food_list[..] else { unreachable!() };
+    let [s1, s2, s3, s4, s5] = &mut cols.sub_skill_list[..] else { unreachable!() };
+    let fields: [(&str, &mut Option<usize>); 20] = [
+        ("名前", &mut cols.name),
+        ("Lv", &mut cols.lv),
+        ("スキルLv", &mut cols.skill_lv),
+        ("食材ABC", &mut cols.food_abc),
+        ("食材1", f1),
+        ("食材2", f2),
+        ("食材3", f3),
+        ("サブスキル1", s1),
+        ("サブスキル2", s2),
+        ("サブスキル3", s3),
+        ("サブスキル4", s4),
+        ("サブスキル5", s5),
+        ("せいかく", &mut cols.nature),
+        ("色違い", &mut cols.shiny),
+        ("固定", &mut cols.fix),
+        ("睡眠時間", &mut cols.sleep_time),
+        ("目標Lv", &mut cols.training),
+        ("次Lv迄のExp", &mut cols.next_exp),
+        ("メモ", &mut cols.memo),
+        ("お気に入り", &mut cols.favorite),
+    ];
+    let mut changed = false;
+    egui::Grid::new("tsv_columns").num_columns(10).spacing([8.0, 4.0]).show(ui, |ui| {
+        for (i, (label, value)) in fields.into_iter().enumerate() {
+            ui.label(label);
+            let mut text = value.map(|v| v.to_string()).unwrap_or_default();
+            if ui.add(egui::TextEdit::singleline(&mut text).hint_text("なし").desired_width(36.0)).changed() {
+                let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
+                *value = digits.parse().ok().filter(|&v| v > 0);
+                changed = true;
+            }
+            if i % 5 == 4 {
+                ui.end_row();
+            }
+        }
+    });
+    changed
 }

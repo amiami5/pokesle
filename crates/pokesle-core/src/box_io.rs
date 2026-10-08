@@ -83,6 +83,17 @@ impl TsvColumns {
             .unwrap_or_else(TsvColumns::default_columns)
     }
 
+    /// 設定(`pokemonBox.tsv`)へ書き戻す
+    pub fn save_to_config(&self, config: &mut crate::config::Config) {
+        let tsv = serde_json::to_value(self).expect("TSV の列設定のシリアライズに失敗しました");
+        let pokemon_box = config.extra.entry("pokemonBox").or_insert_with(|| Value::Object(Default::default()));
+        if let Value::Object(map) = pokemon_box {
+            map.insert("tsv".into(), tsv);
+        } else {
+            *pokemon_box = serde_json::json!({ "tsv": tsv });
+        }
+    }
+
     pub fn default_columns() -> TsvColumns {
         TsvColumns {
             name: Some(1),
@@ -179,6 +190,62 @@ pub fn import_tsv(text: &str, cols: &TsvColumns) -> Vec<BoxPokemon> {
     list
 }
 
+/// JS の数値の文字列化(整数は小数点なし)
+fn js_num(v: f64) -> String {
+    if v.fract() == 0.0 && v.abs() < 1e15 { format!("{}", v as i64) } else { v.to_string() }
+}
+
+/// TSV へ書き出す(本家 `pokemon-box-tsv-popup.vue` の `exportList`)
+pub fn export_tsv(list: &[BoxPokemon], cols: &TsvColumns) -> String {
+    let m = master();
+    let all = [cols.name, cols.lv, cols.skill_lv, cols.food_abc, cols.nature, cols.shiny, cols.fix, cols.sleep_time, cols.training, cols.next_exp, cols.memo, cols.favorite];
+    let column_num = all.iter().chain(&cols.food_list).chain(&cols.sub_skill_list).flatten().copied().max().unwrap_or(0);
+    let opt_num = |v: Option<f64>| v.map(js_num).unwrap_or_default();
+
+    list.iter()
+        .map(|p| {
+            let mut arr = vec![String::new(); column_num];
+            let mut set = |c: Option<usize>, v: String| {
+                if let Some(c) = c.filter(|&c| c > 0) {
+                    arr[c - 1] = v;
+                }
+            };
+            set(cols.name, p.name.clone());
+            set(cols.lv, js_num(p.lv));
+            set(cols.skill_lv, opt_num(p.skill_lv));
+            if cols.food_abc.is_some() {
+                let base = m.pokemon(&p.name);
+                let abc = p
+                    .food_list
+                    .iter()
+                    .map(|f| {
+                        let i = base.and_then(|b| b.food_list.iter().position(|x| &x.name == f)).unwrap_or(0);
+                        (b'A' + i as u8) as char
+                    })
+                    .collect();
+                set(cols.food_abc, abc);
+            }
+            for (c, f) in cols.food_list.iter().zip(&p.food_list).take(3) {
+                set(*c, f.clone());
+            }
+            for (c, s) in cols.sub_skill_list.iter().zip(&p.sub_skill_list).take(5) {
+                set(*c, s.clone());
+            }
+            set(cols.nature, p.nature.clone());
+            set(cols.shiny, if p.shiny { "1".into() } else { String::new() });
+            set(cols.fix, opt_num(p.fix));
+            set(cols.sleep_time, opt_num(p.sleep_time));
+            set(cols.training, opt_num(p.training));
+            set(cols.next_exp, opt_num(p.next_exp));
+            set(cols.memo, p.memo.clone().unwrap_or_default());
+            set(cols.favorite, if p.favorite { "1".into() } else { String::new() });
+            arr.join("	")
+        })
+        .collect::<Vec<_>>()
+        .join("
+")
+}
+
 /// 本家ブラウザ版の localStorage `pokemonBox` の JSON を読み込む
 pub fn import_browser_json(value: &Value) -> Result<BoxFile, String> {
     let mut file: BoxFile = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
@@ -200,5 +267,19 @@ mod tests {
         assert_eq!(list[0].sleep_time, Some(600.0));
         assert!(list[0].shiny);
         assert!(check(&list[0]).is_ok());
+    }
+
+    #[test]
+    fn export_then_import() {
+        let tsv = "ピカチュウ	30		リラックスカカオ	とくせんリンゴ	あまいミツ	おてつだいスピードM	きのみの数S	食材確率アップS	スキル確率アップS	最大所持数アップS	いじっぱり	1		600			メモ";
+        let mut cols = TsvColumns::default_columns();
+        let list = import_tsv(tsv, &cols);
+        let out = export_tsv(&list, &cols);
+        assert_eq!(out, format!("{tsv}	"));
+        // 列をずらして書き出しても同じ設定で読み戻せる
+        cols.skill_lv = Some(20);
+        cols.food_abc = Some(21);
+        let back = import_tsv(&export_tsv(&list, &cols), &cols);
+        assert_eq!(serde_json::to_value(&back).unwrap(), serde_json::to_value(&list).unwrap());
     }
 }
