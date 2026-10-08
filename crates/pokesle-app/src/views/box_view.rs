@@ -1,6 +1,7 @@
 //! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算・厳選テーブル作成
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
@@ -148,9 +149,9 @@ fn kana_sort_key(text: &str) -> String {
     result
 }
 
-/// 設定 `pokemonList.sort`: 並べ替えの条件(列のキー, 1=昇順 / -1=降順)
+/// 設定 `sortableTable.pokemonList2.sort`(本家と同じ場所): 並べ替えの条件(列のキー, 1=昇順 / -1=降順)
 fn sort_info(shared: &Shared) -> Vec<(String, i8)> {
-    let list = shared.config.extra.get("pokemonList").and_then(|v| v.get("sort")).and_then(|v| v.as_array());
+    let list = shared.config.extra.get("sortableTable").and_then(|v| v.get("pokemonList2")).and_then(|v| v.get("sort")).and_then(|v| v.as_array());
     list.into_iter()
         .flatten()
         .filter_map(|x| Some((x.get("key")?.as_str()?.to_string(), if x.get("direction")?.as_i64()? < 0 { -1 } else { 1 })))
@@ -158,8 +159,10 @@ fn sort_info(shared: &Shared) -> Vec<(String, i8)> {
 }
 
 fn set_sort_info(shared: &mut Shared, sort: &[(String, i8)]) {
-    let list = shared.config.extra.entry("pokemonList").or_insert_with(|| serde_json::json!({}));
-    if let Some(map) = list.as_object_mut() {
+    let table = shared.config.extra.entry("sortableTable").or_insert_with(|| serde_json::json!({}));
+    if let Some(table) = table.as_object_mut()
+        && let Some(map) = table.entry("pokemonList2").or_insert_with(|| serde_json::json!({ "hiddenColumn": [] })).as_object_mut()
+    {
         let value = sort.iter().map(|(key, dir)| serde_json::json!({ "key": key, "direction": dir })).collect();
         map.insert("sort".into(), serde_json::Value::Array(value));
     }
@@ -190,6 +193,119 @@ fn toggle_sort(sort: &mut Vec<(String, i8)>, key: &str, shift: bool) {
             _ => *sort = vec![(key.to_string(), 1)],
         }
     }
+}
+
+/// ボックス一覧の列(編集・削除の列を除く)
+#[derive(Clone, Copy, PartialEq)]
+enum Col {
+    Index,
+    Name,
+    Lv,
+    SkillLv,
+    Food,
+    Sub(usize),
+    Nature,
+    Score,
+    Evaluate,
+    Detail(usize),
+}
+
+impl Col {
+    /// 最初の並び
+    fn all() -> Vec<Col> {
+        let mut list = vec![Col::Index, Col::Name, Col::Lv, Col::SkillLv, Col::Food];
+        list.extend((0..SUB_SKILL_LV.len()).map(Col::Sub));
+        list.extend([Col::Nature, Col::Score, Col::Evaluate]);
+        list.extend((0..DETAIL_COLUMNS.len()).map(Col::Detail));
+        list
+    }
+
+    /// 並べ替え・列の並びの保存に使うキー
+    fn key(self) -> String {
+        match self {
+            Col::Index => "index".into(),
+            Col::Name => "name".into(),
+            Col::Lv => "lv".into(),
+            Col::SkillLv => "skillLv".into(),
+            Col::Food => "foodNameList".into(),
+            Col::Sub(slot) => format!("subSkill{}", SUB_SKILL_LV[slot]),
+            Col::Nature => "natureName".into(),
+            Col::Score => "score".into(),
+            Col::Evaluate => "evaluate".into(),
+            Col::Detail(n) => DETAIL_COLUMNS[n].0.into(),
+        }
+    }
+
+    fn title(self) -> String {
+        match self {
+            Col::Index => "No".into(),
+            Col::Name => "ポケモン".into(),
+            Col::Lv => "Lv".into(),
+            Col::SkillLv => "スキルLv".into(),
+            Col::Food => "食材".into(),
+            Col::Sub(slot) => format!("サブ{}", SUB_SKILL_LV[slot]),
+            Col::Nature => "せいかく".into(),
+            Col::Score => "スコア".into(),
+            Col::Evaluate => "厳選".into(),
+            Col::Detail(n) => DETAIL_COLUMNS[n].1.into(),
+        }
+    }
+
+    /// 列の幅(width は覚えている幅。無ければ最初の幅)
+    fn width(self, width: Option<f32>) -> Column {
+        let (initial, min) = match self {
+            Col::Index => (36.0, 24.0),
+            Col::Name => (150.0, 80.0),
+            Col::Lv => (40.0, 24.0),
+            Col::SkillLv => (72.0, 24.0),
+            Col::Food => (84.0, 40.0),
+            Col::Sub(_) => (72.0, 32.0),
+            Col::Nature => (80.0, 24.0),
+            Col::Score => (90.0, 24.0),
+            Col::Evaluate => (70.0, 24.0),
+            Col::Detail(_) => (84.0, 32.0),
+        };
+        Column::initial(width.unwrap_or(initial).max(min)).at_least(min)
+    }
+}
+
+/// 列の並びと幅の保存場所(本家に無い項目なので、設定ではなくウインドウ位置と同じ window.ron に入れる)
+fn column_order_id() -> egui::Id {
+    egui::Id::new("box_column_order")
+}
+
+fn column_width_id() -> egui::Id {
+    egui::Id::new("box_column_width")
+}
+
+/// 保存された列の並び(保存に無い列は最初の並びのまま後ろに付ける)
+fn column_order(ctx: &egui::Context) -> Vec<Col> {
+    let all = Col::all();
+    let saved: Vec<String> = ctx.data_mut(|d| d.get_persisted(column_order_id())).unwrap_or_default();
+    let mut order: Vec<Col> = saved.iter().filter_map(|k| all.iter().copied().find(|c| c.key() == *k)).collect();
+    for c in all {
+        if !order.contains(&c) {
+            order.push(c);
+        }
+    }
+    order
+}
+
+/// 列の並びを保存する(None は最初の並びに戻す)
+fn set_column_order(ctx: &egui::Context, order: Option<&[Col]>) {
+    match order {
+        Some(order) => ctx.data_mut(|d| d.insert_persisted(column_order_id(), order.iter().map(|c| c.key()).collect::<Vec<_>>())),
+        None => ctx.data_mut(|d| d.remove::<Vec<String>>(column_order_id())),
+    }
+}
+
+/// 列のキー → 幅
+fn column_widths(ctx: &egui::Context) -> HashMap<String, f32> {
+    ctx.data_mut(|d| d.get_persisted(column_width_id())).unwrap_or_default()
+}
+
+fn set_column_widths(ctx: &egui::Context, widths: HashMap<String, f32>) {
+    ctx.data_mut(|d| d.insert_persisted(column_width_id(), widths));
 }
 
 #[derive(Default)]
@@ -340,41 +456,39 @@ impl BoxView {
         let mut sort_changed = false;
         let mut action: Option<(usize, bool)> = None; // (index, delete?)
         let detail = simulated_info(shared);
-        let detail_num = if detail { DETAIL_COLUMNS.len() } else { 0 };
+        let mut order = column_order(ui.ctx());
+        let columns: Vec<Col> = order.iter().copied().filter(|c| detail || !matches!(c, Col::Detail(_))).collect();
+        // 列の入れ替え(動かす列, 入れる先の列, 先の列の後ろか)、並びを最初に戻す
+        let mut moved: Option<(Col, Col, bool)> = None;
+        let mut reset_order = false;
+        // 表は列の幅を位置ごとに覚えるので、並びが変わったら別の表として作り直し、
+        // 測っておいた各列の幅を最初の幅として渡す
+        let mut widths = column_widths(ui.ctx());
+        let order_salt: Vec<String> = columns.iter().map(|c| c.key()).collect();
 
         // 列が画面に収まらないときは横にスクロールする
         egui::ScrollArea::horizontal().show(ui, |ui| {
-            TableBuilder::new(ui)
+            let mut table = TableBuilder::new(ui)
+                .id_salt(("box_table", order_salt))
                 .striped(true)
                 .resizable(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::initial(36.0).at_least(24.0))
-                .column(Column::initial(150.0).at_least(80.0))
-                .column(Column::initial(40.0).at_least(24.0))
-                .column(Column::initial(72.0).at_least(24.0))
-                .column(Column::initial(84.0).at_least(40.0))
-                .columns(Column::initial(72.0).at_least(32.0), SUB_SKILL_LV.len())
-                .column(Column::initial(80.0))
-                .column(Column::initial(90.0))
-                .column(Column::initial(70.0))
-                .columns(Column::initial(84.0).at_least(32.0), detail_num)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+            for c in &columns {
+                table = table.column(c.width(widths.get(&c.key()).copied()));
+            }
+            table
                 .column(Column::remainder())
                 // シミュ詳細の見出しは2行
                 .header(if detail { 40.0 } else { 22.0 }, |mut header| {
-                    let sub_titles = SUB_SKILL_LV.map(|lv| (format!("subSkill{lv}"), format!("サブ{lv}")));
-                    let titles = [("index", "No"), ("name", "ポケモン"), ("lv", "Lv"), ("skillLv", "スキルLv"), ("foodNameList", "食材")]
-                        .into_iter()
-                        .chain(sub_titles.iter().map(|(k, t)| (k.as_str(), t.as_str())))
-                        .chain([("natureName", "せいかく"), ("score", "スコア"), ("evaluate", "厳選")])
-                        .chain(DETAIL_COLUMNS.iter().take(detail_num).map(|(k, t, _, _)| (*k, *t)))
-                        .chain([("", "")]);
-                    for (key, title) in titles {
+                    for &col in &columns {
+                        // header.col が返すのは中身の大きさなので、マスの幅はマスの中で測る
+                        let mut cell_width = None;
                         header.col(|ui| {
-                            if key.is_empty() {
-                                return;
-                            }
+                            cell_width = Some(ui.max_rect().width());
+                            let key = col.key();
+                            let title = col.title();
                             // 並べ替え中の列には ▲(昇順)/▼(降順) と、条件が複数なら優先順を付ける
-                            let mark = match sort.iter().position(|(k, _)| k == key) {
+                            let mark = match sort.iter().position(|(k, _)| *k == key) {
                                 Some(n) => {
                                     let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
                                     if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
@@ -382,72 +496,108 @@ impl BoxView {
                                 None => String::new(),
                             };
                             ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
-                            // 文字の横の空いたところも含めて、見出しのマス全体をクリックできるようにする
-                            let mut r = ui.interact(ui.max_rect(), egui::Id::new(("box_sort", key)), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-                            if let Some(help) = detail_help(title) {
+                            // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
+                            let rect = ui.max_rect();
+                            let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
+                            r = if r.dragged() { r.on_hover_cursor(egui::CursorIcon::Grabbing) } else { r.on_hover_cursor(egui::CursorIcon::PointingHand) };
+                            if let Some(help) = detail_help(&title) {
                                 r = r.on_hover_text(help);
                             }
-                            r = r.on_hover_text("クリックで並べ替え(昇順→降順→解除)\nShift+クリックで条件を追加");
+                            r = r.on_hover_text("クリックで並べ替え(昇順→降順→解除)\nShift+クリックで条件を追加\nドラッグで列を入れ替え");
                             if r.clicked() {
-                                toggle_sort(&mut sort, key, ui.input(|i| i.modifiers.shift));
+                                toggle_sort(&mut sort, &key, ui.input(|i| i.modifiers.shift));
                                 sort_changed = true;
                             }
+                            r.context_menu(|ui| {
+                                if ui.button("列の並びを最初に戻す").clicked() {
+                                    reset_order = true;
+                                    ui.close();
+                                }
+                            });
+
+                            // ドラッグ中は列名をマウスの横に出す
+                            r.dnd_set_drag_payload(col);
+                            if r.dragged()
+                                && let Some(pos) = ui.ctx().pointer_interact_pos()
+                            {
+                                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("box_col_drag")));
+                                let galley = painter.layout_no_wrap(title.replace('\n', ""), egui::TextStyle::Body.resolve(ui.style()), ui.visuals().strong_text_color());
+                                let text_rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 8.0), galley.size()).expand(4.0);
+                                painter.rect_filled(text_rect, 4.0, ui.visuals().selection.bg_fill);
+                                painter.galley(text_rect.min + egui::vec2(4.0, 4.0), galley, ui.visuals().strong_text_color());
+                            }
+                            // 落とす先: マスの右半分なら後ろ、左半分なら前に入れる線を出す
+                            if let Some(pos) = ui.ctx().pointer_interact_pos()
+                                && rect.contains(pos)
+                                && let Some(src) = egui::DragAndDrop::payload::<Col>(ui.ctx())
+                                && *src != col
+                            {
+                                let after = pos.x > rect.center().x;
+                                let x = if after { rect.right() } else { rect.left() };
+                                ui.painter().with_clip_rect(rect.expand(4.0)).vline(x, rect.y_range(), egui::Stroke::new(3.0, ui.visuals().selection.stroke.color));
+                                if ui.input(|i| i.pointer.any_released())
+                                    && let Some(src) = egui::DragAndDrop::take_payload::<Col>(ui.ctx())
+                                {
+                                    moved = Some((*src, col, after));
+                                }
+                            }
                         });
+                        if let Some(w) = cell_width {
+                            widths.insert(col.key(), w);
+                        }
                     }
+                    header.col(|_| {});
                 })
                 .body(|body| {
                     body.rows(26.0, rows.len(), |mut row| {
                         let i = rows[row.index()];
                         let p = &shared.box_file.list[i];
                         let result = self.results.get(i).and_then(|r| r.as_ref());
-                        row.col(|ui| {
-                            ui.label(format!("{}", i + 1));
-                        });
-                        row.col(|ui| {
-                            let mark = if p.fix == Some(1.0) { "📌" } else { "" };
-                            ui.label(format!("{mark}{}", p.name));
-                        });
-                        row.col(|ui| {
-                            ui.label(format!("{}", p.lv));
-                        });
-                        row.col(|ui| {
-                            ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
-                        });
-                        row.col(|ui| {
-                            food_icon::food_list(ui, p);
-                        });
-                        for (slot, unlock) in SUB_SKILL_LV.iter().enumerate() {
-                            row.col(|ui| {
-                                let Some(name) = p.sub_skill_list.get(slot) else { return };
-                                let short = m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?");
-                                // まだ解放されていないサブスキルは薄く表示する
-                                let text = if p.lv >= *unlock as f64 { egui::RichText::new(short) } else { egui::RichText::new(short).weak() };
-                                ui.label(text).on_hover_text(name);
-                            });
-                        }
-                        row.col(|ui| {
-                            nature_label(ui, &p.nature);
-                        });
-                        row.col(|ui| {
-                            if let Some(r) = result {
-                                ui.label(fmt_num(r.pokemon.score));
-                            }
-                        });
-                        row.col(|ui| {
-                            let best = result
-                                .and_then(|r| r.evaluate_result.as_ref())
-                                .and_then(|e| e.best.get(&EvalLv::Max))
-                                .and_then(|b| b.energy.as_ref());
-                            if let Some(b) = best {
-                                ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
-                            }
-                        });
-                        for (_, _, fmt, get) in DETAIL_COLUMNS.iter().take(detail_num) {
-                            row.col(|ui| {
-                                if let Some(r) = result {
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(fmt_value(get(&r.pokemon), *fmt));
-                                    });
+                        for &col in &columns {
+                            row.col(|ui| match col {
+                                Col::Index => {
+                                    ui.label(format!("{}", i + 1));
+                                }
+                                Col::Name => {
+                                    let mark = if p.fix == Some(1.0) { "📌" } else { "" };
+                                    ui.label(format!("{mark}{}", p.name));
+                                }
+                                Col::Lv => {
+                                    ui.label(format!("{}", p.lv));
+                                }
+                                Col::SkillLv => {
+                                    ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
+                                }
+                                Col::Food => food_icon::food_list(ui, p),
+                                Col::Sub(slot) => {
+                                    let Some(name) = p.sub_skill_list.get(slot) else { return };
+                                    let short = m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?");
+                                    // まだ解放されていないサブスキルは薄く表示する
+                                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(short) } else { egui::RichText::new(short).weak() };
+                                    ui.label(text).on_hover_text(name);
+                                }
+                                Col::Nature => nature_label(ui, &p.nature),
+                                Col::Score => {
+                                    if let Some(r) = result {
+                                        ui.label(fmt_num(r.pokemon.score));
+                                    }
+                                }
+                                Col::Evaluate => {
+                                    let best = result
+                                        .and_then(|r| r.evaluate_result.as_ref())
+                                        .and_then(|e| e.best.get(&EvalLv::Max))
+                                        .and_then(|b| b.energy.as_ref());
+                                    if let Some(b) = best {
+                                        ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
+                                    }
+                                }
+                                Col::Detail(n) => {
+                                    let (_, _, fmt, get) = DETAIL_COLUMNS[n];
+                                    if let Some(r) = result {
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            ui.label(fmt_value(get(&r.pokemon), fmt));
+                                        });
+                                    }
                                 }
                             });
                         }
@@ -463,6 +613,18 @@ impl BoxView {
                 });
         });
 
+        if let Some((src, dst, after)) = moved {
+            order.retain(|c| *c != src);
+            if let Some(n) = order.iter().position(|c| *c == dst) {
+                order.insert(if after { n + 1 } else { n }, src);
+                set_column_order(ui.ctx(), Some(&order));
+            }
+        }
+        if reset_order {
+            set_column_order(ui.ctx(), None);
+            widths.clear();
+        }
+        set_column_widths(ui.ctx(), widths);
         if sort_changed {
             set_sort_info(shared, &sort);
         }
