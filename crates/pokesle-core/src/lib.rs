@@ -10,6 +10,7 @@ pub mod cooking;
 pub mod data;
 pub mod evaluate_setting;
 pub mod evaluate_table;
+pub mod exp;
 pub mod filter;
 pub mod help_rate;
 pub mod js;

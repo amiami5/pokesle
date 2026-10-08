@@ -480,3 +480,32 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   writeFileSync(path.join(outDir, 'check-list.json'), JSON.stringify({ box: fixBox, table, cases: checklistCases }));
   console.log(`check-list: ${checklistCases.map((c) => `${c.page.pokemon.rows.length}/${c.page.food.rows.length}/${c.page.skill.rows.length}`).join(',')}`);
 }
+
+// ---- 育成に必要なアメ・ゆめのかけら(Exp.calcRequireInfo) ----
+{
+  const { default: Exp } = await up('data/exp.ts');
+  const seeds = [...new Set(Pokemon.list.map((p) => p.seed).filter((x) => x))];
+  const candyList = [
+    { boostMultiply: 2, boostShard: 5, bag: {} },
+    { boostMultiply: 2, boostShard: 5, bag: Object.fromEntries(seeds.map((s) => [s, Math.floor(rand() * 400)])) },
+    { boostMultiply: 1.5, boostShard: 4, bag: Object.fromEntries(seeds.map((s) => [s, pick([0, 10, 50, 100, 300, 1000, 5000])])) },
+  ];
+  const expCases = [];
+  for (const candy of candyList) {
+    for (let i = 0; i < 300; i++) {
+      const p = pick(Pokemon.list);
+      const lv = 1 + Math.floor(rand() * 70);
+      const pokemon = {
+        name: p.name,
+        lv,
+        nature: pick(Nature.list).name,
+        training: pick([null, 1, lv, lv + 1, lv + 5, 25, 30, 50, 60, 65, 70, 75]),
+        nextExp: pick([null, 0, 1, 30, 120, 500]),
+      };
+      const result = Exp.calcRequireInfo(pokemon, Nature.map[pokemon.nature], { candy });
+      expCases.push({ candy, pokemon, result: Object.fromEntries(Object.entries(result).map(([k, v]) => [k, num(v)])) });
+    }
+  }
+  writeFileSync(path.join(outDir, 'exp.json'), JSON.stringify(expCases));
+  console.log(`exp: ${expCases.length}`);
+}

@@ -552,3 +552,37 @@ fn check_list_matches_upstream() {
         panic!("{} 件不一致\n{}", errors.len(), errors.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
     }
 }
+
+#[test]
+fn exp_require_info_matches_upstream() {
+    use pokesle_core::config::CandyConfig;
+    use pokesle_core::exp::calc_require_info;
+    let golden = load("exp.json");
+    let cases = golden.as_array().unwrap();
+    for (i, case) in cases.iter().enumerate() {
+        let mut candy_json = case["candy"].clone();
+        candy_json["shard"] = Value::Null;
+        let candy: CandyConfig = serde_json::from_value(candy_json).unwrap();
+        let pokemon: BoxPokemon = serde_json::from_value(case["pokemon"].clone()).unwrap();
+        let r = calc_require_info(&pokemon, master().nature(&pokemon.nature), &candy);
+        let actual = [
+            ("normalCandyNum", r.normal_candy_num),
+            ("normalCandyShard", r.normal_candy_shard),
+            ("boostCandyNum", r.boost_candy_num),
+            ("boostCandyShard", r.boost_candy_shard),
+            ("bestBoostCandyNum", r.best_boost_candy_num),
+            ("bestBoostCandyShard", r.best_boost_candy_shard),
+            ("bestNormalCandyNum", r.best_normal_candy_num),
+            ("bestNormalCandyShard", r.best_normal_candy_shard),
+        ];
+        for (key, a) in actual {
+            let e = expected_num(&case["result"][key]);
+            let ok = match (a, e) {
+                (Some(a), Some(e)) => close(a, e),
+                (None, None) => true,
+                _ => false,
+            };
+            assert!(ok, "case {i} {key}: actual {a:?} expected {e:?} ({})", case["pokemon"]);
+        }
+    }
+}
