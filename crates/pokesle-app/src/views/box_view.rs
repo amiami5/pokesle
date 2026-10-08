@@ -16,6 +16,7 @@ use pokesle_core::sim_pokemon::{BoxPokemon, SimPokemon};
 use pokesle_core::team_sim::simulate_box;
 use serde::{Deserialize, Serialize};
 
+use super::evaluate_detail::EvaluateDetail;
 use super::pokemon_edit::{EditResult, PokemonEdit};
 use super::{common_setting, fmt_fixed, fmt_num, food_icon, nature_label, style};
 use crate::app::Shared;
@@ -542,6 +543,8 @@ enum TableEvent {
     Toggle(usize),
     Action(RowAction),
     Cell(CellEdit),
+    /// 厳選詳細を開く(ボックス位置, 進化先, レベル)
+    Detail(usize, String, u32),
 }
 
 /// 列の並びと幅の保存場所(本家に無い項目なので、設定ではなくウインドウ位置と同じ window.ron に入れる)
@@ -691,6 +694,8 @@ pub struct BoxView {
     detail_seed: Option<String>,
     /// サマリー情報の並べ替え(列のキー, 1=昇順 / -1=降順)
     summary_sort: Vec<(String, i8)>,
+    /// 厳選値のクリックで開いた厳選詳細
+    detail: Option<EvaluateDetail>,
 }
 
 /// 一覧の操作列でのクリック
@@ -839,6 +844,11 @@ impl BoxView {
             self.summary(ui);
         }
         self.import_window(ui.ctx(), shared);
+        if let Some(d) = &mut self.detail
+            && !d.ui(ui.ctx(), &shared.config, shared.usable_evaluate_table())
+        {
+            self.detail = None;
+        }
         self.confirm_delete_window(ui.ctx(), shared);
 
         if let Some(edit) = &mut self.edit {
@@ -1164,7 +1174,13 @@ impl BoxView {
                         ui.label(fmt_fixed(r.pokemon.score, 1));
                     }
                 }
-                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail, pure_mint),
+                Col::Eval(k, lv, value) => {
+                    if let Some(after) = eval_cell(ui, result, k, lv, value, setting.select_detail, pure_mint)
+                        && let EvalLv::Lv(lv) = lv
+                    {
+                        return Some(TableEvent::Detail(i, after, lv));
+                    }
+                }
                 Col::Candy(0) => {
                     if let Some(b) = m.pokemon(&p.name) {
                         let mut v = config.candy.bag.get(&b.candy_name).copied();
@@ -1324,6 +1340,7 @@ impl BoxView {
         let mut toggle_select: Option<usize> = None;
         let mut select_all: Option<bool> = None;
         let mut edits: Vec<CellEdit> = Vec::new();
+        let mut open_detail = None;
         for e in events {
             match e {
                 TableEvent::Sort(key, shift) => {
@@ -1339,7 +1356,18 @@ impl BoxView {
                 TableEvent::Toggle(i) => toggle_select = Some(i),
                 TableEvent::Action(a) => action = Some(a),
                 TableEvent::Cell(c) => edits.push(c),
+                TableEvent::Detail(i, after, lv) => open_detail = Some((i, after, lv)),
             }
+        }
+        // 本家 evaluate-result.vue の showSelectDetail: 食材は概算したポケモンの食材の並びの位置
+        if let Some((i, after, lv)) = open_detail {
+            let p = &shared.box_file.list[i];
+            let result = self.results.get(i).and_then(|r| r.as_ref());
+            let base = base_of(p, result);
+            let food_index_list =
+                p.food_list.iter().map(|f| base.and_then(|b| b.food_name_list.iter().position(|x| x == f)).unwrap_or(usize::MAX)).collect();
+            let nature = result.and_then(|r| r.pokemon.nature).or_else(|| m.natures.iter().position(|n| n.name == p.nature));
+            self.detail = Some(EvaluateDetail::new(&after, lv, food_index_list, p.sub_skill_list.clone(), nature));
         }
 
         if let Some((src, dst, after)) = moved {
@@ -1854,9 +1882,26 @@ fn hit_check_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>,
 }
 
 /// 厳選の値(本家 evaluate-result.vue)
-fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool, pure_mint: bool) {
+/// 値のクリックで厳選詳細を開く(最大の列を除く)。クリックされた進化先を返す
+fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool, pure_mint: bool) -> Option<String> {
     let rows = eval_rows(result, k, lv, value, detail);
     let key = EVAL_KINDS[k].0;
+    let mut clicked = None;
+    // 本家の .link(青字に下線)
+    let mut value_label = |ui: &mut egui::Ui, text: egui::RichText, after: &str, has_value: bool| {
+        if lv == EvalLv::Max || !has_value {
+            return ui.add(egui::Label::new(text));
+        }
+        let r = ui.add(egui::Label::new(text.color(egui::Color32::from_rgb(0x00, 0x44, 0xcc)).underline()).sense(egui::Sense::click()));
+        if r.hovered() {
+            ui.painter().rect_filled(r.rect, 0.0, egui::Color32::from_rgba_unmultiplied(0x00, 0x44, 0x88, 0x11));
+        }
+        let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if r.clicked() {
+            clicked = Some(after.to_string());
+        }
+        r
+    };
     ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for (after, v, best, diff) in rows {
@@ -1875,17 +1920,22 @@ fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         diff_label(ui);
-                        ui.add_sized([if key == "energy" && value { 52.0 } else { 46.0 }, 16.0], egui::Label::new(style(egui::RichText::new(text).size(11.0))));
-                        ui.label(style(egui::RichText::new(after).size(10.0)));
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(if key == "energy" && value { 52.0 } else { 46.0 }, 16.0),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| value_label(ui, style(egui::RichText::new(text).size(11.0)), &after, v.is_some()),
+                        );
+                        ui.label(style(egui::RichText::new(after.as_str()).size(10.0)));
                     });
                 });
             } else {
-                ui.label(style(egui::RichText::new(after).size(10.0)));
-                ui.label(style(egui::RichText::new(text).size(11.0)));
+                ui.label(style(egui::RichText::new(after.as_str()).size(10.0)));
+                value_label(ui, style(egui::RichText::new(text).size(11.0)), &after, v.is_some());
                 diff_label(ui);
             }
         }
     });
+    clicked
 }
 
 /// 表示設定(本家 index.vue の SettingButton「表示設定」)

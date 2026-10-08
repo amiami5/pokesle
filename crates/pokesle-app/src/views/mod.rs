@@ -2,6 +2,7 @@ pub mod box_view;
 pub mod check_list_view;
 pub mod common_setting;
 pub mod credit_view;
+pub mod evaluate_detail;
 pub mod evaluate_view;
 pub mod food_icon;
 pub mod pokemon_edit;
