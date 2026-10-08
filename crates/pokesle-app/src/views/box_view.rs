@@ -1163,10 +1163,7 @@ impl BoxView {
                 Col::Food => food_icon::food_list(ui, p),
                 Col::Sub(slot) => {
                     let Some(name) = p.sub_skill_list.get(slot) else { return None };
-                    let text = if setting.sub_skill_short { m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?") } else { name.as_str() };
-                    // まだ解放されていないサブスキルは薄く表示する
-                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(text) } else { egui::RichText::new(text).weak() };
-                    ui.label(text).on_hover_text(name);
+                    sub_skill_label(ui, name, slot, p, result, setting.sub_skill_short);
                 }
                 Col::Nature => nature_label(ui, &p.nature),
                 Col::Score => {
@@ -1316,12 +1313,28 @@ impl BoxView {
 
         // 文字の上をクリックしても行を選べるよう、文字の選択はしない
         ui.style_mut().interaction.selectable_labels = false;
+        // 表の列の間隔(文字と罫線の間)は元の値に戻す
+        let spacing_x = ui.spacing().item_spacing.x;
         let (left_offset, right_offset) = ui
             .horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                let l = ui.vertical(|ui| draw(ui, "box_table_left", &left, false)).inner;
+                let l = ui
+                    .vertical(|ui| {
+                        ui.spacing_mut().item_spacing.x = spacing_x;
+                        draw(ui, "box_table_left", &left, false)
+                    })
+                    .inner;
                 // 列が画面に収まらないときは横にスクロールする
-                let r = egui::ScrollArea::horizontal().id_salt("box_table_right_scroll").show(ui, |ui| ui.vertical(|ui| draw(ui, "box_table_right", scrolled, true)).inner).inner;
+                let r = egui::ScrollArea::horizontal()
+                    .id_salt("box_table_right_scroll")
+                    .show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.x = spacing_x;
+                            draw(ui, "box_table_right", scrolled, true)
+                        })
+                        .inner
+                    })
+                    .inner;
                 (l, r)
             })
             .inner;
@@ -1851,6 +1864,43 @@ fn name_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, memo
         }
         None => name_line(ui),
     }
+}
+
+/// サブスキル(本家 sub-skill-label.vue): レア度で色分けし、まだ解放されていないものは薄く、
+/// 銀のタネで上位のサブスキルになったものは赤字にしてタネの印を付ける
+fn sub_skill_label(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon, result: Option<&BoxResult>, short: bool) {
+    let m = master();
+    let enabled = result.and_then(|r| r.pokemon.sub_skill_list.get(slot).copied().flatten()).map(|i| &m.sub_skills[i]);
+    let sub = enabled.or_else(|| m.sub_skill(name));
+    let fix = enabled.is_some_and(|x| x.name != name);
+    let seed = result.is_some_and(|r| r.pokemon.next_sub_skill_list.get(slot).copied().unwrap_or(false));
+    let disabled = p.lv < SUB_SKILL_LV[slot] as f64;
+    let text = match sub {
+        Some(x) if short => x.short.as_str(),
+        Some(x) => x.name.as_str(),
+        None => "-",
+    };
+    let (bg, border, color) = match sub.map_or(1, |x| x.rarity) {
+        2 => (0xeaf5ff, 0x9dc9ef, 0x2c5277),
+        3 => (0xfff4d9, 0xe5bd70, 0x76511f),
+        _ => (0xf6f7fc, 0xbfc8de, 0x3b4663),
+    };
+    let hex = |c: u32| egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+    let alpha = |c: egui::Color32| if disabled { c.gamma_multiply(0.5) } else { c };
+    let size = egui::TextStyle::Body.resolve(ui.style()).size * 0.8;
+    let width = size * if short { 5.0 } else { 11.5 };
+    let text_color = alpha(if fix { egui::Color32::RED } else { hex(color) });
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(size), text_color);
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(width.max(galley.size().x + 4.0), galley.size().y + 4.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect(rect, 5.0, alpha(hex(bg)), egui::Stroke::new(1.0, alpha(hex(border))), egui::StrokeKind::Inside);
+    painter.galley(rect.center() - galley.size() / 2.0, galley, text_color);
+    if seed {
+        // 本家はタネの画像を右上に重ねる
+        painter.circle(rect.right_top() + egui::vec2(-1.0, 1.0), 3.5, hex(0xc8ccd4), egui::Stroke::new(1.0, hex(0x8a909c)));
+    }
+    let hover = if fix { format!("{name} → {}", sub.map_or("", |x| x.name.as_str())) } else { name.to_string() };
+    r.on_hover_text(hover);
 }
 
 /// 整理備考(本家 index.vue の hitCheckList)
