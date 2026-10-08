@@ -1,4 +1,4 @@
-//! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算・厳選テーブル作成
+//! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -9,14 +9,13 @@ use pokesle_core::box_io::{self, TsvColumns};
 use pokesle_core::box_sim::BoxResult;
 use pokesle_core::data::master;
 use pokesle_core::sim_pokemon::SimPokemon;
-use pokesle_core::evaluate_table::{simulate_evaluate_table, EvalLv, EvaluateTable};
+use pokesle_core::evaluate_table::EvalLv;
 use pokesle_core::team_sim::simulate_box;
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::{fmt_fixed, fmt_num, food_icon, nature_label};
+use super::{common_setting, fmt_fixed, fmt_num, food_icon, nature_label, style};
 use crate::app::Shared;
 use crate::job::Job;
-use crate::storage;
 
 /// サブスキルの解放レベル(本家 pokemon-simulator.ts)
 const SUB_SKILL_LV: [u32; 5] = [10, 25, 50, 70, 80];
@@ -101,6 +100,37 @@ fn fmt_value(v: f64, fmt: Fmt) -> String {
         Fmt::Num(d) => fmt_fixed(v, d),
         Fmt::Percent(d) => format!("{:.*}%", d, v * 100.0),
     }
+}
+
+/// キーワード絞り込み(名前・食材・スキル・サブスキル・性格・メモ)
+fn keyword_match(p: &pokesle_core::sim_pokemon::BoxPokemon, query: &str) -> bool {
+    let m = master();
+    let skill = m.pokemon(&p.name).map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("");
+    p.name.contains(query)
+        || p.food_list.iter().any(|x| x.contains(query))
+        || skill.contains(query)
+        || p.sub_skill_list.iter().any(|x| x.contains(query))
+        || p.nature.contains(query)
+        || p.memo.as_deref().is_some_and(|x| x.contains(query))
+}
+
+/// 概算をやり直す必要があるかの判定に使う指紋
+fn simulate_key(shared: &Shared) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut v = shared.config.to_value();
+    if let Some(m) = v.as_object_mut() {
+        // 表示だけの設定は除く
+        m.remove("pokemonList");
+        m.remove("summary");
+    }
+    v.to_string().hash(&mut h);
+    serde_json::to_string(&shared.box_file.list).unwrap_or_default().hash(&mut h);
+    if let Some(t) = shared.usable_evaluate_table() {
+        format!("{:?}{:?}", t.healer, t.support).hash(&mut h);
+        t.pokemon.len().hash(&mut h);
+    }
+    h.finish()
 }
 
 /// 設定 `pokemonList.simulatedInfo`(シミュ詳細)
@@ -317,7 +347,8 @@ pub struct BoxView {
     import_message: String,
     export_text: String,
     simulate_job: Option<Job<Vec<BoxResult>>>,
-    table_job: Option<Job<EvaluateTable>>,
+    /// 概算に使った設定・ボックス・厳選テーブルの指紋
+    simulate_key: Option<u64>,
     /// ボックス位置 → 概算結果(いつ育モードを除く)
     results: Vec<Option<BoxResult>>,
     error: String,
@@ -327,16 +358,39 @@ impl BoxView {
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         self.poll_jobs(shared);
 
+        // 1段目: 共通設定と表示設定(本家 index.vue)
+        let mut changed = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+            changed |= common_setting::ui(ui, &mut shared.config);
+            let mut detail = simulated_info(shared);
+            style::setting(ui, "box_display", "表示設定", &style::plain("表示設定"), false, |ui| {
+                egui::Grid::new("box_display_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+                    style::th(ui, "シミュ詳細");
+                    if ui.checkbox(&mut detail, "シミュ詳細").changed() {
+                        set_simulated_info(shared, detail);
+                    }
+                    ui.end_row();
+                });
+            });
+        });
+        if changed {
+            shared.save_config();
+        }
+        // 2段目: キーワード
+        ui.add_space(5.0);
         ui.horizontal(|ui| {
-            if ui.button("＋ 追加").clicked() {
-                self.edit = Some(PokemonEdit::new(None, None));
-            }
-            if ui.button("TSVの取り込み・書き出し").clicked() {
-                self.import_open = true;
-            }
-            ui.separator();
-            let running = self.simulate_job.is_some() || self.table_job.is_some();
-            if ui.add_enabled(!running && !shared.box_file.list.is_empty(), egui::Button::new("概算を計算")).clicked() {
+            style::th(ui, "キーワード");
+            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0));
+        });
+
+        // 設定・ボックス・厳選テーブルが変わったら概算し直す(本家は自動で再計算する)
+        let key = simulate_key(shared);
+        if self.simulate_job.is_none() && self.simulate_key != Some(key) {
+            self.simulate_key = Some(key);
+            if shared.box_file.list.is_empty() {
+                self.results.clear();
+            } else {
                 let config = shared.config.clone();
                 let list = shared.box_file.list.clone();
                 let table = shared.usable_evaluate_table().cloned();
@@ -345,28 +399,28 @@ impl BoxView {
                     simulate_box(&config, &list, table.as_ref(), true)
                 }));
             }
-            if ui.add_enabled(!running, egui::Button::new("厳選テーブルを作成")).on_hover_text("厳選度の計算に使う基準表を作ります(数分かかります)").clicked() {
-                let config = shared.config.clone();
-                self.table_job = Some(Job::spawn(ui.ctx(), move |p| simulate_evaluate_table(&config, &p)));
-            }
-            ui.separator();
-            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("ポケモン名で絞り込み").desired_width(180.0));
-            ui.separator();
-            let mut detail = simulated_info(shared);
-            if ui.checkbox(&mut detail, "シミュ詳細").on_hover_text("概算の内訳(おてつだい回数・きのみ・食材・スキルなど)の列を表示します").changed() {
-                set_simulated_info(shared, detail);
-            }
-        });
-        if let Some(job) = &self.simulate_job {
-            job.show_progress(ui);
         }
-        if let Some(job) = &self.table_job {
+        if let Some(job) = &self.simulate_job {
             job.show_progress(ui);
         }
         if !self.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &self.error);
         }
-        ui.separator();
+        ui.add_space(5.0);
+
+        // 下段: 追加・TSV
+        egui::Panel::bottom("box_actions").frame(egui::Frame::new().inner_margin(egui::Margin { top: 6, ..Default::default() })).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if style::form_button(ui, "ポケモン新規追加", style::ButtonKind::Execute).clicked() {
+                    self.edit = Some(PokemonEdit::new(None, None));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if style::form_button(ui, "TSVインポート/エクスポート", style::ButtonKind::Normal).clicked() {
+                        self.import_open = true;
+                    }
+                });
+            });
+        });
 
         self.table(ui, shared);
         self.import_window(ui.ctx(), shared);
@@ -412,28 +466,13 @@ impl BoxView {
                 Err(e) => self.error = e,
             }
         }
-        if let Some(job) = &mut self.table_job
-            && let Some(r) = job.poll()
-        {
-            self.table_job = None;
-            match r {
-                Ok(table) => {
-                    if let Err(e) = storage::save_evaluate_table(&table) {
-                        self.error = format!("厳選テーブルを保存できませんでした: {e}");
-                    }
-                    shared.evaluate_table = Some(table);
-                    shared.status = "厳選テーブルを作成しました".into();
-                }
-                Err(e) => self.error = e,
-            }
-        }
     }
 
     fn table(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         let m = master();
         let query = self.search.trim().to_string();
         let mut rows: Vec<usize> = (0..shared.box_file.list.len())
-            .filter(|&i| query.is_empty() || shared.box_file.list[i].name.contains(&query))
+            .filter(|&i| query.is_empty() || keyword_match(&shared.box_file.list[i], &query))
             .collect();
         let mut sort = sort_info(shared);
         if !sort.is_empty() {

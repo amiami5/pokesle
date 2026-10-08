@@ -73,7 +73,7 @@ pub struct CheckListView {
 impl Default for CheckListView {
     fn default() -> Self {
         CheckListView {
-            tab: Tab::Pokemon,
+            tab: Tab::Setting,
             setting_tab: SettingTab::Pokemon,
             job: None,
             results: Vec::new(),
@@ -174,11 +174,11 @@ impl CheckListView {
 
         ui.horizontal(|ui| {
             for (tab, label) in [
+                (Tab::Setting, "厳選基準設定"),
                 (Tab::Pokemon, "ポケモン"),
                 (Tab::Food, "食材"),
                 (Tab::Skill, "スキル"),
                 (Tab::Field, "フィールド別"),
-                (Tab::Setting, "厳選基準設定"),
             ] {
                 ui.selectable_value(&mut self.tab, tab, label);
             }

@@ -6,16 +6,38 @@ use pokesle_core::config::Config;
 use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
-use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, settings_view::SettingsView, team_view::TeamView};
+use crate::views::style;
+use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, team_view::TeamView};
 
+/// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Box,
-    Team,
     CheckList,
-    Settings,
+    Summary,
+    Team,
+    FoodStock,
+    Setting,
+    EvaluateTable,
+    TmpEvaluate,
+    Data,
+    Faq,
+    History,
     Credit,
 }
+
+/// ヘッダーのグループ(本家 app.vue)。(見出し, [(画面, 表示名, 実装済みか)])
+/// (画面, 表示名, 実装済みか)
+type NavItem = (Tab, &str, bool);
+
+const NAV: [(&str, &[NavItem]); 4] = [
+    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック
+リスト", true), (Tab::Summary, "サマリー", false)]),
+    ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", false)]),
+    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", false)]),
+    ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料
+クレジット", true)]),
+];
 
 /// 各画面で共有するデータ
 pub struct Shared {
@@ -73,16 +95,31 @@ pub struct App {
     tab: Tab,
     shared: Shared,
     box_view: BoxView,
-    team_view: TeamView,
     check_list_view: CheckListView,
-    settings_view: SettingsView,
+    team_view: TeamView,
+    evaluate_view: EvaluateView,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> App {
         crate::fonts::install(&cc.egui_ctx);
+        style::apply(&cc.egui_ctx);
+        // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_POPUP=field などで設定ポップアップを開いて起動する
+        #[cfg(debug_assertions)]
+        if let Ok(id) = std::env::var("POKESLE_DEBUG_POPUP") {
+            style::open_popup(&cc.egui_ctx, &id);
+        }
+        #[cfg(debug_assertions)]
+        let tab = match std::env::var("POKESLE_DEBUG_TAB").as_deref() {
+            Ok("team") => Tab::Team,
+            Ok("checklist") => Tab::CheckList,
+            Ok("setting") => Tab::Setting,
+            _ => Tab::Box,
+        };
+        #[cfg(not(debug_assertions))]
+        let tab = Tab::Box;
         App {
-            tab: Tab::Box,
+            tab,
             shared: Shared {
                 config: storage::load_config(),
                 box_file: storage::load_box(),
@@ -90,46 +127,107 @@ impl App {
                 status: String::new(),
             },
             box_view: BoxView::default(),
-            team_view: TeamView::default(),
             check_list_view: CheckListView::default(),
-            settings_view: SettingsView::default(),
+            team_view: TeamView::default(),
+            evaluate_view: EvaluateView::default(),
         }
     }
+
+    /// 本家 app.vue の header
+    fn header(&mut self, ui: &mut egui::Ui) {
+        let rect = ui.max_rect();
+        style::hgradient(
+            ui.painter(),
+            rect,
+            &[(0.0, egui::Color32::from_rgb(0x3a, 0x46, 0x5d)), (0.68, egui::Color32::from_rgb(0x52, 0x60, 0x79)), (1.0, egui::Color32::from_rgb(0x5c, 0x6b, 0x86))],
+        );
+        // 厳選テーブルが使えないときは、チェックリスト・基準確認を無効にし、基準生成に「!」を付ける
+        let require_refresh = self.shared.usable_evaluate_table().is_none();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new("ポケスリシミュ").size(22.0).strong().color(egui::Color32::WHITE));
+            ui.add_space(14.0);
+            for (title, items) in NAV {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.add_space(5.0);
+                    ui.label(egui::RichText::new(title).size(11.0).color(egui::Color32::from_rgb(0xd8, 0xdd, 0xe7)));
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        for &(tab, label, implemented) in items {
+                            let disabled = !implemented || (require_refresh && matches!(tab, Tab::CheckList | Tab::EvaluateTable));
+                            let caution = require_refresh && tab == Tab::Setting;
+                            if nav_item(ui, label, self.tab == tab, disabled, caution, implemented).clicked() {
+                                self.tab = tab;
+                            }
+                        }
+                    });
+                });
+            }
+        });
+    }
+}
+
+/// ヘッダーのリンク1つ(白い太字、選択中は下に緑の線)
+fn nav_item(ui: &mut egui::Ui, label: &str, active: bool, disabled: bool, caution: bool, implemented: bool) -> egui::Response {
+    let font = egui::FontId::proportional(13.0);
+    let alpha = if disabled { 0.5 } else { 1.0 };
+    let color = egui::Color32::WHITE.gamma_multiply(alpha);
+    let galley = ui.fonts_mut(|f| f.layout_job(egui::text::LayoutJob::simple(label.to_string(), font, color, f32::INFINITY)));
+    let badge = if caution { 24.0 } else { 0.0 };
+    let pad = egui::vec2(5.0, 5.0);
+    let height = 38.0_f32.max(galley.size().y + pad.y * 2.0);
+    let size = egui::vec2(galley.size().x + pad.x * 2.0 + badge, height);
+    let sense = if disabled { egui::Sense::hover() } else { egui::Sense::click() };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let p = ui.painter();
+    if !disabled && (active || response.hovered()) {
+        p.rect_filled(rect, 0.0, egui::Color32::from_white_alpha(31));
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - 3.0), rect.right_bottom()), 0.0, egui::Color32::from_rgb(0x7a, 0xc6, 0xb4));
+    }
+    // 本家は太字。少しずらして重ね描きする
+    let pos = egui::pos2(rect.left() + pad.x, rect.center().y - galley.size().y / 2.0);
+    p.galley(pos + egui::vec2(0.5, 0.0), galley.clone(), color);
+    p.galley(pos, galley, color);
+    if caution {
+        let c = egui::pos2(rect.right() - pad.x - 10.0, rect.center().y);
+        p.circle(c, 10.0, style::ACCENT, egui::Stroke::new(2.0, egui::Color32::WHITE));
+        p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(12.0), egui::Color32::WHITE);
+    }
+    if !implemented {
+        return response.on_hover_text("未実装");
+    }
+    if disabled {
+        return response.on_hover_text("厳選テーブルの作成が必要です(基準生成)");
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::top("tabs").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("ポケスリシミュレーター");
-                ui.separator();
-                for (tab, label) in [(Tab::Box, "ボックス"), (Tab::Team, "チーム編成"), (Tab::CheckList, "チェックリスト"), (Tab::Settings, "設定"), (Tab::Credit, "クレジット")] {
-                    ui.selectable_value(&mut self.tab, tab, label);
-                }
-            });
-        });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(format!("ボックス {}匹", self.shared.box_file.list.len()));
-                ui.separator();
-                let table = match (&self.shared.evaluate_table, self.shared.usable_evaluate_table()) {
-                    (_, Some(_)) => "厳選テーブル: 作成済み",
-                    (Some(_), None) => "厳選テーブル: 設定変更により再作成が必要",
-                    (None, None) => "厳選テーブル: 未作成",
-                };
-                ui.label(table);
-                if !self.shared.status.is_empty() {
-                    ui.separator();
+        egui::Panel::top("header").frame(egui::Frame::new()).show(ui, |ui| self.header(ui));
+        if !self.shared.status.is_empty() {
+            egui::Panel::bottom("status").show(ui, |ui| {
+                ui.horizontal(|ui| {
                     ui.label(&self.shared.status);
-                }
+                    if ui.small_button("×").clicked() {
+                        self.shared.status.clear();
+                    }
+                });
             });
-        });
-        egui::CentralPanel::default().show(ui, |ui| match self.tab {
+        }
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(style::SURFACE_SUBTLE).inner_margin(10)).show(ui, |ui| match self.tab {
             Tab::Box => self.box_view.ui(ui, &mut self.shared),
-            Tab::Team => self.team_view.ui(ui, &mut self.shared),
             Tab::CheckList => self.check_list_view.ui(ui, &mut self.shared),
-            Tab::Settings => self.settings_view.ui(ui, &mut self.shared),
+            Tab::Team => {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.team_view.ui(ui, &mut self.shared));
+            }
+            Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
+            _ => {
+                ui.label("未実装です");
+            }
         });
     }
 }

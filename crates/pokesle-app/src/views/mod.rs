@@ -1,10 +1,12 @@
 pub mod box_view;
 pub mod check_list_view;
+pub mod common_setting;
 pub mod credit_view;
+pub mod evaluate_view;
 pub mod food_icon;
 pub mod pokemon_edit;
 pub mod pokemon_target;
-pub mod settings_view;
+pub mod style;
 pub mod team_view;
 
 use eframe::egui;

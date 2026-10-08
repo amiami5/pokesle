@@ -4,7 +4,9 @@ use eframe::egui;
 use pokesle_core::data::master;
 use pokesle_core::team_sim::{run_team_simulation, TeamMember, TeamSimulationRequest, TeamSimulationResult};
 
-use super::{fmt_num, food_icon};
+use pokesle_core::config::Config;
+
+use super::{common_setting, fmt_num, food_icon, style};
 use crate::app::Shared;
 use crate::job::Job;
 
@@ -52,36 +54,135 @@ impl TeamView {
             }
         }
 
-        egui::Grid::new("team_req").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-            ui.label("対象");
-            egui::ComboBox::from_id_salt("day")
-                .selected_text(if self.target_day < 0 { "1週間".to_string() } else { DAYS[self.target_day as usize].to_string() })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.target_day, -1, "1週間");
-                    for (i, d) in DAYS.iter().enumerate() {
-                        ui.selectable_value(&mut self.target_day, i as i32, *d);
+        // 1段目: 共通設定(本家 simulation.vue)
+        let mut changed = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+            changed |= common_setting::ui(ui, &mut shared.config);
+        });
+        // 2段目: シミュレーション設定・除外フィルタ・チーム条件
+        ui.add_space(5.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+            changed |= simulation_setting(ui, &mut shared.config);
+            let f = &shared.config.simulation.filter;
+            let label = style::plain(if f.enable && !f.condition_list.is_empty() { "除外条件：設定あり" } else { "除外なし" });
+            style::setting(ui, "team_filter", "除外フィルタ", &label, false, |ui| {
+                ui.label("除外フィルタの編集は未対応です。");
+            });
+            changed |= require_setting(ui, &mut shared.config);
+        });
+        ui.add_space(5.0);
+
+        // 条件(本家の SettingList)
+        egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::Grid::new("team_req").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+                style::th(ui, "現在のエナジー");
+                style::number(ui, &mut self.before_energy, 100.0, 100.0);
+                ui.end_row();
+                style::th(ui, "曜日");
+                egui::ComboBox::from_id_salt("day")
+                    .selected_text(if self.target_day < 0 { "1週間".to_string() } else { DAYS[self.target_day as usize].to_string() })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.target_day, -1, "1週間");
+                        for (i, d) in DAYS.iter().enumerate() {
+                            ui.selectable_value(&mut self.target_day, i as i32, *d);
+                        }
+                    });
+                ui.end_row();
+                style::th(ui, "時間");
+                ui.horizontal(|ui| {
+                    if self.target_day >= 0 {
+                        ui.add_sized([40.0, 22.0], egui::DragValue::new(&mut self.target_hour).range(1.0..=24.0));
+                    } else {
+                        let mut v = 168.0;
+                        ui.add_enabled(false, egui::DragValue::new(&mut v));
+                    }
+                    ui.label("時間");
+                });
+                ui.end_row();
+                style::th(ui, "料理");
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        if self.target_day >= 0 {
+                            changed |= ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut shared.config.team_simulation.cooking_num).range(0.0..=21.0)).changed();
+                        } else {
+                            let mut v = 21.0;
+                            ui.add_enabled(false, egui::DragValue::new(&mut v));
+                        }
+                        ui.label("食分");
+                    });
+                    style::small(ui, "翌朝の料理分も集めておきたい場合は4にしてください", 150.0);
+                });
+                ui.end_row();
+                style::th(ui, "料理チャンス");
+                ui.horizontal(|ui| {
+                    style::number(ui, &mut self.initial_cooking_change, 1.0, 50.0);
+                    ui.label("%");
+                });
+                ui.end_row();
+                style::th(ui, "料理パワーアップ");
+                style::number(ui, &mut self.initial_cooking_power_up, 1.0, 50.0);
+                ui.end_row();
+                let sim = &mut shared.config.simulation;
+                style::th(ui, "余った食材の評価");
+                ui.horizontal_top(|ui| {
+                    changed |= ui.radio_value(&mut sim.remain_food_mode, 0.0, "隙間に詰める").changed();
+                    ui.add_space(10.0);
+                    ui.vertical(|ui| {
+                        changed |= ui.radio_value(&mut sim.remain_food_mode, 1.0, "以下割合で換算").changed();
+                        ui.horizontal(|ui| {
+                            ui.add_space(16.0);
+                            changed |= style::percent_number(ui, &mut sim.remain_food_rate, 50.0);
+                            ui.label("%");
+                        });
+                    });
+                });
+                ui.end_row();
+                style::th(ui, "モード");
+                ui.horizontal(|ui| {
+                    for (v, l) in [(0.0, "通常"), (1.0, "料理育成(カンスト除外のみ)"), (2.0, "料理育成(料理以外無視)")] {
+                        changed |= ui.radio_value(&mut sim.mode, v, l).changed();
                     }
                 });
-            ui.end_row();
-            if self.target_day >= 0 {
-                ui.label("計算する時間");
-                ui.add(egui::DragValue::new(&mut self.target_hour).range(1.0..=24.0).suffix(" 時間"));
                 ui.end_row();
-                ui.label("今日のエナジー(計算開始前)");
-                ui.add(egui::DragValue::new(&mut self.before_energy).range(0.0..=1e9).speed(100.0));
-                ui.end_row();
-            }
-            ui.label("料理チャンス初期値");
-            ui.add(egui::DragValue::new(&mut self.initial_cooking_change).range(0.0..=70.0).suffix(" %"));
-            ui.end_row();
-            ui.label("料理パワーアップ初期値");
-            ui.add(egui::DragValue::new(&mut self.initial_cooking_power_up).range(0.0..=999.0));
-            ui.end_row();
+            });
         });
+        ui.add_space(5.0);
+        egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                style::th(ui, "所持食材");
+                ui.add_space(12.0);
+                let m = master();
+                let unlimited = shared.config.food_unlimited;
+                egui::Grid::new("food_default").num_columns(6).spacing([6.0, 4.0]).show(ui, |ui| {
+                    for (i, food) in m.foods.iter().enumerate() {
+                        ui.label(&food.name);
+                        if unlimited {
+                            let mut v = 9999.0;
+                            ui.add_enabled(false, egui::DragValue::new(&mut v));
+                        } else {
+                            let v = shared.config.food_default_num.entry(food.name.clone()).or_insert(0.0);
+                            changed |= ui.add_sized([40.0, 20.0], egui::DragValue::new(v).range(0.0..=9999.0)).changed();
+                        }
+                        if i % 3 == 2 {
+                            ui.end_row();
+                        }
+                    }
+                });
+            });
+            changed |= ui.checkbox(&mut shared.config.food_unlimited, "食材無制限").changed();
+        });
+        if changed {
+            shared.save_config();
+        }
+        ui.add_space(5.0);
 
-        ui.horizontal(|ui| {
-            let can_run = self.job.is_none() && !shared.box_file.list.is_empty();
-            if ui.add_enabled(can_run, egui::Button::new("シミュレーション実行")).clicked() {
+        let can_run = self.job.is_none() && !shared.box_file.list.is_empty();
+        ui.add_enabled_ui(can_run, |ui| {
+            if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
                 let config = shared.config.clone();
                 let list = shared.box_file.list.clone();
                 let table = shared.usable_evaluate_table().cloned();
@@ -97,17 +198,17 @@ impl TeamView {
                     run_team_simulation(&config, &list, table.as_ref(), &request, &|v| p.set(v, ""))
                 }));
             }
-            if shared.box_file.list.is_empty() {
-                ui.label("ボックスにポケモンを登録してください");
-            }
         });
+        if shared.box_file.list.is_empty() {
+            ui.label("ボックスにポケモンを登録してください");
+        }
         if let Some(job) = &self.job {
             job.show_progress(ui);
         }
         if !self.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &self.error);
         }
-        ui.separator();
+        ui.add_space(5.0);
 
         let Some(result) = &self.result else { return };
         if result.team_list.is_empty() {
@@ -115,16 +216,12 @@ impl TeamView {
             return;
         }
         let m = master();
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        ui.vertical(|ui| {
             for (rank, team) in result.team_list.iter().enumerate() {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
+                let title = format!("{}: {} (最終エナジー:{})", rank + 1, fmt_num(team.score), fmt_num(team.energy));
+                egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.heading(format!("{}位", rank + 1));
-                        ui.label(format!("スコア {}", fmt_num(team.score)));
-                        ui.label(format!("エナジー {}", fmt_num(team.energy)));
-                        ui.label(format!("ゆめのかけら(スキル) {}", fmt_num(team.skill_shard)));
-                    });
+                    ui.label(format!("ゆめのかけら(スキル) {}", fmt_num(team.skill_shard)));
                     egui::Grid::new(("team", rank)).striped(true).num_columns(6).show(ui, |ui| {
                         for title in ["ポケモン", "Lv", "食材", "エナジー/日", "スキル/日", "スキルエナジー/日"] {
                             ui.strong(title);
@@ -168,4 +265,126 @@ impl TeamView {
             }
         });
     }
+}
+
+/// 本家 simulation.vue の「シミュレーション設定」
+fn simulation_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
+    let mut changed = false;
+    style::setting(ui, "team_simulation", "シミュレーション設定", &style::plain("シミュレーション設定"), false, |ui| {
+        let t = &mut c.team_simulation;
+        egui::Grid::new("team_simulation_grid").num_columns(3).spacing([16.0, 8.0]).show(ui, |ui| {
+            let mut row = |ui: &mut egui::Ui, first: &str, title: &str, v: &mut f64| {
+                style::th(ui, first);
+                style::th(ui, title);
+                ui.horizontal(|ui| {
+                    ui.label("上位");
+                    changed |= style::number(ui, v, 0.1, 50.0);
+                    ui.label("匹");
+                });
+                ui.end_row();
+            };
+            row(ui, "対象ポケモン", "きのみスコア", &mut t.max_rank_berry);
+            row(ui, "", "食材スコア", &mut t.max_rank_food);
+            row(ui, "", "総合スコア", &mut t.max_rank_all);
+            row(ui, "", "サポート抜きスコア", &mut t.max_rank_not_support);
+            ui.label("");
+            ui.label("");
+            style::small(
+                ui,
+                "上記設定は重複しては選ばれず、例えばきのみスコアで選ばれたポケモンは後の3つにはヒットしません。\n必ず上記設定の合計の数が対象になります。\nヒーラーなどは総合スコアが高く出ますが、ヒーラーばかりを対象にしても良い結果にならないので総合スコアの件数は少なめにした方が良い結果になりやすいです。",
+                250.0,
+            );
+            ui.end_row();
+            style::th(ui, "結果表示");
+            ui.label("");
+            ui.horizontal(|ui| {
+                ui.label("上位");
+                changed |= style::number(ui, &mut t.result_num, 0.1, 50.0);
+                ui.label("件");
+            });
+            ui.end_row();
+        });
+    });
+    changed
+}
+
+/// 本家 Berry.typeList の並び
+const TYPE_ORDER: [&str; 18] = [
+    "ノーマル", "ほのお", "みず", "でんき", "くさ", "こおり", "かくとう", "どく", "じめん", "ひこう", "エスパー", "むし", "いわ", "ゴースト",
+    "ドラゴン", "あく", "はがね", "フェアリー",
+];
+
+fn js_num(x: f64) -> String {
+    if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }
+}
+
+/// 本家 simulation.vue の「チーム条件」
+fn require_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
+    let m = master();
+    let r = &c.team_simulation.require;
+    let sp = |k: &str| r.specialty_num.get(k).copied().unwrap_or(0.0);
+    let mut parts: Vec<String> = Vec::new();
+    if r.day_help_rate > 0.0 {
+        parts.push(format!("日中手伝い効率{}%以上", js_num(r.day_help_rate)));
+    }
+    if r.night_help_rate > 0.0 {
+        parts.push(format!("夜間手伝い効率{}%以上", js_num(r.night_help_rate)));
+    }
+    if r.suimin_exp > 0.0 {
+        parts.push(format!("睡眠EXPボーナス{}匹以上", js_num(r.suimin_exp)));
+    }
+    for k in ["きのみ", "食材", "スキル"] {
+        if sp(k) > 0.0 {
+            parts.push(format!("{k}とくい{}匹以上", js_num(sp(k))));
+        }
+    }
+    for ty in TYPE_ORDER {
+        if r.type_num.get(ty).copied().unwrap_or(0.0) > 0.0 {
+            parts.push(format!("{ty}1匹以上"));
+        }
+    }
+    let label: style::Label =
+        if parts.is_empty() { style::plain("チーム条件：なし") } else { vec![("チーム条件：".into(), false), (parts.join(" "), true)] };
+    let mut changed = false;
+    style::setting(ui, "team_require", "チーム条件", &label, false, |ui| {
+        let r = &mut c.team_simulation.require;
+        egui::Grid::new("team_require_grid").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+            let mut row = |ui: &mut egui::Ui, title: &str, v: &mut f64, unit: &str| {
+                style::th(ui, title);
+                ui.horizontal(|ui| {
+                    changed |= style::number(ui, v, 1.0, 80.0);
+                    ui.label(unit);
+                });
+                ui.end_row();
+            };
+            row(ui, "日中手伝い効率", &mut r.day_help_rate, "%以上(最大222%)");
+            row(ui, "夜間手伝い効率", &mut r.night_help_rate, "%以上(最大222%)");
+            row(ui, "睡眠EXPボーナス", &mut r.suimin_exp, "匹以上");
+            for k in ["きのみ", "食材", "スキル"] {
+                row(ui, &format!("{k}とくい"), r.specialty_num.entry(k.to_string()).or_insert(0.0), "匹以上");
+            }
+            for ty in TYPE_ORDER {
+                let color = m.berries.iter().find(|b| b.type_name == ty).and_then(|b| parse_color(&b.type_color)).unwrap_or(style::TH);
+                ui.label(egui::RichText::new(ty).strong().color(color));
+                let v = r.type_num.entry(ty.to_string()).or_insert(0.0);
+                let mut on = *v == 1.0;
+                if ui.checkbox(&mut on, "1匹以上編成する").changed() {
+                    *v = if on { 1.0 } else { 0.0 };
+                    changed = true;
+                }
+                ui.end_row();
+            }
+        });
+    });
+    changed
+}
+
+/// "#rrggbb" を色に
+fn parse_color(s: &str) -> Option<egui::Color32> {
+    let h = s.strip_prefix('#')?;
+    if h.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(h, 16).ok()?;
+    Some(egui::Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
 }
