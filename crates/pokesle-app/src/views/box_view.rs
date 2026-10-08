@@ -144,7 +144,7 @@ impl BoxView {
             .column(Column::initial(36.0).at_least(24.0))
             .column(Column::initial(150.0).at_least(80.0))
             .column(Column::initial(40.0).at_least(24.0))
-            .column(Column::initial(40.0).at_least(24.0))
+            .column(Column::initial(72.0).at_least(24.0))
             .column(Column::initial(56.0).at_least(24.0))
             .column(Column::initial(260.0).at_least(80.0))
             .column(Column::initial(80.0))
@@ -153,7 +153,7 @@ impl BoxView {
             .column(Column::initial(70.0))
             .column(Column::remainder())
             .header(22.0, |mut header| {
-                for title in ["No", "ポケモン", "Lv", "スキ", "食材", "サブスキル", "せいかく", "概算日給", "スコア", "厳選", ""] {
+                for title in ["No", "ポケモン", "Lv", "スキルLv", "食材", "サブスキル", "せいかく", "概算日給", "スコア", "厳選", ""] {
                     header.col(|ui| {
                         ui.strong(title);
                     });
