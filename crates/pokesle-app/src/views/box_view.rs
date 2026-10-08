@@ -903,8 +903,8 @@ impl BoxView {
                                 action = Some(RowAction::Delete(i));
                             }
                             let (icon, color) = match p.fix {
-                                Some(f) if f == 1.0 => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
-                                Some(f) if f == -1.0 => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
+                                Some(1.0) => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
+                                Some(-1.0) => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
                                 _ => (Icon::Fix, egui::Color32::from_gray(0x88)),
                             };
                             let r = icon_button(ui, icon, color).on_hover_text("チームのシミュレーションで固定・除外する設定\nクリックで 固定→除外→解除、右クリックで解除");
@@ -1075,7 +1075,7 @@ impl BoxView {
                 let p = &mut shared.box_file.list[i];
                 p.fix = value.unwrap_or(match p.fix {
                     None => Some(1.0),
-                    Some(f) if f == 1.0 => Some(-1.0),
+                    Some(1.0) => Some(-1.0),
                     _ => None,
                 });
                 shared.save_box();
