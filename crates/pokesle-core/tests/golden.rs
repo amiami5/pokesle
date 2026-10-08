@@ -395,3 +395,160 @@ fn box_with_evaluate_table_matches_upstream() {
         panic!("{} / {checked} 件不一致\n{}", errors.len(), errors.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
     }
 }
+
+#[test]
+fn check_list_matches_upstream() {
+    use pokesle_core::check_list::{food_combination, CheckHit, CheckList, CheckTarget};
+    use pokesle_core::team_sim::simulate_box;
+    let golden = load("check-list.json");
+    let box_list: Vec<BoxPokemon> = serde_json::from_value(golden["box"].clone()).unwrap();
+    let table = table_from_js(&golden["table"]);
+    let m = master();
+    let mut errors: Vec<String> = Vec::new();
+    let mut checked = 0;
+    let num = |v: &Value| expected_num(v).unwrap_or(f64::NAN);
+    let opt_idx = |v: &Value| v.as_u64().map(|x| x as usize);
+    let strings = |v: &Value| -> Vec<String> { serde_json::from_value(v.clone()).unwrap() };
+    let mut cmp = |errors: &mut Vec<String>, label: String, act: f64, exp: f64| {
+        checked += 1;
+        if !close(act, exp) {
+            errors.push(format!("{label}: rust={act} js={exp}"));
+        }
+    };
+    let same = |errors: &mut Vec<String>, label: String, ok: bool, detail: String| {
+        if !ok {
+            errors.push(format!("{label}: {detail}"));
+        }
+    };
+
+    for case in golden["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let config = Config::from_value(&case["config"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let e_ = &mut errors;
+
+        // 一覧
+        let mut page_config = config.clone();
+        page_config.simulation.bag_over_operation = false;
+        page_config.simulation.fix = false;
+        let all = simulate_box(&page_config, &box_list, Some(&table), true).unwrap();
+        let list: Vec<_> = all.iter().collect();
+        let empty = pokesle_core::evaluate_table::EvaluateResult::default();
+        let combos: Vec<String> = list
+            .iter()
+            .map(|r| food_combination(&r.pokemon.base().food_name_list, &r.pokemon.box_pokemon.as_ref().unwrap().food_list))
+            .collect();
+        let targets: Vec<CheckTarget> = list
+            .iter()
+            .zip(&combos)
+            .map(|(r, c)| CheckTarget { base_name: &r.pokemon.base().name, food_combination: c, evaluate_result: r.evaluate_result.as_ref().unwrap_or(&empty) })
+            .collect();
+        let page = &case["page"];
+        let act_box: Vec<usize> = list.iter().map(|r| r.pokemon.box_index().unwrap()).collect();
+        let exp_box: Vec<usize> = serde_json::from_value(page["boxIndexList"].clone()).unwrap();
+        assert_eq!(act_box, exp_box, "{name}: 一覧の対象");
+
+        let cl = CheckList::new(&config, Some(&table));
+        let food = cl.food_check_list(&targets, None);
+        let skill = cl.skill_check_list(&targets, None);
+        let pokemon = cl.pokemon_check_list(&targets, None, Some(&food), Some(&skill));
+
+        let exp_rows = page["pokemon"]["rows"].as_array().unwrap();
+        same(e_, format!("{name}.pokemon"), pokemon.rows.len() == exp_rows.len(), format!("件数 rust={} js={}", pokemon.rows.len(), exp_rows.len()));
+        for (r, e) in pokemon.rows.iter().zip(exp_rows) {
+            let pname = &m.pokemon[r.pokemon].name;
+            let label = format!("{name}.pokemon.{pname}");
+            let act = (pname.as_str(), r.food_name.as_str(), r.checked, r.hit, r.target.as_str());
+            let exp = (e["name"].as_str().unwrap(), e["subName"].as_str().unwrap(), e["checked"].as_bool().unwrap(), opt_idx(&e["hit"]), e["target"].as_str().unwrap());
+            same(e_, label.clone(), act == exp, format!("rust={act:?} js={exp:?}"));
+            cmp(e_, format!("{label}.energyScore"), r.energy_score.unwrap_or(f64::NAN), num(&e["energyScore"]));
+            cmp(e_, format!("{label}.specialtyScore"), r.specialty_score.unwrap_or(f64::NAN), num(&e["specialtyScore"]));
+            let el = e["list"].as_array().unwrap();
+            same(e_, format!("{label}.list"), r.list.len() == el.len(), format!("件数 rust={} js={}", r.list.len(), el.len()));
+            for ((i, s), x) in r.list.iter().zip(el) {
+                same(e_, format!("{label}.list"), Some(*i) == opt_idx(&x[0]), format!("rust={i} js={}", x[0]));
+                cmp(e_, format!("{label}.list[{i}]"), *s, num(&x[1]));
+            }
+        }
+        same(e_, format!("{name}.pokemon.target"), pokemon.target_pokemon_list == strings(&page["pokemon"]["targetPokemonList"]), String::new());
+
+        let exp_rows = page["food"]["rows"].as_array().unwrap();
+        same(e_, format!("{name}.food"), food.rows.len() == exp_rows.len(), format!("件数 rust={} js={}", food.rows.len(), exp_rows.len()));
+        for (r, e) in food.rows.iter().zip(exp_rows) {
+            let label = format!("{name}.food.{}", m.foods[r.food].name);
+            let act = (m.foods[r.food].name.as_str(), r.lv as u64, r.checked, r.hit, r.note(), r.checked_pokemon_list.clone());
+            let exp = (
+                e["food"].as_str().unwrap(),
+                e["lv"].as_u64().unwrap(),
+                e["checked"].as_bool().unwrap(),
+                e["hit"].as_u64().unwrap() as usize,
+                e["note"].as_str().unwrap().to_string(),
+                strings(&e["checkedPokemonList"]),
+            );
+            same(e_, label.clone(), act == exp, format!("rust={act:?} js={exp:?}"));
+            for (k, a) in [("bestFoodScore", r.best_food_score), ("maxNum", r.max_num * 3.0), ("border", r.border), ("score", r.score), ("rate", r.rate)] {
+                cmp(e_, format!("{label}.{k}"), a, num(&e[k]));
+            }
+            let el = e["list"].as_array().unwrap();
+            same(e_, format!("{label}.list"), r.list.len() == el.len(), format!("件数 rust={} js={}", r.list.len(), el.len()));
+            for (x, y) in r.list.iter().zip(el) {
+                same(e_, format!("{label}.list"), Some(x.index) == opt_idx(&y[0]) && Some(x.lv as u64) == y[2].as_u64(), format!("rust={x:?} js={y}"));
+                cmp(e_, format!("{label}.list"), x.score, num(&y[1]));
+            }
+        }
+        same(e_, format!("{name}.food.target"), food.target_pokemon_list == strings(&page["food"]["targetPokemonList"]), String::new());
+
+        let exp_rows = page["skill"]["rows"].as_array().unwrap();
+        same(e_, format!("{name}.skill"), skill.rows.len() == exp_rows.len(), format!("件数 rust={} js={}", skill.rows.len(), exp_rows.len()));
+        for (r, e) in skill.rows.iter().zip(exp_rows) {
+            let label = format!("{name}.skill.{}", m.skills[r.skill].name);
+            let act = (m.skills[r.skill].name.as_str(), r.lv as u64, r.checked, r.hit, r.note(), r.checked_pokemon_list.clone());
+            let exp = (
+                e["skill"].as_str().unwrap(),
+                e["lv"].as_u64().unwrap(),
+                e["checked"].as_bool().unwrap(),
+                e["hit"].as_u64().unwrap() as usize,
+                e["note"].as_str().unwrap().to_string(),
+                strings(&e["checkedPokemonList"]),
+            );
+            same(e_, label.clone(), act == exp, format!("rust={act:?} js={exp:?}"));
+            for (k, a) in [("bestSkillScore", r.best_skill_score), ("border", r.border), ("score", r.score), ("rate", r.rate)] {
+                cmp(e_, format!("{label}.{k}"), a, num(&e[k]));
+            }
+            let el = e["list"].as_array().unwrap();
+            same(e_, format!("{label}.list"), r.list.len() == el.len(), format!("件数 rust={} js={}", r.list.len(), el.len()));
+            for (x, y) in r.list.iter().zip(el) {
+                same(e_, format!("{label}.list"), Some(x.index) == opt_idx(&y[0]) && Some(x.lv as u64) == y[2].as_u64(), format!("rust={x:?} js={y}"));
+                cmp(e_, format!("{label}.list"), x.score, num(&y[1]));
+            }
+        }
+        same(e_, format!("{name}.skill.target"), skill.target_pokemon_list == strings(&page["skill"]["targetPokemonList"]), String::new());
+
+        // 仮定計算
+        let fix_config = Config::from_value(&case["fixConfig"]).unwrap();
+        let mut sim = BoxSimulator::new(fix_config);
+        let result = sim.basic(&box_list, Some(&table)).unwrap();
+        let exp = case["fix"].as_array().unwrap();
+        same(e_, format!("{name}.fix"), result.len() == exp.len(), format!("件数 rust={} js={}", result.len(), exp.len()));
+        for (i, (r, e)) in result.iter().zip(exp).enumerate() {
+            let label = format!("{name}.fix[{i}]");
+            let hits: Vec<String> = r
+                .hit_check_list
+                .iter()
+                .map(|h| match h {
+                    CheckHit::Pokemon { pokemon, .. } => format!("pokemon:{pokemon}"),
+                    CheckHit::Food(f) => format!("food:{}", m.foods[*f].name),
+                    CheckHit::Skill(s) => format!("skill:{}", m.skills[*s].name),
+                })
+                .collect();
+            let act = (r.pokemon.base().name.as_str(), r.pokemon.box_index().unwrap() as u64, hits);
+            let exp_t = (e["name"].as_str().unwrap(), e["boxIndex"].as_u64().unwrap(), strings(&e["hit"]));
+            same(e_, label.clone(), act == exp_t, format!("rust={act:?} js={exp_t:?}"));
+            cmp(e_, format!("{label}.lv"), r.pokemon.lv, num(&e["lv"]));
+            cmp(e_, format!("{label}.energyPerDay"), r.pokemon.energy_per_day, num(&e["energyPerDay"]));
+        }
+    }
+    eprintln!("checked={checked}");
+    if !errors.is_empty() {
+        panic!("{} 件不一致\n{}", errors.len(), errors.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
+    }
+}

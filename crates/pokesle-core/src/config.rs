@@ -470,9 +470,173 @@ impl CandyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryConfig {
-    pub checklist: Value,
+    pub checklist: ChecklistConfig,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn de_truthy_map<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, bool>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Object(m) => m.iter().map(|(k, v)| (k.clone(), js_truthy(v))).collect(),
+        _ => BTreeMap::new(),
+    })
+}
+
+/// チェックリストの設定(`summary.checklist`)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChecklistConfig {
+    pub pokemon_condition: PokemonConditionConfig,
+    pub food: FoodChecklistConfig,
+    pub skill: SkillChecklistConfig,
+    pub field: FieldChecklistConfig,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PokemonConditionConfig {
+    #[serde(default)]
+    pub list: Vec<PokemonCondition>,
+    /// 基準レベル(数値 または "max")
+    #[serde(default)]
+    pub select_lv: Value,
+    #[serde(default, deserialize_with = "de_truthy_map")]
+    pub disable_pokemon_map: BTreeMap<String, bool>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl PokemonConditionConfig {
+    /// 基準レベル。数値でも "max" でもなければ None(本家では該当なしになる)
+    pub fn select_lv(&self) -> Option<crate::evaluate_table::EvalLv> {
+        use crate::evaluate_table::EvalLv;
+        let n = match &self.select_lv {
+            Value::String(s) if s == "max" => return Some(EvalLv::Max),
+            Value::String(s) => s.parse::<f64>().ok()?,
+            Value::Number(n) => n.as_f64()?,
+            _ => return None,
+        };
+        (n >= 0.0 && n.fract() == 0.0).then_some(EvalLv::Lv(n as u32))
+    }
+}
+
+/// ポケモン別の厳選条件1件
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PokemonCondition {
+    #[serde(default)]
+    pub target: Option<PokemonTarget>,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub aaa: bool,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub aab: bool,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub aac: bool,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub aba: bool,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub abb: bool,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub abc: bool,
+    /// 総合厳選度(%)
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub energy_border: Option<f64>,
+    /// とくい厳選度(%)
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub specialty_border: Option<f64>,
+    /// 食材/スキル基準を満たしたら厳選済みとする
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub also_food_and_skill: bool,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl PokemonCondition {
+    /// 食材構成の名前と有効フラグ(AAA～ABC の順)
+    pub fn food_flags(&self) -> [(&'static str, bool); 6] {
+        [("AAA", self.aaa), ("AAB", self.aab), ("AAC", self.aac), ("ABA", self.aba), ("ABB", self.abb), ("ABC", self.abc)]
+    }
+
+    pub fn food_flags_mut(&mut self) -> [(&'static str, &mut bool); 6] {
+        [
+            ("AAA", &mut self.aaa),
+            ("AAB", &mut self.aab),
+            ("AAC", &mut self.aac),
+            ("ABA", &mut self.aba),
+            ("ABB", &mut self.abb),
+            ("ABC", &mut self.abc),
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoodChecklistConfig {
+    #[serde(default, deserialize_with = "de_truthy_map")]
+    pub enable_map: BTreeMap<String, bool>,
+    /// 0: ポケモンの能力に対しての割合、1: 必要最大数に対しての割合
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub border_type: f64,
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub border_lv: Option<f64>,
+    /// 厳選度(%)。null は理論値(100)
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub border_rate: Option<f64>,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub border_value: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub target_value: f64,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillChecklistConfig {
+    #[serde(default, deserialize_with = "de_truthy_map")]
+    pub enable_map: BTreeMap<String, bool>,
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub border_lv: Option<f64>,
+    #[serde(default, deserialize_with = "de_opt_num")]
+    pub border_rate: Option<f64>,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub border_value: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub target_value: f64,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub skill_specialty_only: bool,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldChecklistConfig {
+    /// フィールド別画面に進化後を表示
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub shinkago: bool,
+    /// バケッチャ・パンプジンをまとめて表示
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub bakeccha_matome: bool,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl ChecklistConfig {
+    /// 本家 check-list.vue 冒頭の基準レベル補正(未設定・無効なら Lv60 以上の最小、なければ最大)
+    pub fn normalize_border_lv(&mut self, lv_list: &[u32]) -> bool {
+        let pick = lv_list.iter().copied().find(|&x| x >= 60).or(lv_list.last().copied()).map(|x| x as f64);
+        let mut changed = false;
+        for border_lv in [&mut self.food.border_lv, &mut self.skill.border_lv] {
+            if !border_lv.is_some_and(|x| lv_list.iter().any(|&l| l as f64 == x)) {
+                changed |= *border_lv != pick;
+                *border_lv = pick;
+            }
+        }
+        changed
+    }
 }
 
 impl Config {

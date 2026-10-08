@@ -386,4 +386,97 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   }
   writeFileSync(path.join(outDir, 'box-fix.json'), JSON.stringify({ box: fixBox, table, cases: fixCases }));
   console.log(`box-fix: ${fixCases.map((c) => c.result.length).join(',')}`);
+
+  // ---- チェックリスト(check-list.vue の一覧 + 仮定計算の該当判定) ----
+  const { CheckList } = await up('models/check-list.ts');
+  const target = (v) => ({ type: 'condition', all: false, specialties: { きのみ: false, 食材: false, スキル: false, オール: false }, skillNameList: [], friendPoint: null, pokemonNameList: [], ...v });
+  const cond = (t, v) => ({ target: t, aaa: true, aab: true, aac: true, aba: true, abb: true, abc: true, energyBorder: null, specialtyBorder: null, alsoFoodAndSkill: false, ...v });
+  // とくい「オール」のポケモンはチェックリストの対象外のため除外する
+  const lastAfter = afterNames.filter((n) => Pokemon.map[n].isLast && Pokemon.map[n].fieldList.length && Pokemon.map[n].specialty != 'オール');
+  const checklistConfigs = {
+    cl_a: variant((c) => {
+      const cl = c.summary.checklist;
+      cl.pokemonCondition.list = [
+        cond(target({ specialties: { きのみ: true, 食材: false, スキル: false, オール: false } }), { energyBorder: 20 }),
+        cond(target({ specialties: { きのみ: false, 食材: true, スキル: false, オール: false } }), { aac: false, aba: false, abb: false, abc: false, specialtyBorder: 30, alsoFoodAndSkill: true }),
+        cond(target({ specialties: { きのみ: false, 食材: false, スキル: true, オール: false } }), { energyBorder: 10, specialtyBorder: 50, alsoFoodAndSkill: true }),
+        cond(target({ type: 'pokemon', pokemonNameList: lastAfter.slice(0, 3) }), { energyBorder: 0 }),
+      ];
+      cl.pokemonCondition.selectLv = 'max';
+      cl.pokemonCondition.disablePokemonMap[lastAfter[3]] = true;
+      Object.assign(cl.food, { borderType: 0, borderLv: 60, borderRate: 95, borderValue: 50, targetValue: 60 });
+      Object.assign(cl.skill, { borderLv: 60, borderRate: 95, borderValue: 40, targetValue: 70, skillSpecialtyOnly: false });
+    }),
+    cl_b: variant((c) => {
+      const cl = c.summary.checklist;
+      c.simulation.selectType = 1;
+      cl.pokemonCondition.list = [
+        cond(target({ specialties: { きのみ: true, 食材: true, スキル: true, オール: false } }), { energyBorder: 90, specialtyBorder: 95, alsoFoodAndSkill: true }),
+      ];
+      cl.pokemonCondition.selectLv = 50;
+      Object.assign(cl.food, { borderType: 1, borderLv: 60, borderRate: null, borderValue: 30, targetValue: 50 });
+      Object.assign(cl.skill, { borderLv: 70, borderRate: null, borderValue: 60, targetValue: 80, skillSpecialtyOnly: true });
+      cl.food.enableMap[Food.list[0].name] = false;
+    }),
+  };
+  const hitName = (h) => (h.type == 'pokemon' ? `pokemon:${h.pokemon.name}` : h.type == 'food' ? `food:${h.food.name}` : `skill:${h.skill.name}`);
+  const checklistCases = [];
+  for (const [name, config] of Object.entries(checklistConfigs)) {
+    // 一覧(仮定計算なし・いつ育なし)
+    const pageConfig = { ...config, simulation: { ...config.simulation, bagOverOperation: false, fix: false } };
+    await boxWorker({ type: 'config', config: clone(pageConfig) });
+    const basic = await boxWorker({ type: 'basic', pokemonList: clone(fixBox), evaluateTable: table });
+    const all = await boxWorker({ type: 'assist', pokemonList: basic, basedPokemonList: basic });
+    for (const p of all) {
+      p.foodCombination = p.box.foodList.map((x) => String.fromCharCode(p.base.foodList.findIndex((f) => f.name == x) + 65)).join('');
+    }
+    const list = all;
+    const checkList = new CheckList(config, table);
+    const food = checkList.foodCheckList(config, list);
+    const skill = checkList.skillCheckList(config, list);
+    const pokemon = checkList.pokemonCheckList(config, list, null, food, skill);
+    const idx = (p) => (p ? list.indexOf(p) : null);
+    const page = {
+      boxIndexList: list.map((p) => p.box.index),
+      pokemon: {
+        rows: pokemon.dataList.map((r) => ({
+          name: r.name, subName: r.subName, checked: !!r.checked, hit: idx(r.pokemon), target: r.target,
+          energyScore: num(r.energyScore), specialtyScore: num(r.specialtyScore),
+          list: r.table.dataList.map((x) => [idx(x.pokemon), num(x.score)]),
+        })),
+        targetPokemonList: pokemon.targetPokemonList,
+      },
+      food: {
+        rows: food.dataList.map((r) => ({
+          food: r.food.name, bestFoodScore: num(r.bestFoodScore), maxNum: num(r.maxNum), border: num(r.border), score: num(r.score), lv: r.lv,
+          checked: !!r.checked, checkedPokemonList: r.checkedPokemonList, hit: idx(r.pokemon), rate: num(r.rate), note: r.note,
+          list: r.table.dataList.map((x) => [idx(x.pokemon), num(x.score), x.lv]),
+        })),
+        targetPokemonList: food.targetPokemonList,
+      },
+      skill: {
+        rows: skill.dataList.map((r) => ({
+          skill: r.skill.name, bestSkillScore: num(r.bestSkillScore), border: num(r.border), score: num(r.score), lv: r.lv,
+          checked: !!r.checked, checkedPokemonList: r.checkedPokemonList, hit: idx(r.pokemon), rate: num(r.rate), note: r.note,
+          list: r.table.dataList.map((x) => [idx(x.pokemon), num(x.score), x.lv]),
+        })),
+        targetPokemonList: skill.targetPokemonList,
+      },
+    };
+
+    // 仮定計算(チェックリスト該当で進化)
+    const fixConfig = clone(config);
+    Object.assign(fixConfig.simulation, { fix: true, fixCheckList: true, fixBorder: null, fixBorderSpecialty: null, fixEvolve: true });
+    await boxWorker({ type: 'config', config: clone(fixConfig) });
+    const fixResult = await boxWorker({ type: 'basic', pokemonList: clone(fixBox), evaluateTable: table });
+    checklistCases.push({
+      name,
+      config,
+      fixConfig,
+      page,
+      fix: fixResult.map((p) => ({ name: p.base.name, boxIndex: p.box.index, lv: p.lv, energyPerDay: num(p.energyPerDay), hit: (p.hitCheckList ?? []).map(hitName) })),
+    });
+  }
+  writeFileSync(path.join(outDir, 'check-list.json'), JSON.stringify({ box: fixBox, table, cases: checklistCases }));
+  console.log(`check-list: ${checklistCases.map((c) => `${c.page.pokemon.rows.length}/${c.page.food.rows.length}/${c.page.skill.rows.length}`).join(',')}`);
 }

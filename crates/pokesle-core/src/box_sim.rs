@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use crate::check_list::{CheckHit, CheckList, CheckTarget};
 use crate::config::Config;
 use crate::data::{master, Specialty, SubSkillKind};
 use crate::evaluate_table::{EvalInfo, EvalLv, EvaluateResult, EvaluateTable};
@@ -18,7 +19,7 @@ pub struct BoxResult {
     /// 進化前の名前
     pub before_name: String,
     /// ヒットしたチェックリスト
-    pub hit_check_list: Vec<String>,
+    pub hit_check_list: Vec<CheckHit>,
 }
 
 pub struct BoxSimulator {
@@ -60,6 +61,7 @@ impl BoxSimulator {
         let m = master();
         let config = self.config.clone();
         let lv_list = config.select_evaluate.enabled_levels();
+        let check_list = (config.simulation.fix || config.cleaning).then(|| CheckList::new(&config, evaluate_table));
 
         let fixable_set: Option<HashSet<usize>> = if config.simulation.fix {
             Some(filter_pokemon(pokemon_list, &config.simulation.fix_filter).pokemon_list.iter().map(|x| x.index).collect())
@@ -77,7 +79,7 @@ impl BoxSimulator {
             let mut add_pokemon_list: Vec<String> = Vec::new();
             let mut evaluate_result: Option<EvaluateResult> = None;
             let mut fix = false;
-            let check_list_hit: Vec<String> = Vec::new();
+            let mut check_list_hit: Vec<CheckHit> = Vec::new();
 
             let mut after_list = original_base.after_list.clone();
             if bx.name == "エレズン" {
@@ -209,8 +211,19 @@ impl BoxSimulator {
                             }
                         }
 
-                        // チェックリスト(未移植のため常にヒットなし)
-                        let this_check_hit = 0usize;
+                        // チェックリスト(本家は同じ項目でも別オブジェクトのため重複して積まれる)
+                        let this_check_hit = match &check_list {
+                            Some(cl) => {
+                                let food_combination: String =
+                                    food_index_list.iter().map(|&x| char::from_u32((65 + x) as u32).unwrap_or('?')).collect();
+                                let only = er.only(after, &lv_list);
+                                let hit = cl.get_checked(&CheckTarget { base_name: after, food_combination: &food_combination, evaluate_result: &only });
+                                let n = hit.len();
+                                check_list_hit.extend(hit);
+                                n
+                            }
+                            None => 0,
+                        };
                         let this_fix = config.simulation.fix
                             && fixable_set.as_ref().is_some_and(|s| s.contains(&bx.index))
                             && ((config.simulation.fix_check_list && this_check_hit > 0)
