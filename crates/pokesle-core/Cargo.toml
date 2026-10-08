@@ -1,0 +1,11 @@
+[package]
+name = "pokesle-core"
+description = "ポケスリシミュレーターの計算コア(reimer0204/pokesle-simulator の Rust 移植)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true

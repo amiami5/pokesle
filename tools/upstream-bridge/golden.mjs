@@ -1,0 +1,389 @@
+// 本家の Worker をそのまま Node で実行し、Rust 側の突き合わせ用データを書き出す。
+// 使い方: node --experimental-transform-types tools/upstream-bridge/run.mjs golden.mjs
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from 'node:path';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '../..');
+const outDir = path.join(root, 'crates/pokesle-core/tests/golden');
+mkdirSync(outDir, { recursive: true });
+const up = (p) => import(pathToFileURL(path.join(root, 'upstream/src', p)).href);
+
+// ---- Worker 実行環境のスタブ ----
+globalThis.self = globalThis;
+let captured = null;
+let posted = [];
+globalThis.addEventListener = (type, fn) => {
+  if (type === 'message') captured = fn;
+};
+globalThis.postMessage = (msg) => posted.push(msg);
+
+async function loadWorker(p) {
+  captured = null;
+  await up(p);
+  if (!captured) throw new Error(`worker listener not found: ${p}`);
+  const fn = captured;
+  return async (data) => {
+    posted = [];
+    await fn({ data });
+    const last = posted.filter((x) => x.status !== 'progress').at(-1);
+    if (last?.status === 'error') throw new Error(last.body);
+    return last?.body;
+  };
+}
+
+const boxWorker = await loadWorker('models/pokemon-box/pokemon-box-worker.ts');
+const evaluateWorker = await loadWorker('models/simulation/evaluate-simulator.ts');
+const subSkillCombinationWorker = await loadWorker('models/sub-skill-combination-worker.ts');
+
+const { default: Pokemon } = await up('data/pokemon.ts');
+const { default: SubSkill } = await up('data/sub-skill.ts');
+const { default: Nature } = await up('data/nature.ts');
+const { Food } = await up('data/food_and_cooking.ts');
+const { default: defaultConfig } = await up('data/default-config.ts');
+
+// ---- 乱数(シード固定) ----
+let seed = 20261008;
+const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+const pick = (list) => list[Math.floor(rand() * list.length)];
+
+function makeBox(num) {
+  const list = [];
+  for (let i = 0; i < num; i++) {
+    const p = pick(Pokemon.list);
+    const abc = pick(['AAA', 'AAB', 'AAC', 'ABA', 'ABB', 'ABC']);
+    const foodList = abc
+      .split('')
+      .map((c) => p.foodList[Math.min(c.charCodeAt(0) - 65, p.foodList.length - 1)].name);
+    const subs = [...SubSkill.list]
+      .map((x) => [rand(), x])
+      .sort((a, b) => a[0] - b[0])
+      .slice(0, 5)
+      .map(([, x]) => x.name);
+    list.push({
+      name: p.name,
+      lv: 1 + Math.floor(rand() * 65),
+      skillLv: rand() < 0.3 ? 1 + Math.floor(rand() * p.skill.effect.length) : null,
+      foodList,
+      subSkillList: subs,
+      nature: pick(Nature.list).name,
+      shiny: false,
+      fix: null,
+      sleepTime: pick([null, 100, 600, 1200, 2500]),
+      nextExp: null,
+      memo: null,
+      favorite: false,
+      index: i,
+    });
+  }
+  return list;
+}
+
+const clone = (x) => JSON.parse(JSON.stringify(x));
+function variant(fn) {
+  const c = clone(defaultConfig);
+  fn(c);
+  return c;
+}
+const eventBonus = (types, specialties, v) => ({
+  target: { types, specialties },
+  berry: 0,
+  food: 0,
+  skillRate: 1,
+  skillLv: 0,
+  bag: 0,
+  bagRate: 1,
+  ...v,
+});
+
+const configs = {
+  default: variant(() => {}),
+  cyan_camp_border: variant((c) => {
+    c.simulation.field = 'シアンの砂浜';
+    c.simulation.campTicket = true;
+    c.simulation.expectType.food = 1;
+    c.simulation.expectType['食材ゲットS'] = 1;
+    c.simulation.expectType['エナジーチャージS'] = 1;
+    c.simulation.cookingType = 'デザート';
+  }),
+  ex_food_event: variant((c) => {
+    c.simulation.field = 'ワカクサ本島EX';
+    c.simulation.fieldEx = 2;
+    c.simulation.berryList = ['キー', 'ヒメリ', 'オレン'];
+    c.simulation.eventBonusList = [
+      eventBonus({ ノーマル: true }, { スキル: true }, { berry: 1, food: 1, skillRate: 1.5, skillLv: 1, bag: 5, bagRate: 1.1 }),
+    ];
+    c.simulation.eventBonus.skill.foodGet = 1.5;
+    c.simulation.eventBonus.skill.berryBurst = 2;
+  }),
+  genkifull_day: variant((c) => {
+    c.simulation.genkiFull = true;
+    c.simulation.cookingType = 'サラダ';
+    c.teamSimulation.day = 3;
+    c.teamSimulation.initialCookingChange = 0.2;
+  }),
+  cyan_ex_skill: variant((c) => {
+    c.simulation.field = 'シアンの砂浜EX';
+    c.simulation.fieldEx = 3;
+    c.simulation.berryList = ['オレン', 'ドリ', 'ウブ'];
+    c.sleepTime = 7;
+    c.checkFreq = 6;
+    c.simulation.bagOverOperation = false;
+  }),
+};
+
+const NUM_FIELDS = [
+  'lv', 'berryEnergy', 'berryNum', 'bEpH', 'foodRate', 'foodNum', 'fEpH', 'pickupEnergyPerHelp', 'bag',
+  'bagFullHelpNum', 'fixedSkillLv', 'skillRate', 'ceilSkillRate', 'speed', 'speedBonus', 'baseDayHelpNum',
+  'morningHealGenki', 'selfHeal', 'otherHeal', 'dayHelpRate', 'nightHelpRate', 'normalHelpNum', 'berryHelpNum',
+  'bEpD', 'fEpD', 'foodNumPerDay', 'skillPerDay', 'skillEnergy', 'skillEnergyPerDay', 'energyPerDay', 'shard',
+  'burstBonus', 'cookingChanceEffect', 'tmpScore', 'score', 'supportEnergyPerDay', 'supportShardPerDay',
+];
+const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : x == null ? null : String(x));
+const summarize = (p) => ({
+  name: p.base.name,
+  boxIndex: p.box?.index ?? null,
+  bagOverOperation: !!p.bagOverOperation,
+  ...Object.fromEntries(NUM_FIELDS.map((k) => [k, num(p[k])])),
+  foods: Object.fromEntries(Food.list.map((f) => [f.name, num(p[f.name] ?? 0)])),
+});
+
+// ---- ボックス概算(pokemon-box-worker の basic → assist) ----
+const box = makeBox(150);
+const boxCases = [];
+for (const [name, config] of Object.entries(configs)) {
+  await boxWorker({ type: 'config', config: clone(config) });
+  const basic = await boxWorker({ type: 'basic', pokemonList: clone(box), evaluateTable: null });
+  const assist = await boxWorker({ type: 'assist', pokemonList: basic, basedPokemonList: basic });
+  boxCases.push({ name, config, result: assist.map(summarize) });
+}
+writeFileSync(path.join(outDir, 'box.json'), JSON.stringify({ box, cases: boxCases }));
+console.log(`box: ${boxCases.length} configs x ${boxCases[0].result.length} pokemon`);
+
+// ---- 厳選評価(evaluate-simulator) ----
+const evalConfig = clone(defaultConfig);
+const subSkillCombinationList = await subSkillCombinationWorker({ config: evalConfig });
+const evalTargets = [
+  'ピカチュウ', 'カメックス', 'フシギバナ', 'ゲンガー', 'ハピナス', 'カビゴン', 'ラティオス', 'トゲデマル',
+  'メタモン', 'エーフィ', 'キュワワー', 'ニンフィア', 'ダークライ', 'ミミッキュ', 'プクリン',
+]
+  .filter((n) => Pokemon.map[n])
+  .map((n) => Pokemon.map[n]);
+const evaluateCases = [];
+for (const lv of [30, 60]) {
+  const foodCombinationList = lv < 60 ? ['00', '01'] : ['000', '012'];
+  const subSkillNum = lv < 50 ? 2 : lv < 70 ? 3 : lv < 80 ? 4 : 5;
+  const result = await evaluateWorker({
+    lv,
+    config: evalConfig,
+    pokemonList: evalTargets,
+    foodCombinationList,
+    subSkillCombinationList: subSkillCombinationList[subSkillNum],
+    scoreForHealerEvaluate: 10000,
+    scoreForSupportEvaluate: 150,
+  });
+  const table = {};
+  for (const [name, byFood] of Object.entries(result.result)) {
+    table[name] = {};
+    for (const [food, perc] of Object.entries(byFood)) {
+      table[name][food] = Object.fromEntries(
+        ['energy', 'berry', 'food', 'skill', 'food1', 'food2', 'food3'].map((k) => [k, perc[k].map((x) => num(x.score))]),
+      );
+    }
+  }
+  evaluateCases.push({
+    lv,
+    foodCombinationList,
+    pokemon: evalTargets.map((p) => p.name),
+    healer: result.scoreForHealerEvaluateList,
+    support: result.scoreForSupportEvaluateList,
+    table,
+  });
+}
+writeFileSync(
+  path.join(outDir, 'evaluate.json'),
+  JSON.stringify({ config: evalConfig, subSkillCombinationList, cases: evaluateCases }),
+);
+console.log(`evaluate: ${evaluateCases.length} levels, ${evalTargets.length} pokemon`);
+
+// ---- チームシミュレーション(simulation.vue の simulation() 相当 + team-simulator) ----
+const teamWorker = await loadWorker('models/simulation/team-simulator.ts');
+const { default: PokemonFilter } = await up('models/pokemon-filter.js');
+const { default: Berry } = await up('data/berry.ts');
+
+function teamBox() {
+  const list = makeBox(36);
+  const special = [
+    ['トゲデマル', 'げんきエールS'], ['プラスル'], ['マイナン'], ['メタモン'], ['ハピナス'], ['ラティアス'], ['ラティオス'],
+    ['カビゴン'], ['ニンフィア'], ['ダークライ'],
+  ];
+  for (const [name] of special) {
+    const p = Pokemon.map[name];
+    if (!p) continue;
+    list.push({
+      name, lv: 60, skillLv: null,
+      foodList: [p.foodList[0].name, p.foodList[Math.min(1, p.foodList.length - 1)].name, p.foodList[Math.min(2, p.foodList.length - 1)].name],
+      subSkillList: ['おてつだいボーナス', 'スキル確率アップM', 'げんき回復ボーナス', 'ゆめのかけらボーナス', 'おてつだいスピードM'],
+      nature: pick(Nature.list).name, shiny: false, fix: null, sleepTime: 600, nextExp: null, memo: null, favorite: false,
+      index: list.length,
+    });
+  }
+  return list;
+}
+
+async function teamSimulation(baseConfig, boxList, { targetDay, targetHour, initialCookingChange, initialCookingPowerUp, beforeEnergy }) {
+  const customConfig = clone({ ...baseConfig, teamSimulation: { ...baseConfig.teamSimulation, beforeEnergy } });
+  if (baseConfig.foodUnlimited) customConfig.foodDefaultNum = Object.fromEntries(Food.list.map((f) => [f.name, 9999]));
+  if (baseConfig.simulation.mode == 2) {
+    customConfig.simulation.berryEnergyWeight = 0;
+    customConfig.simulation.skillEnergyIgnore = 0;
+    customConfig.simulation.shardWeight = 0;
+  }
+  if (targetDay != -1) {
+    customConfig.simulation.shardToEnergy = customConfig.selectEvaluate.shardEnergyRate / (7 - targetDay);
+    customConfig.teamSimulation.day = targetDay;
+    customConfig.teamSimulation.timeLength = targetHour != 24 ? targetHour / 24 : null;
+  }
+  customConfig.teamSimulation.initialCookingChange = initialCookingChange / 100;
+  customConfig.teamSimulation.initialCookingPowerUp = initialCookingPowerUp;
+
+  const filtered = PokemonFilter.filter(boxList, customConfig.simulation.filter).pokemonList;
+  await boxWorker({ type: 'config', config: clone(customConfig) });
+  const basic = await boxWorker({ type: 'basic', pokemonList: clone(filtered), evaluateTable: null });
+  const pokemonList = await boxWorker({ type: 'assist', pokemonList: basic, basedPokemonList: basic });
+
+  const fixedPokemonList = clone(pokemonList.filter((x) => x.box?.fix == 1));
+  let rest = pokemonList.filter((x) => x.box?.fix == null);
+  const pickup = 5 - new Set(fixedPokemonList.map((x) => x.box.index)).size;
+  const ts = customConfig.teamSimulation;
+  let targets = [];
+  let sorted;
+  if (baseConfig.simulation.mode != 2) {
+    sorted = rest.toSorted((a, b) => b.bEpD - a.bEpD); targets.push(...sorted.slice(0, ts.maxRankBerry)); rest = sorted.slice(ts.maxRankBerry);
+    sorted = rest.toSorted((a, b) => b.fEpD - a.fEpD); targets.push(...sorted.slice(0, ts.maxRankFood)); rest = sorted.slice(ts.maxRankFood);
+  } else {
+    sorted = rest.toSorted((a, b) => b.fEpD - a.fEpD); targets.push(...sorted.slice(0, ts.maxRankFood + ts.maxRankBerry)); rest = sorted.slice(ts.maxRankFood + ts.maxRankBerry);
+  }
+  sorted = rest.toSorted((a, b) => b.score - a.score); targets.push(...sorted.slice(0, ts.maxRankAll)); rest = sorted.slice(ts.maxRankAll);
+  sorted = rest.toSorted((a, b) => b.energyPerDay - a.energyPerDay); targets.push(...sorted.slice(0, ts.maxRankNotSupport)); rest = sorted.slice(ts.maxRankNotSupport);
+  const targetNum = targets.length;
+  targets = [...targets.filter((p) => p.otherHeal), ...targets.filter((p) => !p.otherHeal && p.selfHeal), ...targets.filter((p) => !p.otherHeal && !p.selfHeal)];
+  for (const berry of Berry.list) {
+    if (ts.require.typeNum[berry.type] && !targets.some((x) => x.base.type == berry.type)) {
+      const top = rest.find((x) => x.base.type == berry.type);
+      if (!top) return [];
+      targets.push(top);
+    }
+  }
+  targets = clone(targets);
+  const topList = [];
+  for (let i = 0; i <= targetNum - pickup; i++) topList.push(i);
+  targets.sort((a, b) => b.score - a.score);
+  return await teamWorker({
+    type: 'simulate', targetNum, pickup, pattern: 1, topList,
+    fixedPokemonList, targetPokemonList: targets, boxPokemonList: clone(boxList), config: customConfig,
+  });
+}
+
+const tBox = teamBox();
+const smallRank = (c) => {
+  c.workerNum = 1;
+  c.teamSimulation.maxRankBerry = 3;
+  c.teamSimulation.maxRankFood = 4;
+  c.teamSimulation.maxRankAll = 5;
+  c.teamSimulation.maxRankNotSupport = 5;
+};
+const teamCases = [
+  { name: 'week', config: variant(smallRank), req: { targetDay: -1, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 } },
+  { name: 'sunday_half', config: variant((c) => { smallRank(c); c.simulation.cookingType = 'サラダ'; }), req: { targetDay: 6, targetHour: 12, initialCookingChange: 20, initialCookingPowerUp: 10, beforeEnergy: 50000 } },
+  { name: 'wed_nightcap_req', config: variant((c) => { smallRank(c); c.teamSimulation.nightCapPikachu = 12; c.teamSimulation.require.typeNum['フェアリー'] = 1; c.simulation.remainFoodMode = 1; c.simulation.remainFoodRate = 0.5; }), req: { targetDay: 2, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 } },
+  { name: 'fixed_genkifull', config: variant((c) => { smallRank(c); c.simulation.genkiFull = true; c.foodUnlimited = true; c.simulation.cookingType = 'デザート'; }), req: { targetDay: -1, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 }, fix: [36, 37] },
+];
+const teamOut = [];
+for (const tc of teamCases) {
+  const boxList = clone(tBox);
+  for (const i of tc.fix ?? []) boxList[i].fix = 1;
+  const result = await teamSimulation(tc.config, boxList, tc.req);
+  teamOut.push({
+    name: tc.name,
+    config: tc.config,
+    req: tc.req,
+    box: boxList,
+    result: result.map((r) => ({
+      score: r.score,
+      energy: r.energy,
+      rawEnergy: r.rawEnergy,
+      skillShard: r.skillShard,
+      bonusShard: r.bonusShard,
+      remainFoodEnergy: r.remainFoodEnergy,
+      members: r.pokemonList.map((p) => ({ name: p.base.name, boxIndex: p.box?.index ?? null, bagOverOperation: !!p.bagOverOperation, skillPerDay: p.skillPerDay ?? null, energyPerDay: p.energyPerDay ?? null })),
+      cookingList: r.cookingList.map((c) => ({ name: c.cooking.name, energy: c.energy, potSize: c.potSize })),
+      foodNum: r.foodNum,
+      cookingPowerUpEffectList: r.cookingPowerUpEffectList,
+    })),
+  });
+  console.log(`team ${tc.name}: ${result.length} results`);
+}
+writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
+
+// ---- 厳選テーブルありのボックス概算(仮定計算・進化・純粋ミント) ----
+{
+  const fixBox = makeBox(30).map((p) => ({ ...p, lv: 10 + (p.lv % 40), nextExp: p.index % 3 == 0 ? 50 : null }));
+  const lvList = [30, 50, 60, 70];
+  const afterNames = [...new Set(fixBox.flatMap((p) => Pokemon.map[p.name].afterList))].filter((n) => !Pokemon.map[n].kaihou);
+  const table = { scoreForHealerEvaluate: {}, scoreForSupportEvaluate: {} };
+  const cfg = clone(defaultConfig);
+  const combos = await subSkillCombinationWorker({ config: cfg });
+  for (const lv of lvList) {
+    const foodCombinationList = lv < 60 ? ['00', '01'] : ['000', '001', '002', '010', '011', '012'];
+    const subSkillNum = lv < 50 ? 2 : lv < 70 ? 3 : lv < 80 ? 4 : 5;
+    const healer = 10000 * (1.025 ** (lv - 1));
+    const support = 150 * (1.025 ** (lv - 1));
+    const r = await evaluateWorker({
+      lv, config: cfg, pokemonList: afterNames.map((n) => Pokemon.map[n]), foodCombinationList,
+      subSkillCombinationList: combos[subSkillNum], scoreForHealerEvaluate: healer, scoreForSupportEvaluate: support,
+    });
+    table.scoreForHealerEvaluate[lv] = { '': { energy: healer } };
+    table.scoreForSupportEvaluate[lv] = { '': { energy: support } };
+    for (const [name, byFood] of Object.entries(r.result)) {
+      table[name] ??= {};
+      table[name][lv] = {};
+      for (const [food, perc] of Object.entries(byFood)) {
+        table[name][lv][food] = Object.fromEntries(['energy', 'berry', 'food', 'skill', 'food1', 'food2', 'food3'].map((k) => [k, perc[k].map((x) => x.score)]));
+      }
+    }
+  }
+  const fixConfigs = {
+    fix_lv_evolve: variant((c) => {
+      c.simulation.fix = true; c.simulation.fixLv = 50; c.simulation.fixEvolve = true; c.simulation.fixBorder = 30;
+      c.simulation.fixCheckList = false; c.simulation.fixSubSkillSeed = true; c.simulation.fixSkillSeed = 1; c.pureMint = true;
+    }),
+    fix_candy: variant((c) => {
+      c.simulation.fix = true; c.simulation.fixResourceMode = 1; c.simulation.fixBorderSpecialty = 40; c.simulation.fixCheckList = false;
+      c.candy.bag.s = 30; c.candy.bag.m = 10; c.candy.shard = 300000; c.simulation.selectType = 1;
+      for (const k of Object.keys(c.candy.bag)) if (!['s', 'm', 'l'].includes(k)) c.candy.bag[k] = 200;
+    }),
+  };
+  const fixCases = [];
+  for (const [name, config] of Object.entries(fixConfigs)) {
+    await boxWorker({ type: 'config', config: clone(config) });
+    const basic = await boxWorker({ type: 'basic', pokemonList: clone(fixBox), evaluateTable: table });
+    fixCases.push({
+      name,
+      config,
+      result: basic.map((p) => ({
+        ...summarize(p),
+        useCandy: p.useCandy ?? null,
+        useShard: p.useShard ?? null,
+        best: Object.fromEntries(
+          Object.entries(p.evaluateResult ?? {}).filter(([, v]) => v.best).map(([lv, v]) => [lv, Object.fromEntries(
+            ['energy', 'berry', 'food', 'skill', 'specialty'].map((k) => [k, v.best[k] ? { name: v.best[k].name, score: num(v.best[k].score), value: num(v.best[k].value) } : null]),
+          )]),
+        ),
+      })),
+    });
+  }
+  writeFileSync(path.join(outDir, 'box-fix.json'), JSON.stringify({ box: fixBox, table, cases: fixCases }));
+  console.log(`box-fix: ${fixCases.map((c) => c.result.length).join(',')}`);
+}

@@ -1,0 +1,23 @@
+# Third-party licenses
+
+このファイルは `cargo about generate about.hbs > THIRD_PARTY_LICENSES.md` で生成しています。
+
+{{#each overview}}
+- {{name}} ({{count}})
+{{/each}}
+
+{{#each licenses}}
+---
+
+## {{name}}
+
+使用しているクレート:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+```
+{{{text}}}
+```
+
+{{/each}}
