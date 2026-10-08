@@ -19,6 +19,8 @@ pub fn install(ctx: &egui::Context) {
         if let Ok(bytes) = std::fs::read(format!("{dir}\\{file}")) {
             let mut data = FontData::from_owned(bytes);
             data.index = index;
+            // 游ゴシック等は行の高さに対して字面が上寄りに描かれるので、下げて枠の上下中央に合わせる(実測で 0.2)
+            data.tweak.y_offset_factor = 0.2;
             fonts.font_data.insert("jp".into(), Arc::new(data));
             for family in [FontFamily::Proportional, FontFamily::Monospace] {
                 fonts.families.entry(family).or_default().insert(0, "jp".into());
