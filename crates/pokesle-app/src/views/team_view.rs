@@ -2,11 +2,12 @@
 
 use eframe::egui;
 use pokesle_core::data::master;
-use pokesle_core::team_sim::{run_team_simulation, TeamMember, TeamSimulationRequest, TeamSimulationResult};
+use pokesle_core::team_sim::{run_team_simulation, TeamSimulationRequest, TeamSimulationResult};
 
 use pokesle_core::config::Config;
 
-use super::{common_setting, fmt_num, food_icon, pokemon_filter, style};
+use super::team_result::{self, ResultSetting};
+use super::{common_setting, fmt_num, pokemon_filter, style};
 use crate::app::Shared;
 use crate::job::Job;
 
@@ -20,7 +21,10 @@ pub struct TeamView {
     initial_cooking_power_up: f64,
     before_energy: f64,
     job: Option<Job<TeamSimulationResult>>,
-    result: Option<TeamSimulationResult>,
+    /// 結果と、計算に使った設定
+    result: Option<(TeamSimulationResult, Config)>,
+    /// 実行中の計算に使っている設定
+    job_config: Option<Config>,
     error: String,
 }
 
@@ -34,6 +38,7 @@ impl Default for TeamView {
             before_energy: 0.0,
             job: None,
             result: None,
+            job_config: None,
             error: String::new(),
         }
     }
@@ -47,7 +52,7 @@ impl TeamView {
             self.job = None;
             match r {
                 Ok(r) => {
-                    self.result = Some(r);
+                    self.result = Some((r, self.job_config.take().unwrap_or_else(|| shared.config.clone())));
                     self.error.clear();
                 }
                 Err(e) => self.error = e,
@@ -71,6 +76,7 @@ impl TeamView {
                 changed |= pokemon_filter::editor(ui, "team_filter", &mut shared.config.simulation.filter, &shared.box_file.list);
             });
             changed |= require_setting(ui, &mut shared.config);
+            changed |= display_setting(ui, &mut shared.config);
         });
         ui.add_space(5.0);
 
@@ -184,6 +190,7 @@ impl TeamView {
         ui.add_enabled_ui(can_run, |ui| {
             if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
                 let config = shared.config.clone();
+                self.job_config = Some(config.clone());
                 let list = shared.box_file.list.clone();
                 let table = shared.usable_evaluate_table().cloned();
                 let request = TeamSimulationRequest {
@@ -210,61 +217,50 @@ impl TeamView {
         }
         ui.add_space(5.0);
 
-        let Some(result) = &self.result else { return };
+        let Some((result, result_config)) = &self.result else {
+            ui.label("シミュレーション実行ボタンを押してください");
+            return;
+        };
         if result.team_list.is_empty() {
             ui.label("条件を満たすチームが見つかりませんでした");
             return;
         }
-        let m = master();
+        let setting = ResultSetting::load(&shared.config);
+        let short = shared.config.extra.get("pokemonList").and_then(|v| v.get("subSkillShort")).and_then(|v| v.as_bool()).unwrap_or(true);
         ui.vertical(|ui| {
             for (rank, team) in result.team_list.iter().enumerate() {
                 let title = format!("{}: {} (最終エナジー:{})", rank + 1, fmt_num(team.score), fmt_num(team.energy));
-                egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.label(format!("ゆめのかけら(スキル) {}", fmt_num(team.skill_shard)));
-                    egui::Grid::new(("team", rank)).striped(true).num_columns(6).show(ui, |ui| {
-                        for title in ["ポケモン", "Lv", "食材", "エナジー/日", "スキル/日", "スキルエナジー/日"] {
-                            ui.strong(title);
-                        }
-                        ui.end_row();
-                        for member in &team.pokemon_list {
-                            match member {
-                                TeamMember::Pokemon { pokemon, .. } => {
-                                    let bx = pokemon.box_pokemon.as_ref();
-                                    let name = format!("{}{}", pokemon.base().name, if pokemon.bag_over_operation { "(いつ育)" } else { "" });
-                                    ui.label(name);
-                                    ui.label(format!("{}", pokemon.lv));
-                                    ui.horizontal(|ui| {
-                                        if let Some(b) = bx {
-                                            ui.set_height(24.0);
-                                            food_icon::food_list(ui, b);
-                                        }
-                                    });
-                                    ui.label(fmt_num(pokemon.energy_per_day));
-                                    ui.label(format!("{:.2}", pokemon.skill_per_day));
-                                    ui.label(fmt_num(pokemon.skill_energy_per_day));
-                                }
-                                TeamMember::NightCapPikachu(p) => {
-                                    ui.label("ナイトキャップピカチュウ");
-                                    ui.label(format!("{}", p.lv));
-                                    ui.label("");
-                                    ui.label(fmt_num(p.b_ep_d));
-                                    ui.label("");
-                                    ui.label("");
-                                }
-                            }
-                            ui.end_row();
-                        }
-                    });
-                    ui.collapsing("料理", |ui| {
-                        for c in &team.cooking_list {
-                            ui.label(format!("{}  {} (鍋 {})", m.cookings[c.cooking].name, fmt_num(c.energy), c.pot_size));
-                        }
+                let header = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0);
+                let r = header.show(ui, |ui| {
+                    egui::ScrollArea::horizontal().id_salt(("team_result_scroll", rank)).show(ui, |ui| {
+                        team_result::team_table(ui, team, &shared.config, result_config, setting, short);
                     });
                 });
+                r.header_response.on_hover_text("スコアは「エナジー✕(100% + 追加ゆめのかけら ÷ エナジーによるゆめのかけら ✕ ゆめのかけら評価倍率)」です。");
+                ui.add_space(10.0);
             }
         });
     }
+}
+
+/// 本家 simulation.vue の「表示設定」
+fn display_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
+    let mut s = ResultSetting::load(c);
+    let mut changed = false;
+    style::setting(ui, "team_display", "表示設定", &style::plain("表示設定"), false, |ui| {
+        egui::Grid::new("team_display_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+            style::th(ui, "エナジー内訳");
+            changed |= ui.checkbox(&mut s.detail, "エナジー内訳").changed();
+            ui.end_row();
+            style::th(ui, "食材情報");
+            changed |= ui.checkbox(&mut s.food, "食材情報").changed();
+            ui.end_row();
+        });
+    });
+    if changed {
+        s.save(c);
+    }
+    changed
 }
 
 /// 本家 simulation.vue の「シミュレーション設定」

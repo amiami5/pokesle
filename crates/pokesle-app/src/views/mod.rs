@@ -8,6 +8,7 @@ pub mod pokemon_edit;
 pub mod pokemon_filter;
 pub mod pokemon_target;
 pub mod style;
+pub mod team_result;
 pub mod team_view;
 
 use eframe::egui;
