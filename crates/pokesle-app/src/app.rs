@@ -7,7 +7,7 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, team_view::TeamView};
+use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -24,6 +24,7 @@ enum Tab {
     Faq,
     History,
     Credit,
+    UiSetting,
 }
 
 /// ヘッダーのリンク(画面, 表示名, 実装済みか)
@@ -34,7 +35,7 @@ const NAV: [(&str, &[NavItem]); 4] = [
     ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", false)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", false)]),
     ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", false)]),
-    ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料\nクレジット", true)]),
+    ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
 ];
 
 /// 各画面で共有するデータ
@@ -42,6 +43,7 @@ pub struct Shared {
     pub config: Config,
     pub box_file: BoxFile,
     pub evaluate_table: Option<EvaluateTable>,
+    pub ui_setting: storage::UiSetting,
     pub status: String,
 }
 
@@ -96,11 +98,15 @@ pub struct App {
     check_list_view: CheckListView,
     team_view: TeamView,
     evaluate_view: EvaluateView,
+    ui_setting_view: UiSettingView,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> App {
-        crate::fonts::install(&cc.egui_ctx);
+        let ui_setting = storage::load_ui_setting();
+        ui_setting_view::apply(&cc.egui_ctx, &ui_setting);
+        // 表示倍率は設定画面だけで変える(Ctrl+/- で変わると設定とずれるため)
+        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         style::apply(&cc.egui_ctx);
         // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_POPUP=field などで設定ポップアップを開いて起動する。
         // 入れ子のポップアップは fix,resource のようにカンマ区切りで指定する
@@ -115,6 +121,7 @@ impl App {
             Ok("team") => Tab::Team,
             Ok("checklist") => Tab::CheckList,
             Ok("setting") => Tab::Setting,
+            Ok("ui") => Tab::UiSetting,
             _ => Tab::Box,
         };
         #[cfg(not(debug_assertions))]
@@ -125,12 +132,14 @@ impl App {
                 config: storage::load_config(),
                 box_file: storage::load_box(),
                 evaluate_table: storage::load_evaluate_table(),
+                ui_setting,
                 status: String::new(),
             },
             box_view: BoxView::default(),
             check_list_view: CheckListView::default(),
             team_view: TeamView::default(),
             evaluate_view: EvaluateView::default(),
+            ui_setting_view: UiSettingView::default(),
         }
     }
 
@@ -226,6 +235,7 @@ impl eframe::App for App {
             }
             Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
+            Tab::UiSetting => self.ui_setting_view.ui(ui, &mut self.shared.ui_setting, &mut self.shared.status),
             _ => {
                 ui.label("未実装です");
             }

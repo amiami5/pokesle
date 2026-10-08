@@ -62,3 +62,27 @@ pub fn load_evaluate_table() -> Option<EvaluateTable> {
 pub fn save_evaluate_table(table: &EvaluateTable) -> Result<(), String> {
     write_json("evaluate-table.json", table)
 }
+
+/// 見た目の設定(本家にはない、このアプリ独自の設定)
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct UiSetting {
+    /// None なら既定(游ゴシック等)
+    pub font: Option<crate::fonts::FontChoice>,
+    /// 表示倍率(文字の大きさ)
+    pub zoom: f32,
+}
+
+impl Default for UiSetting {
+    fn default() -> Self {
+        UiSetting { font: None, zoom: 1.0 }
+    }
+}
+
+pub fn load_ui_setting() -> UiSetting {
+    read_json("ui-setting.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+pub fn save_ui_setting(setting: &UiSetting) -> Result<(), String> {
+    write_json("ui-setting.json", setting)
+}

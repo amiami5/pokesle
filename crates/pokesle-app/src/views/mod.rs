@@ -10,6 +10,7 @@ pub mod pokemon_target;
 pub mod style;
 pub mod team_result;
 pub mod team_view;
+pub mod ui_setting_view;
 
 use eframe::egui;
 use pokesle_core::data::master;

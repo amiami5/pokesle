@@ -2138,6 +2138,7 @@ dependencies = [
  "pokesle-core",
  "serde",
  "serde_json",
+ "skrifa",
 ]
 
 [[package]]
