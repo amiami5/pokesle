@@ -10,7 +10,7 @@ use pokesle_core::evaluate_table::{simulate_evaluate_table, EvalLv, EvaluateTabl
 use pokesle_core::team_sim::simulate_box;
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::{food_abc, fmt_fixed, fmt_num};
+use super::{food_abc, fmt_fixed, fmt_num, nature_label};
 use crate::app::Shared;
 use crate::job::Job;
 use crate::storage;
@@ -307,7 +307,7 @@ impl BoxView {
                             });
                         }
                         row.col(|ui| {
-                            ui.label(&p.nature);
+                            nature_label(ui, &p.nature);
                         });
                         row.col(|ui| {
                             if let Some(r) = result {
