@@ -1,5 +1,7 @@
 //! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算・厳選テーブル作成
 
+use std::cmp::Ordering;
+
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use pokesle_core::box_io::{self, TsvColumns};
@@ -28,55 +30,55 @@ enum Fmt {
 }
 
 /// 「シミュ詳細」の列(本家 index.vue の `config.pokemonList.simulatedInfo`)
-const DETAIL_COLUMNS: [(&str, Fmt, fn(&SimPokemon) -> f64); 25] = [
-    ("おてつだい
+const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 25] = [
+    ("speed", "おてつだい
 時間", Fmt::Num(0), |p| p.speed),
-    ("日中おてつ
+    ("dayHelpNum", "日中おてつ
 だい回数", Fmt::Num(2), |p| p.day_help_num),
-    ("夜間おてつ
+    ("nightHelpNum", "夜間おてつ
 だい回数", Fmt::Num(2), |p| p.night_help_num),
-    ("きのみ
+    ("berryNum", "きのみ
 個数", Fmt::Num(0), |p| p.berry_num),
-    ("きのみ
+    ("bEpH", "きのみ
 /手伝い", Fmt::Num(1), |p| p.b_ep_h),
-    ("きのみ
+    ("bEpD", "きのみ
 /日", Fmt::Num(1), |p| p.b_ep_d),
-    ("食材
+    ("foodRate", "食材
 率", Fmt::Percent(1), |p| p.food_rate),
-    ("食材
+    ("foodNum", "食材
 個数", Fmt::Num(1), |p| p.food_num),
-    ("食材
+    ("fEpH", "食材
 /手伝い", Fmt::Num(1), |p| p.f_ep_h),
-    ("食材
+    ("fEpD", "食材
 /日", Fmt::Num(1), |p| p.f_ep_d),
-    ("きのみ+食材
+    ("pickupEnergyPerHelp", "きのみ+食材
 /手伝い", Fmt::Num(1), |p| p.pickup_energy_per_help),
-    ("きのみ+食材
+    ("pickupEnergyPerDay", "きのみ+食材
 /日", Fmt::Num(1), |p| p.pickup_energy_per_day),
-    ("所持
+    ("bag", "所持
 数", Fmt::Num(0), |p| p.bag),
-    ("いつ育
+    ("bagFullHelpNum", "いつ育
 到達回数", Fmt::Num(1), |p| p.bag_full_help_num),
-    ("通常おてつ
+    ("normalHelpNum", "通常おてつ
 だい回数", Fmt::Num(2), |p| p.normal_help_num),
-    ("いつ育おてつ
+    ("berryHelpNum", "いつ育おてつ
 だい回数", Fmt::Num(2), |p| p.berry_help_num),
-    ("補正後
+    ("fixedSkillLv", "補正後
 スキルLv", Fmt::Num(0), |p| p.fixed_skill_lv),
-    ("スキル確率", Fmt::Percent(2), |p| p.skill_rate),
-    ("天井補正
+    ("skillRate", "スキル確率", Fmt::Percent(2), |p| p.skill_rate),
+    ("ceilSkillRate", "天井補正
 スキル確率", Fmt::Percent(2), |p| p.ceil_skill_rate),
-    ("スキル
+    ("skillPerDay", "スキル
 回数/日", Fmt::Num(2), |p| p.skill_per_day),
-    ("スキル
+    ("skillEnergyPerDay", "スキル
 エナジー/日", Fmt::Num(1), |p| p.skill_energy_per_day),
-    ("スキル
+    ("shard", "スキル
 ゆめかけ/日", Fmt::Num(1), |p| p.shard),
-    ("エナジー
+    ("energyPerDay", "エナジー
 /日", Fmt::Num(1), |p| p.energy_per_day),
-    ("サポート
+    ("supportEnergyPerDay", "サポート
 エナジー/日", Fmt::Num(1), |p| p.support_energy_per_day),
-    ("サポート
+    ("supportShardPerDay", "サポート
 ゆめかけ/日", Fmt::Num(1), |p| p.support_shard_per_day),
 ];
 
@@ -111,6 +113,83 @@ fn set_simulated_info(shared: &mut Shared, on: bool) {
         map.insert("simulatedInfo".into(), on.into());
     }
     shared.save_config();
+}
+
+/// 並べ替えに使う値(本家 sortable-table.vue の getSortKey)
+#[derive(PartialEq, PartialOrd)]
+enum SortValue {
+    Num(f64),
+    Str(String),
+}
+
+/// 文字列の並べ替え用に濁点・半濁点を外し、長音を直前の母音に置き換える(本家 convertKatakanaForSort)
+fn kana_sort_key(text: &str) -> String {
+    const VOICED: &str = "ガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポヴがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽゔ";
+    const PLAIN: &str = "カキクケコサシスセソタチツテトハヒフヘホハヒフヘホウかきくけこさしすせそたちつてとはひふへほはひふへほう";
+    const VOWELS: [(&str, char); 5] = [
+        ("アァカガサザタダナハバパマヤャラワヮヵ", 'ア'),
+        ("イィキギシジチヂニヒビピミリヰ", 'イ'),
+        ("ウゥクグスズツヅヌフブプムユュルヴ", 'ウ'),
+        ("エェケゲセゼテデネヘベペメレヱヶ", 'エ'),
+        ("オォコゴソゾトドノホボポモヨョロヲ", 'オ'),
+    ];
+    let mut result = String::new();
+    for c in text.chars() {
+        let c = VOICED.chars().position(|v| v == c).and_then(|i| PLAIN.chars().nth(i)).unwrap_or(c);
+        if c == 'ー'
+            && let Some(prev) = result.chars().last()
+            && let Some((_, v)) = VOWELS.iter().find(|(list, _)| list.contains(prev))
+        {
+            result.push(*v);
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// 設定 `pokemonList.sort`: 並べ替えの条件(列のキー, 1=昇順 / -1=降順)
+fn sort_info(shared: &Shared) -> Vec<(String, i8)> {
+    let list = shared.config.extra.get("pokemonList").and_then(|v| v.get("sort")).and_then(|v| v.as_array());
+    list.into_iter()
+        .flatten()
+        .filter_map(|x| Some((x.get("key")?.as_str()?.to_string(), if x.get("direction")?.as_i64()? < 0 { -1 } else { 1 })))
+        .collect()
+}
+
+fn set_sort_info(shared: &mut Shared, sort: &[(String, i8)]) {
+    let list = shared.config.extra.entry("pokemonList").or_insert_with(|| serde_json::json!({}));
+    if let Some(map) = list.as_object_mut() {
+        let value = sort.iter().map(|(key, dir)| serde_json::json!({ "key": key, "direction": dir })).collect();
+        map.insert("sort".into(), serde_json::Value::Array(value));
+    }
+    shared.save_config();
+}
+
+/// 見出しのクリックで並べ替えを切り替える(本家 setSort)
+/// クリック: 昇順 → 降順 → 解除。Shift+クリック: 並べ替えの条件を後ろに追加する
+fn toggle_sort(sort: &mut Vec<(String, i8)>, key: &str, shift: bool) {
+    if shift {
+        match sort.last_mut() {
+            Some((k, dir)) if k == key => {
+                if *dir == 1 {
+                    *dir = -1;
+                } else {
+                    sort.pop();
+                }
+            }
+            _ => {
+                sort.retain(|(k, _)| k != key);
+                sort.push((key.to_string(), 1));
+            }
+        }
+    } else {
+        match sort.first() {
+            Some((k, 1)) if k == key => *sort = vec![(key.to_string(), -1)],
+            Some((k, _)) if k == key => sort.clear(),
+            _ => *sort = vec![(key.to_string(), 1)],
+        }
+    }
 }
 
 #[derive(Default)]
@@ -237,9 +316,28 @@ impl BoxView {
     fn table(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         let m = master();
         let query = self.search.trim().to_string();
-        let rows: Vec<usize> = (0..shared.box_file.list.len())
+        let mut rows: Vec<usize> = (0..shared.box_file.list.len())
             .filter(|&i| query.is_empty() || shared.box_file.list[i].name.contains(&query))
             .collect();
+        let mut sort = sort_info(shared);
+        if !sort.is_empty() {
+            let keys: Vec<Vec<SortValue>> = rows.iter().map(|&i| sort.iter().map(|(k, _)| self.sort_value(shared, i, k)).collect()).collect();
+            // 本家と同じく安定ソート(同じ値は元の順のまま)
+            let mut order: Vec<usize> = (0..rows.len()).collect();
+            order.sort_by(|&a, &b| {
+                for (n, (_, dir)) in sort.iter().enumerate() {
+                    if keys[a][n] > keys[b][n] {
+                        return if *dir > 0 { Ordering::Greater } else { Ordering::Less };
+                    }
+                    if keys[a][n] < keys[b][n] {
+                        return if *dir > 0 { Ordering::Less } else { Ordering::Greater };
+                    }
+                }
+                Ordering::Equal
+            });
+            rows = order.into_iter().map(|n| rows[n]).collect();
+        }
+        let mut sort_changed = false;
         let mut action: Option<(usize, bool)> = None; // (index, delete?)
         let detail = simulated_info(shared);
         let detail_num = if detail { DETAIL_COLUMNS.len() } else { 0 };
@@ -263,15 +361,34 @@ impl BoxView {
                 .column(Column::remainder())
                 // シミュ詳細の見出しは2行
                 .header(if detail { 40.0 } else { 22.0 }, |mut header| {
-                    let sub_titles = SUB_SKILL_LV.map(|lv| format!("サブ{lv}"));
-                    let titles = ["No", "ポケモン", "Lv", "スキルLv", "食材"].into_iter().chain(sub_titles.iter().map(|s| s.as_str())).chain(["せいかく", "スコア", "厳選"])
-                        .chain(DETAIL_COLUMNS.iter().take(detail_num).map(|(t, _, _)| *t))
-                        .chain([""]);
-                    for title in titles {
+                    let sub_titles = SUB_SKILL_LV.map(|lv| (format!("subSkill{lv}"), format!("サブ{lv}")));
+                    let titles = [("index", "No"), ("name", "ポケモン"), ("lv", "Lv"), ("skillLv", "スキルLv"), ("foodNameList", "食材")]
+                        .into_iter()
+                        .chain(sub_titles.iter().map(|(k, t)| (k.as_str(), t.as_str())))
+                        .chain([("natureName", "せいかく"), ("score", "スコア"), ("evaluate", "厳選")])
+                        .chain(DETAIL_COLUMNS.iter().take(detail_num).map(|(k, t, _, _)| (*k, *t)))
+                        .chain([("", "")]);
+                    for (key, title) in titles {
                         header.col(|ui| {
-                            let r = ui.strong(title);
+                            if key.is_empty() {
+                                return;
+                            }
+                            // 並べ替え中の列には ▲(昇順)/▼(降順) と、条件が複数なら優先順を付ける
+                            let mark = match sort.iter().position(|(k, _)| k == key) {
+                                Some(n) => {
+                                    let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
+                                    if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
+                                }
+                                None => String::new(),
+                            };
+                            let mut r = ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).sense(egui::Sense::click()));
                             if let Some(help) = detail_help(title) {
-                                r.on_hover_text(help);
+                                r = r.on_hover_text(help);
+                            }
+                            r = r.on_hover_text("クリックで並べ替え(昇順→降順→解除)\nShift+クリックで条件を追加");
+                            if r.clicked() {
+                                toggle_sort(&mut sort, key, ui.input(|i| i.modifiers.shift));
+                                sort_changed = true;
                             }
                         });
                     }
@@ -323,7 +440,7 @@ impl BoxView {
                                 ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
                             }
                         });
-                        for (_, fmt, get) in DETAIL_COLUMNS.iter().take(detail_num) {
+                        for (_, _, fmt, get) in DETAIL_COLUMNS.iter().take(detail_num) {
                             row.col(|ui| {
                                 if let Some(r) = result {
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -344,6 +461,10 @@ impl BoxView {
                 });
         });
 
+        if sort_changed {
+            set_sort_info(shared, &sort);
+        }
+
         match action {
             Some((i, false)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
             Some((i, true)) => {
@@ -352,6 +473,39 @@ impl BoxView {
                 self.results.clear();
             }
             None => {}
+        }
+    }
+
+    /// 並べ替えの値。数値が無いときは 0(本家 getSortKey の `value || 0`)
+    fn sort_value(&self, shared: &Shared, i: usize, key: &str) -> SortValue {
+        let m = master();
+        let p = &shared.box_file.list[i];
+        let result = self.results.get(i).and_then(|r| r.as_ref());
+        let num = |v: Option<f64>| SortValue::Num(v.filter(|x| !x.is_nan()).unwrap_or(0.0));
+        let text = |v: &str| SortValue::Str(kana_sort_key(v));
+        match key {
+            "index" => num(Some(i as f64)),
+            "name" => text(&p.name),
+            "lv" => num(Some(p.lv)),
+            "skillLv" => num(p.skill_lv),
+            "foodNameList" => text(&p.food_list.join(",")),
+            "natureName" => text(&p.nature),
+            "score" => num(result.map(|r| r.pokemon.score)),
+            "evaluate" => num(result
+                .and_then(|r| r.evaluate_result.as_ref())
+                .and_then(|e| e.best.get(&EvalLv::Max))
+                .and_then(|b| b.energy.as_ref())
+                .map(|b| b.score)),
+            _ => {
+                if let Some(slot) = SUB_SKILL_LV.iter().position(|lv| key == format!("subSkill{lv}")) {
+                    let name = p.sub_skill_list.get(slot).map(|n| m.sub_skill(n).map(|x| x.short.as_str()).unwrap_or(n)).unwrap_or("");
+                    return text(name);
+                }
+                match DETAIL_COLUMNS.iter().find(|(k, _, _, _)| *k == key) {
+                    Some((_, _, _, get)) => num(result.map(|r| get(&r.pokemon))),
+                    None => num(None),
+                }
+            }
         }
     }
 
