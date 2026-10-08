@@ -381,7 +381,9 @@ impl BoxView {
                                 }
                                 None => String::new(),
                             };
-                            let mut r = ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).sense(egui::Sense::click()));
+                            ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+                            // 文字の横の空いたところも含めて、見出しのマス全体をクリックできるようにする
+                            let mut r = ui.interact(ui.max_rect(), egui::Id::new(("box_sort", key)), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                             if let Some(help) = detail_help(title) {
                                 r = r.on_hover_text(help);
                             }
