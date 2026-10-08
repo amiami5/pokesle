@@ -6,7 +6,7 @@ use pokesle_core::team_sim::{run_team_simulation, TeamMember, TeamSimulationRequ
 
 use pokesle_core::config::Config;
 
-use super::{common_setting, fmt_num, food_icon, style};
+use super::{common_setting, fmt_num, food_icon, pokemon_filter, style};
 use crate::app::Shared;
 use crate::job::Job;
 
@@ -58,17 +58,17 @@ impl TeamView {
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
-            changed |= common_setting::ui(ui, &mut shared.config);
+            changed |= common_setting::ui(ui, &mut shared.config, &shared.box_file.list);
         });
         // 2段目: シミュレーション設定・除外フィルタ・チーム条件
         ui.add_space(5.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
             changed |= simulation_setting(ui, &mut shared.config);
-            let f = &shared.config.simulation.filter;
-            let label = style::plain(if f.enable && !f.condition_list.is_empty() { "除外条件：設定あり" } else { "除外なし" });
+            let n = pokemon_filter::exclude_count(&shared.box_file.list, &shared.config.simulation.filter);
+            let label = style::plain(if n == 0 { "除外なし".to_string() } else { format!("除外条件：{n}匹") });
             style::setting(ui, "team_filter", "除外フィルタ", &label, false, |ui| {
-                ui.label("除外フィルタの編集は未対応です。");
+                changed |= pokemon_filter::editor(ui, "team_filter", &mut shared.config.simulation.filter, &shared.box_file.list);
             });
             changed |= require_setting(ui, &mut shared.config);
         });

@@ -7,7 +7,9 @@ use eframe::egui;
 use pokesle_core::config::{Config, EventBonus};
 use pokesle_core::cooking::evaluate_lv_list;
 use pokesle_core::data::{master, Berry, CookingType};
+use pokesle_core::sim_pokemon::BoxPokemon;
 
+use super::pokemon_filter;
 use super::style::{self, form_button, number, percent_number, small, th, ButtonKind, Label};
 use super::fmt_fixed;
 
@@ -38,15 +40,16 @@ fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
     egui::Grid::new(id).num_columns(2).spacing([16.0, 10.0]).min_col_width(80.0).show(ui, add);
 }
 
-/// 本家 CommonSetting。呼び出し側の横並び(horizontal_wrapped)の中で呼ぶ。変更があれば true
-pub fn ui(ui: &mut egui::Ui, config: &mut Config) -> bool {
+/// 本家 CommonSetting。呼び出し側の横並び(horizontal_wrapped)の中で呼ぶ。変更があれば true。
+/// `box_list` は育成仮定の除外フィルタの件数表示に使う
+pub fn ui(ui: &mut egui::Ui, config: &mut Config, box_list: &[BoxPokemon]) -> bool {
     let mut changed = false;
     changed |= field_setting(ui, config);
     changed |= event_bonus_setting(ui, config);
     changed |= berry_setting(ui, config);
     changed |= skill_setting(ui, config);
     changed |= bag_over_setting(ui, config);
-    changed |= fix_setting(ui, config);
+    changed |= fix_setting(ui, config, box_list);
     changed |= select_setting(ui, config);
     changed |= cooking_setting(ui, config);
     changed |= expect_setting(ui, config);
@@ -536,10 +539,11 @@ fn fix_label(c: &Config) -> Label {
     style::plain(text)
 }
 
-fn fix_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
+fn fix_setting(ui: &mut egui::Ui, c: &mut Config, box_list: &[BoxPokemon]) -> bool {
     let mut changed = false;
     let label = fix_label(c);
     style::setting(ui, "fix", "育成仮定", &label, false, |ui| {
+        changed |= resource_popup(ui.ctx(), c);
         let s = &mut c.simulation;
         grid(ui, "fix_grid", |ui| {
             th(ui, "育成仮定");
@@ -561,9 +565,13 @@ fn fix_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                         changed |= opt_number(ui, "fix_border_specialty", &mut s.fix_border_specialty, true);
                         ui.label("%以上のみ");
                     });
-                    let excluded = s.fix_filter.enable && !s.fix_filter.condition_list.is_empty();
-                    ui.add_enabled(false, egui::Button::new(if excluded { "除外フィルタ(設定あり)" } else { "除外なし" }))
-                        .on_disabled_hover_text("除外フィルタの編集は未対応です");
+                });
+                // 本家では育成仮定が「しない」でも押せる
+                ui.add_space(3.0);
+                let n = pokemon_filter::exclude_count(box_list, &s.fix_filter);
+                let label = style::plain(if n == 0 { "除外なし".to_string() } else { format!("除外：{n}匹") });
+                style::setting(ui, "fix_filter", "除外フィルタ", &label, false, |ui| {
+                    changed |= pokemon_filter::editor(ui, "fix_filter", &mut s.fix_filter, box_list);
                 });
             });
             ui.end_row();
@@ -577,7 +585,9 @@ fn fix_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                 ] {
                     changed |= ui.radio_value(&mut s.fix_resource_mode, v, l).changed();
                 }
-                ui.add_enabled(false, egui::Button::new("アメ・ゆめのかけら管理")).on_disabled_hover_text("未対応です");
+                if form_button(ui, "アメ・ゆめのかけら管理", ButtonKind::Normal).clicked() {
+                    style::open_popup(ui.ctx(), "resource");
+                }
             });
             ui.end_row();
 
@@ -631,11 +641,74 @@ fn fix_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
     changed
 }
 
+/// アメ・ゆめのかけら管理(本家 resource-edit-popup.vue)
+fn resource_popup(ctx: &egui::Context, c: &mut Config) -> bool {
+    let mut changed = false;
+    style::popup(ctx, "resource", "リソース管理", |ui| {
+        let candy = &mut c.candy;
+        ui.horizontal(|ui| {
+            ui.label("ゆめのかけら");
+            changed |= opt_number_hint(ui, "candy_shard", &mut candy.shard, false, 160.0, "未入力の場合は無制限");
+        });
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.label("ばんのうアメ");
+            for key in ["s", "m", "l"] {
+                ui.label(format!("{}:", key.to_uppercase()));
+                changed |= bag_number(ui, &mut candy.bag, key, 50.0);
+            }
+        });
+        ui.add_space(5.0);
+        small(
+            ui,
+            "ばんのうアメは各ポケモンに使用できる量を指定してください。
+Sを10個指定した場合、チームシミュレーションではSを10個使用した個体を複数編成したものがレコメンドされる可能性があります。",
+            900.0,
+        );
+        ui.add_space(10.0);
+
+        // アメの種類ごと(本家 seedPokemonList: アメ名が初めて出てくるポケモン)
+        let mut seed: Vec<&pokesle_core::data::Pokemon> = Vec::new();
+        for p in &master().pokemon {
+            if seed.iter().all(|x| x.candy_name != p.candy_name) {
+                seed.push(p);
+            }
+        }
+        egui::Grid::new("resource_candy").striped(true).num_columns(3).spacing([24.0, 4.0]).show(ui, |ui| {
+            th(ui, "タイプ");
+            th(ui, "アメ名");
+            th(ui, "アメ数");
+            ui.end_row();
+            for p in seed {
+                ui.label(&p.type_name);
+                ui.label(&p.candy_name);
+                changed |= bag_number(ui, &mut candy.bag, &p.candy_name, 80.0);
+                ui.end_row();
+            }
+        });
+    });
+    changed
+}
+
+/// アメの数の入力。未設定なら空欄で出し、空欄にしたら 0(本家の null と同じ扱い)
+fn bag_number(ui: &mut egui::Ui, bag: &mut std::collections::HashMap<String, f64>, key: &str, width: f32) -> bool {
+    let mut v = bag.get(key).copied();
+    if opt_number_hint(ui, &format!("candy_bag_{key}"), &mut v, false, width, "") {
+        bag.insert(key.to_string(), v.unwrap_or(0.0));
+        return true;
+    }
+    false
+}
+
 /// 空欄で null になる数値入力(本家 `$event || null`: 0 も null になる)
 fn opt_number(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_null: bool) -> bool {
+    opt_number_hint(ui, id, value, zero_is_null, 50.0, "-")
+}
+
+fn opt_number_hint(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_null: bool, width: f32, hint: &str) -> bool {
     let id = egui::Id::new(("opt_number", id));
     let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.map(js_num).unwrap_or_default());
-    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text("-").desired_width(50.0));
+    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width));
     let mut changed = false;
     if r.changed() {
         let v = text.trim().parse::<f64>().ok().filter(|x| !zero_is_null || *x != 0.0);

@@ -362,7 +362,7 @@ impl BoxView {
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
-            changed |= common_setting::ui(ui, &mut shared.config);
+            changed |= common_setting::ui(ui, &mut shared.config, &shared.box_file.list);
             let mut detail = simulated_info(shared);
             style::setting(ui, "box_display", "表示設定", &style::plain("表示設定"), false, |ui| {
                 egui::Grid::new("box_display_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {

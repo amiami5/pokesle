@@ -102,10 +102,13 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> App {
         crate::fonts::install(&cc.egui_ctx);
         style::apply(&cc.egui_ctx);
-        // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_POPUP=field などで設定ポップアップを開いて起動する
+        // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_POPUP=field などで設定ポップアップを開いて起動する。
+        // 入れ子のポップアップは fix,resource のようにカンマ区切りで指定する
         #[cfg(debug_assertions)]
-        if let Ok(id) = std::env::var("POKESLE_DEBUG_POPUP") {
-            style::open_popup(&cc.egui_ctx, &id);
+        if let Ok(ids) = std::env::var("POKESLE_DEBUG_POPUP") {
+            for id in ids.split(',') {
+                style::open_popup(&cc.egui_ctx, id);
+            }
         }
         #[cfg(debug_assertions)]
         let tab = match std::env::var("POKESLE_DEBUG_TAB").as_deref() {

@@ -180,7 +180,7 @@ pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOn
         });
         let hr = header.response.rect;
         ui.painter().with_clip_rect(hr).hline(hr.x_range(), hr.bottom(), egui::Stroke::new(1.0, LINE));
-        egui::ScrollArea::vertical().max_height(max_h - 44.0).auto_shrink([true, true]).show(ui, |ui| {
+        egui::ScrollArea::vertical().max_height(max_h - 44.0).auto_shrink([false, true]).show(ui, |ui| {
             egui::Frame::new().inner_margin(20).show(ui, add_contents);
         });
     });
