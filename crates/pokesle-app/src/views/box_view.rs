@@ -1,7 +1,7 @@
 //! ボックス画面: 一覧・追加/編集・TSV取り込み/書き出し・概算
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
 use egui_extras::{Column, TableBuilder};
@@ -537,6 +537,18 @@ pub struct BoxView {
     error: String,
     /// 表示中のページ(0 始まり)
     page: usize,
+    /// 選択中のポケモン(ボックス位置)。まとめて削除する(本家 selectedPokemonList)
+    selected: HashSet<usize>,
+    /// 削除の確認(メッセージ, 消すボックス位置)
+    confirm_delete: Option<(String, Vec<usize>)>,
+}
+
+/// 一覧の操作列でのクリック
+enum RowAction {
+    Edit(usize),
+    Delete(usize),
+    /// 固定・除外の切り替え(None なら 未設定→固定→除外→未設定 の順に進める)
+    Fix(usize, Option<Option<f64>>),
 }
 
 impl BoxView {
@@ -559,6 +571,17 @@ impl BoxView {
             style::th(ui, "キーワード");
             if ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0)).changed() {
                 self.page = 0;
+            }
+            ui.add_space(10.0);
+            style::th(ui, "ボックス整理");
+            // お気に入りは選べない(本家 selectedPokemonList)
+            self.selected.retain(|&i| shared.box_file.list.get(i).is_some_and(|p| !p.favorite));
+            let n = self.selected.len();
+            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, &format!("選択したポケモン({n}匹)を削除"), style::ButtonKind::Important)).inner;
+            if r.clicked() {
+                let mut list: Vec<usize> = self.selected.iter().copied().collect();
+                list.sort_unstable();
+                self.confirm_delete = Some(("選択したポケモンを削除します。よろしいですか？".into(), list));
             }
         });
 
@@ -618,6 +641,7 @@ impl BoxView {
         };
         self.table(ui, shared, &setting, rows);
         self.import_window(ui.ctx(), shared);
+        self.confirm_delete_window(ui.ctx(), shared);
 
         if let Some(edit) = &mut self.edit {
             match edit.ui(ui.ctx()) {
@@ -714,7 +738,8 @@ impl BoxView {
         let m = master();
         let mut sort = sort_info(shared);
         let mut sort_changed = false;
-        let mut action: Option<(usize, bool)> = None; // (index, delete?)
+        let mut action: Option<RowAction> = None;
+        let mut toggle_select: Option<usize> = None;
         let mut edits: Vec<CellEdit> = Vec::new();
         let levels = shared.config.select_evaluate.enabled_levels();
         let all = Col::all(setting, &levels);
@@ -746,17 +771,41 @@ impl BoxView {
 
         // 列が画面に収まらないときは横にスクロールする
         egui::ScrollArea::horizontal().show(ui, |ui| {
+            // 文字の上をクリックしても行を選べるよう、文字の選択はしない
+            ui.style_mut().interaction.selectable_labels = false;
             let mut table = TableBuilder::new(ui)
-                .id_salt(("box_table", order_salt))
+                .id_salt(("box_table2", order_salt))
                 .striped(true)
                 .resizable(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+                .sense(egui::Sense::click())
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                // 本家と同じく先頭は選択・編集・削除・固定/除外の列
+                .column(Column::exact(86.0).resizable(false));
             for c in &columns {
                 table = table.column(c.width(widths.get(&c.key()).copied(), setting));
             }
             table
                 .column(Column::remainder())
                 .header(if tall_header { 40.0 } else { 22.0 }, |mut header| {
+                    header.col(|ui| {
+                        let key = "edit";
+                        let mark = match sort.iter().position(|(k, _)| k == key) {
+                            Some(n) => {
+                                let arrow = if sort[n].1 > 0 { "▲" } else { "▼" };
+                                if sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
+                            }
+                            None => String::new(),
+                        };
+                        ui.add(egui::Label::new(egui::RichText::new(mark).strong()).selectable(false));
+                        let r = ui
+                            .interact(ui.max_rect(), egui::Id::new(("box_sort", key)), egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text("この列でソートするとPTシミュへの固定/除外でソートできます。");
+                        if r.clicked() {
+                            toggle_sort(&mut sort, key, ui.input(|i| i.modifiers.shift));
+                            sort_changed = true;
+                        }
+                    });
                     for &col in &columns {
                         // header.col が返すのは中身の大きさなので、マスの幅はマスの中で測る
                         let mut cell_width = None;
@@ -838,6 +887,34 @@ impl BoxView {
                         let p = &shared.box_file.list[i];
                         let result = self.results.get(i).and_then(|r| r.as_ref());
                         let require = setting.candy.then(|| calc_require_info(p, result.and_then(|r| r.pokemon.nature).map(|n| &m.natures[n]), &shared.config.candy));
+                        let selected = self.selected.contains(&i);
+                        row.set_selected(selected);
+                        row.col(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let mut checked = selected;
+                            if ui.add_enabled(!p.favorite, egui::Checkbox::without_text(&mut checked)).clicked() {
+                                toggle_select = Some(i);
+                            }
+                            if icon_button(ui, Icon::Edit, egui::Color32::from_gray(0x88)).on_hover_text("編集").clicked() {
+                                action = Some(RowAction::Edit(i));
+                            }
+                            let delete_color = if p.favorite { egui::Color32::from_gray(0xcc) } else { egui::Color32::from_gray(0x88) };
+                            if icon_button(ui, Icon::Delete, delete_color).on_hover_text("削除").clicked() && !p.favorite {
+                                action = Some(RowAction::Delete(i));
+                            }
+                            let (icon, color) = match p.fix {
+                                Some(f) if f == 1.0 => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
+                                Some(f) if f == -1.0 => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
+                                _ => (Icon::Fix, egui::Color32::from_gray(0x88)),
+                            };
+                            let r = icon_button(ui, icon, color).on_hover_text("チームのシミュレーションで固定・除外する設定\nクリックで 固定→除外→解除、右クリックで解除");
+                            if r.clicked() {
+                                action = Some(RowAction::Fix(i, None));
+                            }
+                            if r.secondary_clicked() {
+                                action = Some(RowAction::Fix(i, Some(None)));
+                            }
+                        });
                         for &col in &columns {
                             row.col(|ui| match col {
                                 Col::Index => {
@@ -933,14 +1010,11 @@ impl BoxView {
                                 }
                             });
                         }
-                        row.col(|ui| {
-                            if ui.small_button("編集").clicked() {
-                                action = Some((i, false));
-                            }
-                            if ui.small_button("削除").clicked() {
-                                action = Some((i, true));
-                            }
-                        });
+                        row.col(|_| {});
+                        // 行のクリックで選択を切り替える(本家 clickRow)
+                        if row.response().clicked() && !p.favorite {
+                            toggle_select = Some(i);
+                        }
                     });
                 });
         });
@@ -985,14 +1059,64 @@ impl BoxView {
             }
         }
 
+        if let Some(i) = toggle_select
+            && !self.selected.remove(&i)
+        {
+            self.selected.insert(i);
+        }
         match action {
-            Some((i, false)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
-            Some((i, true)) => {
-                shared.box_file.list.remove(i);
+            Some(RowAction::Edit(i)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
+            Some(RowAction::Delete(i)) => {
+                let p = &shared.box_file.list[i];
+                self.confirm_delete = Some((format!("{}(Lv{})を削除します。よろしいですか？", p.name, p.lv), vec![i]));
+            }
+            // 本家 toggleFix: 未設定 → 固定(1) → 除外(-1) → 未設定
+            Some(RowAction::Fix(i, value)) => {
+                let p = &mut shared.box_file.list[i];
+                p.fix = value.unwrap_or(match p.fix {
+                    None => Some(1.0),
+                    Some(f) if f == 1.0 => Some(-1.0),
+                    _ => None,
+                });
                 shared.save_box();
-                self.results.clear();
             }
             None => {}
+        }
+    }
+
+    /// 削除の確認(本家は confirm)
+    fn confirm_delete_window(&mut self, ctx: &egui::Context, shared: &mut Shared) {
+        let Some((message, list)) = &self.confirm_delete else { return };
+        let mut close = false;
+        let mut ok = false;
+        let r = egui::Modal::new(egui::Id::new("box_confirm_delete")).show(ctx, |ui| {
+            ui.label(message.as_str());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if style::form_button(ui, "削除", style::ButtonKind::Important).clicked() {
+                    ok = true;
+                }
+                if style::form_button(ui, "キャンセル", style::ButtonKind::Normal).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if ok {
+            // 後ろから消して位置がずれないようにする
+            let mut list = list.clone();
+            list.sort_unstable_by(|a, b| b.cmp(a));
+            list.dedup();
+            for i in list {
+                if i < shared.box_file.list.len() {
+                    shared.box_file.list.remove(i);
+                }
+            }
+            shared.save_box();
+            self.results.clear();
+            self.selected.clear();
+        }
+        if ok || close || r.should_close() {
+            self.confirm_delete = None;
         }
     }
 
@@ -1006,6 +1130,8 @@ impl BoxView {
         let text = |v: &str| SortValue::Str(kana_sort_key(v));
         match key {
             "index" => num(Some(i as f64)),
+            // 本家: 除外(-1)は固定(1)の後ろに並べる
+            "edit" => num(p.fix.map(|f| if f == -1.0 { 2.0 } else { f })),
             "name" => text(&p.name),
             "memo" => text(p.memo.as_deref().unwrap_or("")),
             "lv" => num(Some(p.lv)),
@@ -1085,6 +1211,7 @@ impl BoxView {
                         self.import_message = format!("{}匹を取り込みました", list.len());
                         shared.box_file.list = list;
                         shared.save_box();
+                        self.selected.clear();
                         self.results.clear();
                         self.import_text.clear();
                     } else if lines > 0 {
@@ -1321,4 +1448,54 @@ fn display_setting(ui: &mut egui::Ui, shared: &mut Shared) {
         shared.config.candy.boost_shard = candy.1;
         s.save(shared);
     }
+}
+
+/// 操作列のアイコン(本家 index.vue の SVG)
+#[derive(Clone, Copy)]
+enum Icon {
+    Edit,
+    Delete,
+    Fix,
+    Exclude,
+}
+
+/// アイコンのボタン(16×16)
+fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let color = if response.hovered() { color.gamma_multiply(0.7) } else { color };
+    let p = ui.painter();
+    // 本家の SVG は 100×100 の座標
+    let at = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 100.0);
+    let poly = |pts: &[(f32, f32)]| egui::Shape::convex_polygon(pts.iter().map(|&(x, y)| at(x, y)).collect(), color, egui::Stroke::NONE);
+    match icon {
+        Icon::Edit => {
+            p.add(poly(&[(0.0, 100.0), (0.0, 80.0), (60.0, 20.0), (80.0, 40.0), (20.0, 100.0)]));
+            p.add(poly(&[(65.0, 15.0), (80.0, 0.0), (100.0, 20.0), (85.0, 35.0)]));
+        }
+        Icon::Delete => {
+            p.rect_filled(egui::Rect::from_min_max(at(10.0, 15.0), at(90.0, 30.0)), 0.0, color);
+            p.rect_filled(egui::Rect::from_min_max(at(40.0, 0.0), at(60.0, 15.0)), 0.0, color);
+            p.add(poly(&[(30.0, 100.0), (20.0, 40.0), (80.0, 40.0), (70.0, 100.0)]));
+        }
+        // 人の形(頭と体)。固定は右に＋、除外は斜線
+        Icon::Fix | Icon::Exclude => {
+            let (cx, w) = if matches!(icon, Icon::Fix) { (36.0, 64.0) } else { (50.0, 70.0) };
+            p.circle_filled(at(cx, 30.0), rect.width() * 0.19, color);
+            let body = egui::Rect::from_min_max(at(cx - w / 2.0, 58.0), at(cx + w / 2.0, 92.0));
+            p.rect_filled(body, egui::CornerRadius { nw: 7, ne: 7, sw: 1, se: 1 }, color);
+            if matches!(icon, Icon::Fix) {
+                let stroke = egui::Stroke::new(2.0, color);
+                p.line_segment([at(86.0, 34.0), at(86.0, 66.0)], stroke);
+                p.line_segment([at(70.0, 50.0), at(100.0, 50.0)], stroke);
+            } else {
+                let bg = ui.visuals().extreme_bg_color;
+                p.line_segment([at(4.0, 4.0), at(96.0, 96.0)], egui::Stroke::new(4.0, bg));
+                p.line_segment([at(4.0, 4.0), at(96.0, 96.0)], egui::Stroke::new(2.0, color));
+            }
+        }
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
