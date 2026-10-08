@@ -5,17 +5,113 @@ use egui_extras::{Column, TableBuilder};
 use pokesle_core::box_io::{self, TsvColumns};
 use pokesle_core::box_sim::BoxResult;
 use pokesle_core::data::master;
+use pokesle_core::sim_pokemon::SimPokemon;
 use pokesle_core::evaluate_table::{simulate_evaluate_table, EvalLv, EvaluateTable};
 use pokesle_core::team_sim::simulate_box;
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::{food_abc, fmt_num};
+use super::{food_abc, fmt_fixed, fmt_num};
 use crate::app::Shared;
 use crate::job::Job;
 use crate::storage;
 
 /// サブスキルの解放レベル(本家 pokemon-simulator.ts)
 const SUB_SKILL_LV: [u32; 5] = [10, 25, 50, 70, 80];
+
+/// 数値の表示形式(本家 sortable-table.vue)
+#[derive(Clone, Copy)]
+enum Fmt {
+    /// 小数点以下の桁数
+    Num(usize),
+    /// ×100 して % 表示(小数点以下の桁数)
+    Percent(usize),
+}
+
+/// 「シミュ詳細」の列(本家 index.vue の `config.pokemonList.simulatedInfo`)
+const DETAIL_COLUMNS: [(&str, Fmt, fn(&SimPokemon) -> f64); 25] = [
+    ("おてつだい
+時間", Fmt::Num(0), |p| p.speed),
+    ("日中おてつ
+だい回数", Fmt::Num(2), |p| p.day_help_num),
+    ("夜間おてつ
+だい回数", Fmt::Num(2), |p| p.night_help_num),
+    ("きのみ
+個数", Fmt::Num(0), |p| p.berry_num),
+    ("きのみ
+/手伝い", Fmt::Num(1), |p| p.b_ep_h),
+    ("きのみ
+/日", Fmt::Num(1), |p| p.b_ep_d),
+    ("食材
+率", Fmt::Percent(1), |p| p.food_rate),
+    ("食材
+個数", Fmt::Num(1), |p| p.food_num),
+    ("食材
+/手伝い", Fmt::Num(1), |p| p.f_ep_h),
+    ("食材
+/日", Fmt::Num(1), |p| p.f_ep_d),
+    ("きのみ+食材
+/手伝い", Fmt::Num(1), |p| p.pickup_energy_per_help),
+    ("きのみ+食材
+/日", Fmt::Num(1), |p| p.pickup_energy_per_day),
+    ("所持
+数", Fmt::Num(0), |p| p.bag),
+    ("いつ育
+到達回数", Fmt::Num(1), |p| p.bag_full_help_num),
+    ("通常おてつ
+だい回数", Fmt::Num(2), |p| p.normal_help_num),
+    ("いつ育おてつ
+だい回数", Fmt::Num(2), |p| p.berry_help_num),
+    ("補正後
+スキルLv", Fmt::Num(0), |p| p.fixed_skill_lv),
+    ("スキル確率", Fmt::Percent(2), |p| p.skill_rate),
+    ("天井補正
+スキル確率", Fmt::Percent(2), |p| p.ceil_skill_rate),
+    ("スキル
+回数/日", Fmt::Num(2), |p| p.skill_per_day),
+    ("スキル
+エナジー/日", Fmt::Num(1), |p| p.skill_energy_per_day),
+    ("スキル
+ゆめかけ/日", Fmt::Num(1), |p| p.shard),
+    ("エナジー
+/日", Fmt::Num(1), |p| p.energy_per_day),
+    ("サポート
+エナジー/日", Fmt::Num(1), |p| p.support_energy_per_day),
+    ("サポート
+ゆめかけ/日", Fmt::Num(1), |p| p.support_shard_per_day),
+];
+
+/// 列見出しの説明(本家 index.vue の help-button)
+fn detail_help(title: &str) -> Option<&'static str> {
+    match title {
+        "エナジー
+/日" => Some("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。"),
+        "サポート
+エナジー/日" => Some("おてつだいボーナスやげんき回復系スキル、おてつだいサポートなどによる他ポケモンの効率上昇によって、追加で得られるであろうエナジーです。"),
+        "サポート
+ゆめかけ/日" => Some("おてつだいボーナスやげんき回復系スキルによる他ポケモンの効率上昇、もしくはゆめのかけらボーナスやリサーチEXPボーナスによって、得られるであろうゆめのかけらの量です。"),
+        _ => None,
+    }
+}
+
+fn fmt_value(v: f64, fmt: Fmt) -> String {
+    match fmt {
+        Fmt::Num(d) => fmt_fixed(v, d),
+        Fmt::Percent(d) => format!("{:.*}%", d, v * 100.0),
+    }
+}
+
+/// 設定 `pokemonList.simulatedInfo`(シミュ詳細)
+fn simulated_info(shared: &Shared) -> bool {
+    shared.config.extra.get("pokemonList").and_then(|v| v.get("simulatedInfo")).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+fn set_simulated_info(shared: &mut Shared, on: bool) {
+    let list = shared.config.extra.entry("pokemonList").or_insert_with(|| serde_json::json!({}));
+    if let Some(map) = list.as_object_mut() {
+        map.insert("simulatedInfo".into(), on.into());
+    }
+    shared.save_config();
+}
 
 #[derive(Default)]
 pub struct BoxView {
@@ -60,6 +156,11 @@ impl BoxView {
             }
             ui.separator();
             ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("ポケモン名で絞り込み").desired_width(180.0));
+            ui.separator();
+            let mut detail = simulated_info(shared);
+            if ui.checkbox(&mut detail, "シミュ詳細").on_hover_text("概算の内訳(おてつだい回数・きのみ・食材・スキルなど)の列を表示します").changed() {
+                set_simulated_info(shared, detail);
+            }
         });
         if let Some(job) = &self.simulate_job {
             job.show_progress(ui);
@@ -140,6 +241,8 @@ impl BoxView {
             .filter(|&i| query.is_empty() || shared.box_file.list[i].name.contains(&query))
             .collect();
         let mut action: Option<(usize, bool)> = None; // (index, delete?)
+        let detail = simulated_info(shared);
+        let detail_num = if detail { DETAIL_COLUMNS.len() } else { 0 };
 
         // 列が画面に収まらないときは横にスクロールする
         egui::ScrollArea::horizontal().show(ui, |ui| {
@@ -155,18 +258,20 @@ impl BoxView {
                 .columns(Column::initial(72.0).at_least(32.0), SUB_SKILL_LV.len())
                 .column(Column::initial(80.0))
                 .column(Column::initial(90.0))
-                .column(Column::initial(90.0))
                 .column(Column::initial(70.0))
+                .columns(Column::initial(84.0).at_least(32.0), detail_num)
                 .column(Column::remainder())
-                .header(22.0, |mut header| {
+                // シミュ詳細の見出しは2行
+                .header(if detail { 40.0 } else { 22.0 }, |mut header| {
                     let sub_titles = SUB_SKILL_LV.map(|lv| format!("サブ{lv}"));
-                    let titles = ["No", "ポケモン", "Lv", "スキルLv", "食材"].into_iter().chain(sub_titles.iter().map(|s| s.as_str())).chain(["せいかく", "エナジー/日", "スコア", "厳選", ""]);
+                    let titles = ["No", "ポケモン", "Lv", "スキルLv", "食材"].into_iter().chain(sub_titles.iter().map(|s| s.as_str())).chain(["せいかく", "スコア", "厳選"])
+                        .chain(DETAIL_COLUMNS.iter().take(detail_num).map(|(t, _, _)| *t))
+                        .chain([""]);
                     for title in titles {
                         header.col(|ui| {
                             let r = ui.strong(title);
-                            if title == "エナジー/日" {
-                                // 本家 index.vue の説明文
-                                r.on_hover_text("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。");
+                            if let Some(help) = detail_help(title) {
+                                r.on_hover_text(help);
                             }
                         });
                     }
@@ -206,11 +311,6 @@ impl BoxView {
                         });
                         row.col(|ui| {
                             if let Some(r) = result {
-                                ui.label(fmt_num(r.pokemon.energy_per_day));
-                            }
-                        });
-                        row.col(|ui| {
-                            if let Some(r) = result {
                                 ui.label(fmt_num(r.pokemon.score));
                             }
                         });
@@ -223,6 +323,15 @@ impl BoxView {
                                 ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
                             }
                         });
+                        for (_, fmt, get) in DETAIL_COLUMNS.iter().take(detail_num) {
+                            row.col(|ui| {
+                                if let Some(r) = result {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(fmt_value(get(&r.pokemon), *fmt));
+                                    });
+                                }
+                            });
+                        }
                         row.col(|ui| {
                             if ui.small_button("編集").clicked() {
                                 action = Some((i, false));
