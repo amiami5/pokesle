@@ -14,6 +14,9 @@ use crate::app::Shared;
 use crate::job::Job;
 use crate::storage;
 
+/// サブスキルの解放レベル(本家 pokemon-simulator.ts)
+const SUB_SKILL_LV: [u32; 5] = [10, 25, 50, 70, 80];
+
 #[derive(Default)]
 pub struct BoxView {
     search: String,
@@ -138,85 +141,99 @@ impl BoxView {
             .collect();
         let mut action: Option<(usize, bool)> = None; // (index, delete?)
 
-        TableBuilder::new(ui)
-            .striped(true)
-            .resizable(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::initial(36.0).at_least(24.0))
-            .column(Column::initial(150.0).at_least(80.0))
-            .column(Column::initial(40.0).at_least(24.0))
-            .column(Column::initial(72.0).at_least(24.0))
-            .column(Column::initial(56.0).at_least(24.0))
-            .column(Column::initial(260.0).at_least(80.0))
-            .column(Column::initial(80.0))
-            .column(Column::initial(90.0))
-            .column(Column::initial(90.0))
-            .column(Column::initial(70.0))
-            .column(Column::remainder())
-            .header(22.0, |mut header| {
-                for title in ["No", "ポケモン", "Lv", "スキルLv", "食材", "サブスキル", "せいかく", "概算日給", "スコア", "厳選", ""] {
-                    header.col(|ui| {
-                        ui.strong(title);
-                    });
-                }
-            })
-            .body(|body| {
-                body.rows(22.0, rows.len(), |mut row| {
-                    let i = rows[row.index()];
-                    let p = &shared.box_file.list[i];
-                    let result = self.results.get(i).and_then(|r| r.as_ref());
-                    row.col(|ui| {
-                        ui.label(format!("{}", i + 1));
-                    });
-                    row.col(|ui| {
-                        let mark = if p.fix == Some(1.0) { "📌" } else { "" };
-                        ui.label(format!("{mark}{}", p.name));
-                    });
-                    row.col(|ui| {
-                        ui.label(format!("{}", p.lv));
-                    });
-                    row.col(|ui| {
-                        ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
-                    });
-                    row.col(|ui| {
-                        ui.label(food_abc(&p.name, &p.food_list));
-                    });
-                    row.col(|ui| {
-                        let short: Vec<&str> = p.sub_skill_list.iter().map(|s| m.sub_skill(s).map(|x| x.short.as_str()).unwrap_or("?")).collect();
-                        ui.label(short.join(" "));
-                    });
-                    row.col(|ui| {
-                        ui.label(&p.nature);
-                    });
-                    row.col(|ui| {
-                        if let Some(r) = result {
-                            ui.label(fmt_num(r.pokemon.energy_per_day));
+        // 列が画面に収まらないときは横にスクロールする
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::initial(36.0).at_least(24.0))
+                .column(Column::initial(150.0).at_least(80.0))
+                .column(Column::initial(40.0).at_least(24.0))
+                .column(Column::initial(72.0).at_least(24.0))
+                .column(Column::initial(56.0).at_least(24.0))
+                .columns(Column::initial(72.0).at_least(32.0), SUB_SKILL_LV.len())
+                .column(Column::initial(80.0))
+                .column(Column::initial(90.0))
+                .column(Column::initial(90.0))
+                .column(Column::initial(70.0))
+                .column(Column::remainder())
+                .header(22.0, |mut header| {
+                    let sub_titles = SUB_SKILL_LV.map(|lv| format!("サブ{lv}"));
+                    let titles = ["No", "ポケモン", "Lv", "スキルLv", "食材"].into_iter().chain(sub_titles.iter().map(|s| s.as_str())).chain(["せいかく", "エナジー/日", "スコア", "厳選", ""]);
+                    for title in titles {
+                        header.col(|ui| {
+                            let r = ui.strong(title);
+                            if title == "エナジー/日" {
+                                // 本家 index.vue の説明文
+                                r.on_hover_text("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。");
+                            }
+                        });
+                    }
+                })
+                .body(|body| {
+                    body.rows(22.0, rows.len(), |mut row| {
+                        let i = rows[row.index()];
+                        let p = &shared.box_file.list[i];
+                        let result = self.results.get(i).and_then(|r| r.as_ref());
+                        row.col(|ui| {
+                            ui.label(format!("{}", i + 1));
+                        });
+                        row.col(|ui| {
+                            let mark = if p.fix == Some(1.0) { "📌" } else { "" };
+                            ui.label(format!("{mark}{}", p.name));
+                        });
+                        row.col(|ui| {
+                            ui.label(format!("{}", p.lv));
+                        });
+                        row.col(|ui| {
+                            ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
+                        });
+                        row.col(|ui| {
+                            ui.label(food_abc(&p.name, &p.food_list));
+                        });
+                        for (slot, unlock) in SUB_SKILL_LV.iter().enumerate() {
+                            row.col(|ui| {
+                                let Some(name) = p.sub_skill_list.get(slot) else { return };
+                                let short = m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?");
+                                // まだ解放されていないサブスキルは薄く表示する
+                                let text = if p.lv >= *unlock as f64 { egui::RichText::new(short) } else { egui::RichText::new(short).weak() };
+                                ui.label(text).on_hover_text(name);
+                            });
                         }
-                    });
-                    row.col(|ui| {
-                        if let Some(r) = result {
-                            ui.label(fmt_num(r.pokemon.score));
-                        }
-                    });
-                    row.col(|ui| {
-                        let best = result
-                            .and_then(|r| r.evaluate_result.as_ref())
-                            .and_then(|e| e.best.get(&EvalLv::Max))
-                            .and_then(|b| b.energy.as_ref());
-                        if let Some(b) = best {
-                            ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
-                        }
-                    });
-                    row.col(|ui| {
-                        if ui.small_button("編集").clicked() {
-                            action = Some((i, false));
-                        }
-                        if ui.small_button("削除").clicked() {
-                            action = Some((i, true));
-                        }
+                        row.col(|ui| {
+                            ui.label(&p.nature);
+                        });
+                        row.col(|ui| {
+                            if let Some(r) = result {
+                                ui.label(fmt_num(r.pokemon.energy_per_day));
+                            }
+                        });
+                        row.col(|ui| {
+                            if let Some(r) = result {
+                                ui.label(fmt_num(r.pokemon.score));
+                            }
+                        });
+                        row.col(|ui| {
+                            let best = result
+                                .and_then(|r| r.evaluate_result.as_ref())
+                                .and_then(|e| e.best.get(&EvalLv::Max))
+                                .and_then(|b| b.energy.as_ref());
+                            if let Some(b) = best {
+                                ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
+                            }
+                        });
+                        row.col(|ui| {
+                            if ui.small_button("編集").clicked() {
+                                action = Some((i, false));
+                            }
+                            if ui.small_button("削除").clicked() {
+                                action = Some((i, true));
+                            }
+                        });
                     });
                 });
-            });
+        });
 
         match action {
             Some((i, false)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),

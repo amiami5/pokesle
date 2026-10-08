@@ -126,7 +126,7 @@ impl TeamView {
                         ui.label(format!("ゆめのかけら(スキル) {}", fmt_num(team.skill_shard)));
                     });
                     egui::Grid::new(("team", rank)).striped(true).num_columns(6).show(ui, |ui| {
-                        for title in ["ポケモン", "Lv", "食材", "日給", "スキル/日", "スキルエナジー/日"] {
+                        for title in ["ポケモン", "Lv", "食材", "エナジー/日", "スキル/日", "スキルエナジー/日"] {
                             ui.strong(title);
                         }
                         ui.end_row();

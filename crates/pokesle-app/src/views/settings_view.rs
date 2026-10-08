@@ -93,10 +93,10 @@ impl SettingsView {
             ui.heading("チーム編成");
             egui::Grid::new("team").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
                 let t = &mut c.team_simulation;
-                changed |= num(ui, "きのみエナジー上位から", &mut t.max_rank_berry, 0.0..=100.0, 0.1);
-                changed |= num(ui, "食材エナジー上位から", &mut t.max_rank_food, 0.0..=100.0, 0.1);
-                changed |= num(ui, "スコア上位から", &mut t.max_rank_all, 0.0..=100.0, 0.1);
-                changed |= num(ui, "日給上位から", &mut t.max_rank_not_support, 0.0..=100.0, 0.1);
+                changed |= num(ui, "対象: きのみスコア上位(匹)", &mut t.max_rank_berry, 0.0..=100.0, 0.1);
+                changed |= num(ui, "対象: 食材スコア上位(匹)", &mut t.max_rank_food, 0.0..=100.0, 0.1);
+                changed |= num(ui, "対象: 総合スコア上位(匹)", &mut t.max_rank_all, 0.0..=100.0, 0.1);
+                changed |= num(ui, "対象: サポート抜きスコア上位(匹)", &mut t.max_rank_not_support, 0.0..=100.0, 0.1);
                 changed |= num(ui, "結果の表示件数", &mut t.result_num, 1.0..=10.0, 0.1);
                 changed |= num(ui, "ナイトキャップピカチュウ Lv(0は無し)", &mut t.night_cap_pikachu, 0.0..=20.0, 0.1);
             });
