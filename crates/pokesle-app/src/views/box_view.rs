@@ -740,6 +740,8 @@ impl BoxView {
         let mut sort_changed = false;
         let mut action: Option<RowAction> = None;
         let mut toggle_select: Option<usize> = None;
+        let mut select_all: Option<bool> = None;
+        let selectable: Vec<usize> = rows.iter().copied().filter(|&i| !shared.box_file.list[i].favorite).collect();
         let mut edits: Vec<CellEdit> = Vec::new();
         let levels = shared.config.select_evaluate.enabled_levels();
         let all = Col::all(setting, &levels);
@@ -796,7 +798,7 @@ impl BoxView {
                             }
                             None => String::new(),
                         };
-                        ui.add(egui::Label::new(egui::RichText::new(mark).strong()).selectable(false));
+                        // 並べ替えのクリックはマス全体で受け、上に置く全選択のチェックボックスを優先する
                         let r = ui
                             .interact(ui.max_rect(), egui::Id::new(("box_sort", key)), egui::Sense::click())
                             .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -805,6 +807,14 @@ impl BoxView {
                             toggle_sort(&mut sort, key, ui.input(|i| i.modifiers.shift));
                             sort_changed = true;
                         }
+                        // 表示中の行(お気に入りを除く)をまとめて選ぶ。本家にはない
+                        let n = selectable.iter().filter(|i| self.selected.contains(i)).count();
+                        let mut all = n > 0 && n == selectable.len();
+                        let checkbox = egui::Checkbox::without_text(&mut all).indeterminate(n > 0 && n < selectable.len());
+                        if ui.add_enabled(!selectable.is_empty(), checkbox).on_hover_text("表示中のポケモンをすべて選択/解除").clicked() {
+                            select_all = Some(n < selectable.len());
+                        }
+                        ui.add(egui::Label::new(egui::RichText::new(mark).strong()).selectable(false));
                     });
                     for &col in &columns {
                         // header.col が返すのは中身の大きさなので、マスの幅はマスの中で測る
@@ -1063,6 +1073,11 @@ impl BoxView {
             && !self.selected.remove(&i)
         {
             self.selected.insert(i);
+        }
+        match select_all {
+            Some(true) => self.selected.extend(&selectable),
+            Some(false) => self.selected.retain(|i| !selectable.contains(i)),
+            None => {}
         }
         match action {
             Some(RowAction::Edit(i)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
