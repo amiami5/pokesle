@@ -246,3 +246,34 @@ pub fn percent_number(ui: &mut egui::Ui, value: &mut f64, width: f32) -> bool {
     }
     changed
 }
+
+/// 数値を JS の文字列化に近い形で出す(整数なら小数点なし)
+pub fn js_num(x: f64) -> String {
+    if x.fract() == 0.0 && x.abs() < 1e15 { format!("{}", x as i64) } else { format!("{x}") }
+}
+
+/// 空欄で null になる数値入力(`zero_is_null` なら本家 `$event || null` と同じく 0 も null)
+pub fn opt_number(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_null: bool, width: f32, hint: &str) -> bool {
+    let id = egui::Id::new(("opt_number", id));
+    let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.map(js_num).unwrap_or_default());
+    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width));
+    let mut changed = false;
+    if r.changed() {
+        let v = text.trim().parse::<f64>().ok().filter(|x| !zero_is_null || *x != 0.0);
+        if v != *value {
+            *value = v;
+            changed = true;
+        }
+    }
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(id));
+    }
+    changed
+}
+
+/// 本家 HelpButton(「?」にマウスを乗せると説明を出す)
+pub fn help(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new("?").strong().color(PRIMARY)).on_hover_text(text);
+}

@@ -10,7 +10,7 @@ use pokesle_core::data::{master, Berry, CookingType};
 use pokesle_core::sim_pokemon::BoxPokemon;
 
 use super::pokemon_filter;
-use super::style::{self, form_button, number, percent_number, small, th, ButtonKind, Label};
+use super::style::{self, form_button, js_num, number, percent_number, small, th, ButtonKind, Label};
 use super::fmt_fixed;
 
 /// 本家 Berry.typeList の並び
@@ -29,11 +29,6 @@ fn berry_list_by_color() -> Vec<&'static Berry> {
 
 fn type_berry(ty: &str) -> Option<&'static Berry> {
     master().berries.iter().find(|b| b.type_name == ty)
-}
-
-/// 数値を JS の文字列化に近い形で出す(整数なら小数点なし)
-fn js_num(x: f64) -> String {
-    if x.fract() == 0.0 && x.abs() < 1e15 { format!("{}", x as i64) } else { format!("{x}") }
 }
 
 fn grid(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
@@ -706,23 +701,7 @@ fn opt_number(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_null
 }
 
 fn opt_number_hint(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_null: bool, width: f32, hint: &str) -> bool {
-    let id = egui::Id::new(("opt_number", id));
-    let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.map(js_num).unwrap_or_default());
-    let r = ui.add(egui::TextEdit::singleline(&mut text).hint_text(hint).desired_width(width));
-    let mut changed = false;
-    if r.changed() {
-        let v = text.trim().parse::<f64>().ok().filter(|x| !zero_is_null || *x != 0.0);
-        if v != *value {
-            *value = v;
-            changed = true;
-        }
-    }
-    if r.has_focus() {
-        ui.data_mut(|d| d.insert_temp(id, text));
-    } else {
-        ui.data_mut(|d| d.remove::<String>(id));
-    }
-    changed
+    style::opt_number(ui, id, value, zero_is_null, width, hint)
 }
 
 // ---- 厳選設定 ----
