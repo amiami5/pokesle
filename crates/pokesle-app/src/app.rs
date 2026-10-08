@@ -6,12 +6,13 @@ use pokesle_core::config::Config;
 use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
-use crate::views::{box_view::BoxView, credit_view, settings_view::SettingsView, team_view::TeamView};
+use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, settings_view::SettingsView, team_view::TeamView};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Box,
     Team,
+    CheckList,
     Settings,
     Credit,
 }
@@ -73,6 +74,7 @@ pub struct App {
     shared: Shared,
     box_view: BoxView,
     team_view: TeamView,
+    check_list_view: CheckListView,
     settings_view: SettingsView,
 }
 
@@ -89,6 +91,7 @@ impl App {
             },
             box_view: BoxView::default(),
             team_view: TeamView::default(),
+            check_list_view: CheckListView::default(),
             settings_view: SettingsView::default(),
         }
     }
@@ -100,7 +103,7 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.heading("ポケスリシミュレーター");
                 ui.separator();
-                for (tab, label) in [(Tab::Box, "ボックス"), (Tab::Team, "チーム編成"), (Tab::Settings, "設定"), (Tab::Credit, "クレジット")] {
+                for (tab, label) in [(Tab::Box, "ボックス"), (Tab::Team, "チーム編成"), (Tab::CheckList, "チェックリスト"), (Tab::Settings, "設定"), (Tab::Credit, "クレジット")] {
                     ui.selectable_value(&mut self.tab, tab, label);
                 }
             });
@@ -124,6 +127,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Box => self.box_view.ui(ui, &mut self.shared),
             Tab::Team => self.team_view.ui(ui, &mut self.shared),
+            Tab::CheckList => self.check_list_view.ui(ui, &mut self.shared),
             Tab::Settings => self.settings_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
         });

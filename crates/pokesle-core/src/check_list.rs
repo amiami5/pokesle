@@ -314,7 +314,7 @@ impl CheckList {
             }
             list.sort_by(|a, b| js::cmp_num(b.1, a.1));
 
-            let in_checked = |rows: &[String]| rows.iter().any(|x| *x == pokemon.name);
+            let in_checked = |rows: &[String]| rows.contains(&pokemon.name);
             let checked = list.first().is_some_and(|x| x.1 >= 0.0)
                 || (item.also_food_and_skill
                     && (food_check_list.is_some_and(|f| f.rows.iter().any(|r| in_checked(&r.checked_pokemon_list)))
@@ -505,6 +505,84 @@ pub fn food_combination(base_food_name_list: &[String], food_list: &[String]) ->
         .map(|f| {
             let i = base_food_name_list.iter().position(|x| x == f).map(|i| i as i64).unwrap_or(-1);
             char::from_u32((i + 65) as u32).unwrap_or('?')
+        })
+        .collect()
+}
+
+/// フィールド別画面のポケモン1匹
+#[derive(Debug, Clone)]
+pub struct FieldPokemon {
+    pub name: String,
+    /// 厳選テーブルの理論値(総合)の平均
+    pub energy: f64,
+}
+
+/// フィールド別画面の1行(睡眠タイプは うとうと・すやすや・ぐっすり の順)
+#[derive(Debug, Clone)]
+pub struct FieldRow {
+    pub name: String,
+    pub pokemon: [Vec<FieldPokemon>; 3],
+    /// そのフィールド・睡眠タイプに出る全ポケモンの数
+    pub all_num: [usize; 3],
+    pub rate: [f64; 3],
+    pub energy: [f64; 3],
+}
+
+pub const SLEEP_TYPES: [&str; 3] = ["うとうと", "すやすや", "ぐっすり"];
+
+/// 本家 check-list/field.vue。`target_pokemon_list` は各チェックリストの捕獲対象を合わせたもの
+pub fn field_check_list(config: &Config, table: Option<&EvaluateTable>, target_pokemon_list: &[String]) -> Vec<FieldRow> {
+    let m = master();
+    let cl = &config.summary.checklist;
+    let lv_list = config.select_evaluate.enabled_levels();
+    let evaluate_lv = match cl.pokemon_condition.select_lv() {
+        Some(EvalLv::Max) => lv_list.last().copied(),
+        Some(EvalLv::Lv(lv)) => Some(lv),
+        None => None,
+    };
+
+    let mut list: Vec<(String, &crate::data::Pokemon, f64)> = m
+        .pokemon
+        .iter()
+        .filter(|p| (cl.field.shinkago || p.evolve.before.is_none()) && p.after_list.iter().any(|a| target_pokemon_list.contains(a)))
+        .map(|p| {
+            let energy_list: Vec<f64> = p
+                .after_list
+                .iter()
+                .filter_map(|a| table.and_then(|t| t.pokemon.get(a)).and_then(|x| evaluate_lv.and_then(|lv| x.get(&lv))))
+                .flat_map(|by_food| {
+                    let mut foods: Vec<_> = by_food.iter().collect();
+                    foods.sort_by(|a, b| a.0.cmp(b.0));
+                    foods.into_iter().map(|(_, perc)| perc.energy.get(100).copied().unwrap_or(f64::NAN)).collect::<Vec<_>>()
+                })
+                .collect();
+            let energy = energy_list.iter().fold(0.0, |a, x| a + x) / (energy_list.len().max(1) as f64);
+            (p.name.clone(), p, energy)
+        })
+        .collect();
+
+    if cl.field.bakeccha_matome && list.iter().any(|x| x.0.starts_with("バケッチャ")) {
+        let first = list.iter().find(|x| x.0.starts_with("バケッチャ")).cloned();
+        list.retain(|x| !x.0.starts_with("バケッチャ"));
+        if let Some((_, p, energy)) = first {
+            list.push(("バケッチャ".to_string(), p, energy));
+        }
+    }
+
+    let in_field = |p: &crate::data::Pokemon, field: &str, ty: &str| p.field_list.iter().any(|f| f.name == field && f.sleep_type == ty);
+    m.fields
+        .iter()
+        .map(|field| {
+            let pokemon = SLEEP_TYPES.map(|ty| {
+                list.iter().filter(|x| in_field(x.1, &field.name, ty)).map(|x| FieldPokemon { name: x.0.clone(), energy: x.2 }).collect::<Vec<_>>()
+            });
+            let all_num = SLEEP_TYPES.map(|ty| m.pokemon.iter().filter(|p| in_field(p, &field.name, ty)).count());
+            let rate: [f64; 3] = std::array::from_fn(|i| pokemon[i].len() as f64 / all_num[i].max(1) as f64);
+            let energy: [f64; 3] = std::array::from_fn(|i| {
+                let l = &pokemon[i];
+                if l.is_empty() { 0.0 } else { l.iter().fold(0.0, |a, x| a + x.energy) / l.len() as f64 * rate[i] }
+            });
+            FieldRow { name: field.name.clone(), pokemon, all_num, rate, energy }
         })
         .collect()
 }

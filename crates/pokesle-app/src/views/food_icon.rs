@@ -47,6 +47,14 @@ fn food_texture(ctx: &egui::Context, food_name: &str) -> Option<egui::TextureHan
     texture
 }
 
+/// 食材1つをアイコン(なければ名前)で表示する
+pub fn food_icon(ui: &mut egui::Ui, food_name: &str, size: f32) -> egui::Response {
+    match food_texture(ui.ctx(), food_name) {
+        Some(t) => ui.add(egui::Image::new((t.id(), egui::vec2(size, size)))).on_hover_text(food_name),
+        None => ui.label(food_name),
+    }
+}
+
 /// ボックスのポケモンの食材3枠をアイコンで表示する(本家 index.vue の foodNameList)。
 /// 右下にその枠で採れる個数を出し、Lv が足りず解放されていない枠は薄く表示する。
 pub fn food_list(ui: &mut egui::Ui, pokemon: &BoxPokemon) {
