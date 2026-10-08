@@ -5,6 +5,7 @@ use pokesle_core::data::master;
 
 const LICENSE: &str = include_str!("../../../../LICENSE");
 const THIRD_PARTY: &str = include_str!("../../../../THIRD_PARTY_LICENSES.md");
+const NOTO_EMOJI_LICENSE: &str = include_str!("../../assets/food/LICENSE-NOTO-EMOJI.txt");
 
 pub fn ui(ui: &mut egui::Ui) {
     let m = master();
@@ -22,6 +23,13 @@ pub fn ui(ui: &mut egui::Ui) {
         ui.separator();
         ui.heading("ライセンス");
         ui.add(egui::Label::new(egui::RichText::new(LICENSE).monospace()).wrap());
+
+        ui.separator();
+        ui.heading("食材アイコン");
+        ui.label("食材アイコンは Noto Emoji(Copyright 2013 Google LLC、SIL Open Font License 1.1)と、本アプリで描いた絵(オイル・シッポ・ミルク)です。");
+        ui.label("Noto Emoji のうち、エッグは白に、ワカクサ大豆はクリーム色に色を変えています。");
+        ui.hyperlink("https://github.com/googlefonts/noto-emoji");
+        ui.add(egui::Label::new(egui::RichText::new(NOTO_EMOJI_LICENSE).monospace()).wrap());
 
         ui.separator();
         ui.heading("使用しているライブラリ");

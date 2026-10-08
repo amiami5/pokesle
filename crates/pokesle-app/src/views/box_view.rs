@@ -10,7 +10,7 @@ use pokesle_core::evaluate_table::{simulate_evaluate_table, EvalLv, EvaluateTabl
 use pokesle_core::team_sim::simulate_box;
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::{food_abc, fmt_fixed, fmt_num, nature_label};
+use super::{fmt_fixed, fmt_num, food_icon, nature_label};
 use crate::app::Shared;
 use crate::job::Job;
 use crate::storage;
@@ -254,7 +254,7 @@ impl BoxView {
                 .column(Column::initial(150.0).at_least(80.0))
                 .column(Column::initial(40.0).at_least(24.0))
                 .column(Column::initial(72.0).at_least(24.0))
-                .column(Column::initial(56.0).at_least(24.0))
+                .column(Column::initial(84.0).at_least(40.0))
                 .columns(Column::initial(72.0).at_least(32.0), SUB_SKILL_LV.len())
                 .column(Column::initial(80.0))
                 .column(Column::initial(90.0))
@@ -277,7 +277,7 @@ impl BoxView {
                     }
                 })
                 .body(|body| {
-                    body.rows(22.0, rows.len(), |mut row| {
+                    body.rows(26.0, rows.len(), |mut row| {
                         let i = rows[row.index()];
                         let p = &shared.box_file.list[i];
                         let result = self.results.get(i).and_then(|r| r.as_ref());
@@ -295,7 +295,7 @@ impl BoxView {
                             ui.label(p.skill_lv.map(|x| x.to_string()).unwrap_or_default());
                         });
                         row.col(|ui| {
-                            ui.label(food_abc(&p.name, &p.food_list));
+                            food_icon::food_list(ui, p);
                         });
                         for (slot, unlock) in SUB_SKILL_LV.iter().enumerate() {
                             row.col(|ui| {

@@ -2134,6 +2134,7 @@ dependencies = [
  "directories",
  "eframe",
  "egui_extras",
+ "image",
  "pokesle-core",
  "serde",
  "serde_json",

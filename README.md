@@ -73,6 +73,10 @@ cargo build --release
 | 計算ロジックの変更(`src/models/simulation/` など) | **されない**(差分を見て `crates/pokesle-core` へ移植) |
 | 特定のポケモン名を見る処理の変更(エレズン、ラティアス/ラティオスなど) | **されない** |
 
+新しい食材のアイコンは自動では増えません(アイコンが無い食材は名前の先頭2文字を表示します)。
+`tools/food-icons/make.py` の `MAPPING` に本家の画像名と Noto Emoji のコードポイントを1行足し、
+`python tools/food-icons/make.py` を実行してから `crates/pokesle-app/src/views/food_icon.rs` の `FOOD_ICONS` に追加してください。
+
 ### テストが失敗したとき
 
 - `data::tests::load_master` が失敗: 未対応のスキル・サブスキル・性格補正が追加されています。メッセージに名前が出るので、
@@ -96,5 +100,5 @@ git commit -m "本家 <コミット> に追従"
 [MIT License](LICENSE)。本家 (c) 2024 reimer0204 の著作権表示を含みます。
 
 - 依存ライブラリのライセンスは [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)(`cargo about generate about.hbs > THIRD_PARTY_LICENSES.md` で生成)を参照してください。
-- 本アプリはきのみ・食材等の画像を同梱しません。
+- 本アプリはゲームの画像を同梱しません。食材アイコンは [Noto Emoji](https://github.com/googlefonts/noto-emoji)(OFL-1.1、Copyright 2013 Google LLC)と自作の絵です。詳しくは [crates/pokesle-app/assets/food/README.md](crates/pokesle-app/assets/food/README.md) を参照してください。
 - 「ポケモン」「ポケモンスリープ」等の名称に関する権利は各権利者に帰属します。

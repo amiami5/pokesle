@@ -16,3 +16,4 @@ serde_json.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["accesskit", "default_fonts", "glow", "persistence"] }
 egui_extras = { version = "0.36", default-features = false }
 directories = "6"
+image = { version = "0.25", default-features = false, features = ["png"] }

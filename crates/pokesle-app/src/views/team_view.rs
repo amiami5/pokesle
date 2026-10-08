@@ -4,7 +4,7 @@ use eframe::egui;
 use pokesle_core::data::master;
 use pokesle_core::team_sim::{run_team_simulation, TeamMember, TeamSimulationRequest, TeamSimulationResult};
 
-use super::{food_abc, fmt_num};
+use super::{fmt_num, food_icon};
 use crate::app::Shared;
 use crate::job::Job;
 
@@ -137,7 +137,12 @@ impl TeamView {
                                     let name = format!("{}{}", pokemon.base().name, if pokemon.bag_over_operation { "(いつ育)" } else { "" });
                                     ui.label(name);
                                     ui.label(format!("{}", pokemon.lv));
-                                    ui.label(bx.map(|b| food_abc(&b.name, &b.food_list)).unwrap_or_default());
+                                    ui.horizontal(|ui| {
+                                        if let Some(b) = bx {
+                                            ui.set_height(24.0);
+                                            food_icon::food_list(ui, b);
+                                        }
+                                    });
                                     ui.label(fmt_num(pokemon.energy_per_day));
                                     ui.label(format!("{:.2}", pokemon.skill_per_day));
                                     ui.label(fmt_num(pokemon.skill_energy_per_day));

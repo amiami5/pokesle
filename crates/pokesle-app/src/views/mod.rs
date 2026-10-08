@@ -1,20 +1,12 @@
 pub mod box_view;
 pub mod credit_view;
+pub mod food_icon;
 pub mod pokemon_edit;
 pub mod settings_view;
 pub mod team_view;
 
 use eframe::egui;
 use pokesle_core::data::master;
-
-/// 食材の並び(ABC表記)
-pub fn food_abc(name: &str, food_list: &[String]) -> String {
-    let Some(base) = master().pokemon(name) else { return String::new() };
-    food_list
-        .iter()
-        .map(|f| base.food_name_list.iter().position(|x| x == f).map(|i| (b'A' + i as u8) as char).unwrap_or('?'))
-        .collect()
-}
 
 /// 数値を桁区切りで表示
 pub fn fmt_num(x: f64) -> String {
