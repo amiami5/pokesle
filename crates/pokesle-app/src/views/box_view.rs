@@ -7,7 +7,8 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use pokesle_core::box_io::{self, TsvColumns};
 use pokesle_core::box_sim::BoxResult;
-use pokesle_core::data::master;
+use pokesle_core::check_list::CheckHit;
+use pokesle_core::data::{master, Pokemon};
 use pokesle_core::evaluate_table::EvalLv;
 use pokesle_core::exp::{calc_require_info, RequireInfo};
 use pokesle_core::js::to_fixed;
@@ -64,6 +65,44 @@ const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 25] = [
 /// 厳選の列の種類(キー, 見出し)。本家 index.vue の evaluateList
 const EVAL_KINDS: [(&str, &str); 5] = [("energy", ""), ("specialty", "得意"), ("berry", "きのみ"), ("food", "食材"), ("skill", "スキル")];
 
+/// 表示モード(本家 index.vue の mode)。本家と同じく保存しない
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum Mode {
+    #[default]
+    Normal,
+    /// ボックス整理(簡易)
+    Cleaning,
+    /// ボックス整理(詳細)
+    CleaningDetail,
+    /// まっしろミント
+    PureMint,
+}
+
+impl Mode {
+    const ALL: [(Mode, &str); 4] =
+        [(Mode::Normal, "通常"), (Mode::Cleaning, "ボックス整理(簡易)"), (Mode::CleaningDetail, "ボックス整理(詳細)"), (Mode::PureMint, "まっしろミント")];
+
+    fn cleaning(self) -> bool {
+        matches!(self, Mode::Cleaning | Mode::CleaningDetail)
+    }
+}
+
+/// 概算で使ったポケモン(進化を仮定していれば進化後)
+fn base_of(p: &BoxPokemon, result: Option<&BoxResult>) -> Option<&'static Pokemon> {
+    let m = master();
+    result.map(|r| &m.pokemon[r.pokemon.base]).or_else(|| m.pokemon(&p.name))
+}
+
+/// 種ポケモン
+fn seed_of(base: &Pokemon) -> Option<&'static Pokemon> {
+    base.seed.as_deref().and_then(|s| master().pokemon(s))
+}
+
+/// 概算結果のポケモンの種ポケ名
+fn result_seed(r: &BoxResult) -> Option<&'static str> {
+    master().pokemon[r.pokemon.base].seed.as_deref()
+}
+
 /// 「アメ情報」の列(キー, 見出し)。先頭3つは入力欄
 const CANDY_COLUMNS: [(&str, &str); 11] = [
     ("candy", "所持ｱﾒ"),
@@ -102,6 +141,7 @@ fn detail_help(title: &str) -> Option<&'static str> {
         "エナジー\n/日" => Some("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。"),
         "サポート\nエナジー/日" => Some("おてつだいボーナスやげんき回復系スキル、おてつだいサポートなどによる他ポケモンの効率上昇によって、追加で得られるであろうエナジーです。"),
         "サポート\nゆめかけ/日" => Some("おてつだいボーナスやげんき回復系スキルによる他ポケモンの効率上昇、もしくはゆめのかけらボーナスやリサーチEXPボーナスによって、得られるであろうゆめのかけらの量です。\n現状の実装ではリサーチEXPボーナスもゆめのかけらとして扱ってこの値に含めています。"),
+        "整理備考" => Some("✅️がついている項目は「チェックリスト」に該当しているポケモンです。"),
         _ => None,
     }
 }
@@ -126,9 +166,10 @@ fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
 }
 
 /// 概算をやり直す必要があるかの判定に使う指紋
-fn simulate_key(shared: &Shared) -> u64 {
+fn simulate_key(shared: &Shared, mode: Mode) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    mode.hash(&mut h);
     let mut v = shared.config.to_value();
     if let Some(m) = v.as_object_mut() {
         // 表示だけの設定と、本家でも再計算しないアメの設定は除く
@@ -164,8 +205,25 @@ struct ListSetting {
     simulated_info: bool,
     fix_score: bool,
     page_unit: Option<f64>,
+    cleaning: CleaningSetting,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 本家 `config.pokemonList.cleaning`
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct CleaningSetting {
+    /// 色違いも整理備考に表示する
+    shiny_lock: bool,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Default for CleaningSetting {
+    fn default() -> Self {
+        CleaningSetting { shiny_lock: true, extra: Default::default() }
+    }
 }
 
 impl Default for ListSetting {
@@ -183,6 +241,7 @@ impl Default for ListSetting {
             simulated_info: false,
             fix_score: false,
             page_unit: Some(50.0),
+            cleaning: CleaningSetting::default(),
             extra: Default::default(),
         }
     }
@@ -288,8 +347,14 @@ fn toggle_sort(sort: &mut Vec<(String, i8)>, key: &str, shift: bool) {
 enum Col {
     /// 選択・編集・削除・固定/除外の列(いつも先頭で、入れ替えない)
     Op,
+    /// 種ポケの図鑑No(ボックス整理)
+    SeedNo,
+    /// 図鑑No(ボックス整理)
+    PokemonNo,
     Index,
     Name,
+    /// 整理備考(ボックス整理)
+    HitCheck,
     Memo,
     Lv,
     Food,
@@ -308,8 +373,15 @@ enum Col {
 
 impl Col {
     /// 表示設定で出す列(最初の並び)
-    fn all(setting: &ListSetting, levels: &[u32]) -> Vec<Col> {
-        let mut list = vec![Col::Index, Col::Name];
+    fn all(setting: &ListSetting, levels: &[u32], mode: Mode) -> Vec<Col> {
+        let mut list = Vec::new();
+        if mode.cleaning() {
+            list.extend([Col::SeedNo, Col::PokemonNo]);
+        }
+        list.extend([Col::Index, Col::Name]);
+        if mode.cleaning() {
+            list.push(Col::HitCheck);
+        }
         if setting.memo {
             list.push(Col::Memo);
         }
@@ -350,6 +422,9 @@ impl Col {
     fn key(self) -> String {
         match self {
             Col::Op => "edit".into(),
+            Col::SeedNo => "pokemonSeedNo".into(),
+            Col::PokemonNo => "pokemonNo".into(),
+            Col::HitCheck => "hitCheckList".into(),
             Col::Index => "index".into(),
             Col::Name => "name".into(),
             Col::Memo => "memo".into(),
@@ -376,6 +451,9 @@ impl Col {
     fn title(self, setting: &ListSetting) -> String {
         match self {
             Col::Op => String::new(),
+            Col::SeedNo => "種ポケ\n図鑑No".into(),
+            Col::PokemonNo => "図鑑\nNo".into(),
+            Col::HitCheck => "整理備考".into(),
             Col::Index => "No".into(),
             Col::Name => "名前".into(),
             Col::Memo => "メモ".into(),
@@ -408,6 +486,8 @@ impl Col {
     fn width(self, width: Option<f32>, setting: &ListSetting) -> Column {
         let (initial, min) = match self {
             Col::Op => (86.0, 86.0),
+            Col::SeedNo | Col::PokemonNo => (60.0, 32.0),
+            Col::HitCheck => (150.0, 60.0),
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
             Col::Memo => (120.0, 40.0),
@@ -537,8 +617,20 @@ fn eval_text(v: f64, key: &str, value: bool) -> String {
     }
 }
 
-/// 厳選の値の進化先一覧(進化先名, 値, 最良か)。表示設定「最適でない進化先の厳選値も表示」なら全進化先
-fn eval_rows(result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool) -> Vec<(String, Option<f64>, bool)> {
+/// まっしろミントでの元の性格との差(本家 evaluate-result.vue)
+fn diff_text(d: f64, key: &str, value: bool) -> String {
+    let sign = if d > 0.0 { "+" } else { "" };
+    if !value {
+        format!("{sign}{}%", to_fixed(d * 100.0, 1))
+    } else if key != "energy" {
+        format!("{sign}{}", to_fixed(d, 1))
+    } else {
+        format!("{sign}{}", fmt_num(pokesle_core::js::round(d)))
+    }
+}
+
+/// 厳選の値の進化先一覧(進化先名, 値, 最良か, まっしろミントでの差)。表示設定「最適でない進化先の厳選値も表示」なら全進化先
+fn eval_rows(result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool) -> Vec<(String, Option<f64>, bool, Option<f64>)> {
     let m = master();
     let key = EVAL_KINDS[k].0;
     let Some(r) = result else { return Vec::new() };
@@ -550,9 +642,18 @@ fn eval_rows(result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, deta
         .into_iter()
         .map(|a| {
             let info = e.get(lv, &a).and_then(|x| x.get(key));
-            let v = info.map(|x| if value { x.value } else { x.score }).filter(|x| !x.is_nan());
+            let pick = |x: &pokesle_core::evaluate_table::EvalInfo| if value { x.value } else { x.score };
+            let original = info.map(pick).filter(|x| !x.is_nan());
+            // まっしろミントの評価があればそちらを出し、元の性格との差を添える
+            let (v, diff) = match info.and_then(|x| x.pure_mint.as_deref()) {
+                Some(pm) => {
+                    let v = Some(pick(pm)).filter(|x| !x.is_nan());
+                    (v, v.zip(original).map(|(a, b)| a - b))
+                }
+                None => (original, None),
+            };
             let is_best = multi && best.as_deref() == Some(a.as_str());
-            (a, v, is_best)
+            (a, v, is_best, diff)
         })
         .collect()
 }
@@ -581,6 +682,15 @@ pub struct BoxView {
     scroll_offset: f32,
     /// マウスが乗っている行(左右の表で揃える)
     hover_row: Option<usize>,
+    mode: Mode,
+    /// ボックス整理(詳細)のタブ(0: サマリー情報、1: 詳細)
+    detail_tab: usize,
+    /// ボックス整理(詳細)で確認中の最終進化ポケモン
+    detail_pokemon: Option<String>,
+    /// ボックス整理(詳細)で絞り込み中の種ポケ
+    detail_seed: Option<String>,
+    /// サマリー情報の並べ替え(列のキー, 1=昇順 / -1=降順)
+    summary_sort: Vec<(String, i8)>,
 }
 
 /// 一覧の操作列でのクリック
@@ -589,9 +699,23 @@ enum RowAction {
     Delete(usize),
     /// 固定・除外の切り替え(None なら 未設定→固定→除外→未設定 の順に進める)
     Fix(usize, Option<Option<f64>>),
+    /// お気に入りの切り替え(ボックス整理)
+    Favorite(usize),
 }
 
 impl BoxView {
+    /// 見た目の確認用(デバッグ版のみ): 表示モードを指定して起動する
+    #[cfg(debug_assertions)]
+    pub fn debug_mode(&mut self, mode: &str) {
+        self.mode = match mode {
+            "cleaning" => Mode::Cleaning,
+            "cleaning_detail" | "cleaning_detail1" => Mode::CleaningDetail,
+            "pure_mint" => Mode::PureMint,
+            _ => Mode::Normal,
+        };
+        self.detail_tab = (mode == "cleaning_detail1") as usize;
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         self.poll_jobs(shared);
 
@@ -608,6 +732,16 @@ impl BoxView {
         // 2段目: キーワード
         ui.add_space(5.0);
         ui.horizontal(|ui| {
+            style::th(ui, "表示モード");
+            let label = Mode::ALL.iter().find(|(m, _)| *m == self.mode).map_or("", |(_, l)| *l);
+            egui::ComboBox::from_id_salt("box_mode").selected_text(label).show_ui(ui, |ui| {
+                for (m, l) in Mode::ALL {
+                    if ui.selectable_value(&mut self.mode, m, l).changed() {
+                        self.page = 0;
+                    }
+                }
+            });
+            ui.add_space(10.0);
             style::th(ui, "キーワード");
             if ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0)).changed() {
                 self.page = 0;
@@ -623,16 +757,34 @@ impl BoxView {
                 list.sort_unstable();
                 self.confirm_delete = Some(("選択したポケモンを削除します。よろしいですか？".into(), list));
             }
+            if self.mode.cleaning() {
+                let mut s = ListSetting::load(shared);
+                if ui.checkbox(&mut s.cleaning.shiny_lock, "色違いも整理備考に表示する").changed() {
+                    s.save(shared);
+                }
+            }
         });
+        if self.mode == Mode::CleaningDetail {
+            ui.add_space(5.0);
+            let detail = match self.detail_seed.as_ref().or(self.detail_pokemon.as_ref()) {
+                Some(x) => format!("詳細({x})"),
+                None => "詳細".to_string(),
+            };
+            if let Some(t) = style::tab_list(ui, &["サマリー情報".to_string(), detail], self.detail_tab) {
+                self.detail_tab = t;
+            }
+        }
 
         // 設定・ボックス・厳選テーブルが変わったら概算し直す(本家は自動で再計算する)
-        let key = simulate_key(shared);
+        let key = simulate_key(shared, self.mode);
         if self.simulate_job.is_none() && self.simulate_key != Some(key) {
             self.simulate_key = Some(key);
             if shared.box_file.list.is_empty() {
                 self.results.clear();
             } else {
-                let config = shared.config.clone();
+                let mut config = shared.config.clone();
+                config.cleaning = self.mode.cleaning();
+                config.pure_mint = self.mode == Mode::PureMint;
                 let list = shared.box_file.list.clone();
                 let table = shared.usable_evaluate_table().cloned();
                 self.simulate_job = Some(Job::spawn(ui.ctx(), move |p| {
@@ -650,7 +802,9 @@ impl BoxView {
         ui.add_space(5.0);
 
         let setting = ListSetting::load(shared);
-        let rows = self.sorted_rows(shared);
+        // ボックス整理(詳細)のサマリー情報(本家は一覧の代わりに出す)
+        let show_list = self.mode != Mode::CleaningDetail || self.detail_tab == 1;
+        let rows = if show_list { self.sorted_rows(shared) } else { Vec::new() };
         // ページ分け(本家 sortable-table の pager)
         let page_max = setting.page_unit().map(|u| rows.len().div_ceil(u).max(1));
         if let Some(max) = page_max {
@@ -659,7 +813,7 @@ impl BoxView {
 
         // 下段: ページ送り・追加・TSV
         egui::Panel::bottom("box_actions").frame(egui::Frame::new().inner_margin(egui::Margin { top: 6, ..Default::default() })).show(ui, |ui| {
-            if let Some(max) = page_max {
+            if let Some(max) = page_max.filter(|_| show_list) {
                 self.pager(ui, max);
                 ui.add_space(4.0);
             }
@@ -679,7 +833,11 @@ impl BoxView {
             Some(u) => rows.into_iter().skip(u * self.page).take(u).collect(),
             None => rows,
         };
-        self.table(ui, shared, &setting, rows);
+        if show_list {
+            self.table(ui, shared, &setting, rows);
+        } else if self.simulate_job.is_none() {
+            self.summary(ui);
+        }
         self.import_window(ui.ctx(), shared);
         self.confirm_delete_window(ui.ctx(), shared);
 
@@ -750,8 +908,19 @@ impl BoxView {
     /// キーワードで絞り込み、並べ替えたボックス位置の一覧
     fn sorted_rows(&self, shared: &Shared) -> Vec<usize> {
         let query = self.search.trim().to_string();
+        let result = |i: usize| self.results.get(i).and_then(|r| r.as_ref());
         let mut rows: Vec<usize> = (0..shared.box_file.list.len())
-            .filter(|&i| query.is_empty() || keyword_match(&shared.box_file.list[i], &query))
+            .filter(|&i| {
+                if self.mode != Mode::CleaningDetail {
+                    return query.is_empty() || keyword_match(&shared.box_file.list[i], &query);
+                }
+                // ボックス整理(詳細)はキーワードではなく、サマリー情報で選んだポケモン・種ポケで絞り込む
+                match (&self.detail_seed, &self.detail_pokemon) {
+                    (Some(seed), _) => result(i).and_then(result_seed).is_some_and(|s| s == seed),
+                    (None, Some(name)) => result(i).is_some_and(|r| r.pokemon.after_list.contains(name)),
+                    (None, None) => true,
+                }
+            })
             .collect();
         let sort = sort_info(shared);
         if !sort.is_empty() {
@@ -779,7 +948,7 @@ impl BoxView {
         let mut sort = sort_info(shared);
         let selectable: Vec<usize> = rows.iter().copied().filter(|&i| !shared.box_file.list[i].favorite).collect();
         let levels = shared.config.select_evaluate.enabled_levels();
-        let all = Col::all(setting, &levels);
+        let all = Col::all(setting, &levels, self.mode);
         let mut order = column_order(ui.ctx(), &all);
         let columns = order.clone();
         // 表は列の幅を位置ごとに覚えるので、並びが変わったら別の表として作り直し、
@@ -788,18 +957,32 @@ impl BoxView {
         let order_salt: Vec<String> = columns.iter().map(|c| c.key()).collect();
         let tall_header = columns.iter().any(|c| c.tall_header(setting));
         let has_eval = columns.iter().any(|c| matches!(c, Col::Eval(..)));
+        let has_hit = columns.contains(&Col::HitCheck);
+        let shiny_lock = setting.cleaning.shiny_lock;
+        let pure_mint = self.mode == Mode::PureMint;
         // 行の高さ: 厳選の列は進化先名と値の2段(全進化先を出すときは進化先の数だけ)
         let heights: Vec<f32> = rows
             .iter()
             .map(|&i| {
-                if !has_eval {
-                    return 26.0;
-                }
-                if !setting.select_detail {
-                    return 36.0;
-                }
-                let n = self.results.get(i).and_then(|r| r.as_ref()).map_or(1, |r| m.pokemon[r.pokemon.base].after_list.len().max(1));
-                (n as f32 * 18.0 + 6.0).max(26.0)
+                let result = self.results.get(i).and_then(|r| r.as_ref());
+                // 整理備考は項目の数だけ
+                let hit = if has_hit {
+                    let p = &shared.box_file.list[i];
+                    let n = p.favorite as usize + (p.shiny && shiny_lock) as usize + result.map_or(0, |r| r.hit_check_list.len());
+                    n as f32 * 22.0 + 4.0
+                } else {
+                    0.0
+                };
+                let eval = if !has_eval {
+                    26.0
+                } else if !setting.select_detail {
+                    // まっしろミントは差分の段が増える
+                    if pure_mint { 50.0 } else { 36.0 }
+                } else {
+                    let n = result.map_or(1, |r| m.pokemon[r.pokemon.base].after_list.len().max(1));
+                    (n as f32 * 18.0 + 6.0).max(26.0)
+                };
+                eval.max(hit)
             })
             .collect();
 
@@ -820,6 +1003,9 @@ impl BoxView {
         };
         let selected = &self.selected;
         let results = &self.results;
+        let cleaning = self.mode.cleaning();
+        // 本家はボックス整理でお気に入りの星が増える
+        let op_width = if cleaning { 106.0 } else { 86.0 };
         let list = &shared.box_file.list;
         let config = &shared.config;
 
@@ -930,7 +1116,24 @@ impl BoxView {
                     if r.secondary_clicked() {
                         return Some(TableEvent::Action(RowAction::Fix(i, Some(None))));
                     }
+                    if cleaning {
+                        let color = if p.favorite { egui::Color32::from_rgb(0xff, 0xd7, 0x00) } else { egui::Color32::from_gray(0x88) };
+                        if icon_button(ui, Icon::Star, color).on_hover_text("お気に入り").clicked() {
+                            return Some(TableEvent::Action(RowAction::Favorite(i)));
+                        }
+                    }
                 }
+                Col::SeedNo => {
+                    if let Some(b) = base_of(p, result).and_then(seed_of) {
+                        ui.label(b.no.to_string());
+                    }
+                }
+                Col::PokemonNo => {
+                    if let Some(b) = base_of(p, result) {
+                        ui.label(b.no.to_string());
+                    }
+                }
+                Col::HitCheck => hit_check_cell(ui, p, result, shiny_lock),
                 Col::Index => {
                     ui.label(format!("{}", i + 1));
                 }
@@ -961,7 +1164,7 @@ impl BoxView {
                         ui.label(fmt_fixed(r.pokemon.score, 1));
                     }
                 }
-                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail),
+                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail, pure_mint),
                 Col::Candy(0) => {
                     if let Some(b) = m.pokemon(&p.name) {
                         let mut v = config.candy.bag.get(&b.candy_name).copied();
@@ -1041,7 +1244,7 @@ impl BoxView {
                 .scroll_bar_visibility(if last { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::AlwaysHidden });
             for &c in cols {
                 // 本家と同じく先頭は選択・編集・削除・固定/除外の列
-                table = table.column(if c == Col::Op { Column::exact(86.0).resizable(false) } else { c.width(widths.get(&c.key()).copied(), setting) });
+                table = table.column(if c == Col::Op { Column::exact(op_width).resizable(false) } else { c.width(widths.get(&c.key()).copied(), setting) });
             }
             if last {
                 table = table.column(Column::remainder());
@@ -1205,7 +1408,160 @@ impl BoxView {
                 });
                 shared.save_box();
             }
+            // 本家 toggleFavorite
+            Some(RowAction::Favorite(i)) => {
+                let p = &mut shared.box_file.list[i];
+                p.favorite = !p.favorite;
+                shared.save_box();
+            }
             None => {}
+        }
+    }
+
+    /// ボックス整理(詳細)のサマリー情報: 最終進化ポケモンごとの、ボックス内で進化先に持つポケモンの数
+    fn summary(&mut self, ui: &mut egui::Ui) {
+        struct Row {
+            p: &'static Pokemon,
+            seed: Option<&'static Pokemon>,
+            num: usize,
+            checked: bool,
+        }
+        const COLUMNS: [(&str, &str, f32); 10] = [
+            ("seedNo", "種ポケ\n図鑑No", 60.0),
+            ("seed", "種ポケ", 200.0),
+            ("no", "図鑑No", 60.0),
+            ("name", "名前", 230.0),
+            ("berryName", "きのみ", 90.0),
+            ("typeName", "タイプ", 80.0),
+            ("specialty", "とくい", 70.0),
+            ("num", "ボックス内\n候補数", 80.0),
+            ("checklistChecked", "チェックリスト\n該当", 100.0),
+            ("dummy", "", 230.0),
+        ];
+        let m = master();
+        // ポケモンごとにボックス全体を見ず、概算結果を1回だけ集計する(本家と同じ)
+        let mut count: HashMap<&str, (usize, bool)> = HashMap::new();
+        for r in self.results.iter().flatten() {
+            for name in &r.pokemon.after_list {
+                let e = count.entry(name.as_str()).or_default();
+                e.0 += 1;
+                e.1 |= !r.hit_check_list.is_empty();
+            }
+        }
+        let mut list: Vec<Row> = m
+            .pokemon
+            .iter()
+            .filter(|p| p.is_last)
+            .map(|p| {
+                let (num, checked) = count.get(p.name.as_str()).copied().unwrap_or_default();
+                Row { p, seed: seed_of(p), num, checked }
+            })
+            .collect();
+        let sort_value = |r: &Row, key: &str| -> SortValue {
+            let text = |v: &str| SortValue::Str(kana_sort_key(v));
+            match key {
+                "seedNo" => SortValue::Num(r.seed.map_or(0.0, |s| s.no as f64)),
+                "seed" => text(r.p.seed.as_deref().unwrap_or("")),
+                "no" => SortValue::Num(r.p.no as f64),
+                "name" => text(&r.p.name),
+                "berryName" => text(&m.berries[r.p.berry].name),
+                "typeName" => text(&m.berries[r.p.berry].type_name),
+                "specialty" => text(r.p.specialty.name()),
+                "num" => SortValue::Num(r.num as f64),
+                "checklistChecked" => SortValue::Num(r.checked as u8 as f64),
+                _ => SortValue::Num(0.0),
+            }
+        };
+        if !self.summary_sort.is_empty() {
+            let sort = &self.summary_sort;
+            list.sort_by(|a, b| {
+                for (key, dir) in sort {
+                    let (x, y) = (sort_value(a, key), sort_value(b, key));
+                    let o = x.partial_cmp(&y).unwrap_or(Ordering::Equal);
+                    if o != Ordering::Equal {
+                        return if *dir > 0 { o } else { o.reverse() };
+                    }
+                }
+                Ordering::Equal
+            });
+        }
+
+        let mut sort_click: Option<(String, bool)> = None;
+        // (最終進化ポケモン, 種ポケ)。確認なら種ポケは None
+        let mut pick: Option<(Option<String>, Option<String>)> = None;
+        let mut table = TableBuilder::new(ui).id_salt("box_cleaning_summary").striped(true).cell_layout(egui::Layout::left_to_right(egui::Align::Center));
+        for (_, _, w) in COLUMNS {
+            table = table.column(Column::initial(w).at_least(30.0).clip(true));
+        }
+        table
+            .column(Column::remainder())
+            .header(40.0, |mut header| {
+                for (key, title, _) in COLUMNS {
+                    header.col(|ui| {
+                        let mark = match self.summary_sort.iter().position(|(k, _)| k == key) {
+                            Some(n) => {
+                                let arrow = if self.summary_sort[n].1 > 0 { "▲" } else { "▼" };
+                                if self.summary_sort.len() > 1 { format!("{arrow}{}", n + 1) } else { arrow.to_string() }
+                            }
+                            None => String::new(),
+                        };
+                        ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false).extend());
+                        let r = ui.interact(ui.max_rect(), egui::Id::new(("box_summary_sort", key)), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if r.clicked() {
+                            sort_click = Some((key.to_string(), ui.input(|i| i.modifiers.shift)));
+                        }
+                    });
+                }
+                header.col(|_| {});
+            })
+            .body(|body| {
+                body.rows(30.0, list.len(), |mut row| {
+                    let r = &list[row.index()];
+                    row.col(|ui| {
+                        right(ui, r.seed.map(|s| s.no.to_string()).unwrap_or_default());
+                    });
+                    row.col(|ui| {
+                        ui.label(r.p.seed.as_deref().unwrap_or(""));
+                    });
+                    row.col(|ui| right(ui, r.p.no.to_string()));
+                    row.col(|ui| {
+                        ui.label(&r.p.name);
+                    });
+                    row.col(|ui| {
+                        ui.label(&m.berries[r.p.berry].name);
+                    });
+                    row.col(|ui| {
+                        ui.label(&m.berries[r.p.berry].type_name);
+                    });
+                    row.col(|ui| {
+                        ui.label(r.p.specialty.name());
+                    });
+                    row.col(|ui| right(ui, r.num.to_string()));
+                    row.col(|ui| {
+                        if r.checked {
+                            ui.label("◯");
+                        }
+                    });
+                    row.col(|ui| {
+                        if style::form_button(ui, "確認", style::ButtonKind::Normal).clicked() {
+                            pick = Some((Some(r.p.name.clone()), None));
+                        }
+                        if style::form_button(ui, "種ポケで絞り込み", style::ButtonKind::Normal).clicked() {
+                            pick = Some((None, r.p.seed.clone()));
+                        }
+                    });
+                    row.col(|_| {});
+                });
+            });
+
+        if let Some((key, shift)) = sort_click {
+            toggle_sort(&mut self.summary_sort, &key, shift);
+        }
+        if let Some((pokemon, seed)) = pick {
+            self.detail_pokemon = pokemon;
+            self.detail_seed = seed;
+            self.detail_tab = 1;
+            self.page = 0;
         }
     }
 
@@ -1257,6 +1613,10 @@ impl BoxView {
             "index" => num(Some(i as f64)),
             // 本家: 除外(-1)は固定(1)の後ろに並べる
             "edit" => num(p.fix.map(|f| if f == -1.0 { 2.0 } else { f })),
+            // 本家は並べ替えに図鑑の並び順(order)を使う
+            "pokemonSeedNo" => num(base_of(p, result).and_then(seed_of).map(|b| b.order as f64)),
+            "pokemonNo" => num(base_of(p, result).map(|b| b.order as f64)),
+            "hitCheckList" => num(Some(result.map_or(0, |r| r.hit_check_list.len()) as f64)),
             "name" => text(&p.name),
             "memo" => text(p.memo.as_deref().unwrap_or("")),
             "lv" => num(Some(p.lv)),
@@ -1465,18 +1825,56 @@ fn name_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, memo
     }
 }
 
+/// 整理備考(本家 index.vue の hitCheckList)
+fn hit_check_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, shiny_lock: bool) {
+    let m = master();
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        if p.favorite {
+            ui.label("⭐お気に入り");
+        }
+        if p.shiny && shiny_lock {
+            ui.label("✨色違い");
+        }
+        for hit in result.map_or(&[][..], |r| &r.hit_check_list[..]) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.label("✅");
+                match hit {
+                    CheckHit::Food(f) => {
+                        food_icon::food_icon(ui, &m.foods[*f].name, 20.0).on_hover_text(&m.foods[*f].name);
+                    }
+                    _ => {
+                        ui.label(hit.label());
+                    }
+                }
+            });
+        }
+    });
+}
+
 /// 厳選の値(本家 evaluate-result.vue)
-fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool) {
+fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool, pure_mint: bool) {
     let rows = eval_rows(result, k, lv, value, detail);
     let key = EVAL_KINDS[k].0;
     ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        for (after, v, best) in rows {
+        for (after, v, best, diff) in rows {
             let text = v.map_or_else(|| "-".to_string(), |v| eval_text(v, key, value));
             let style = |t: egui::RichText| if best { t.strong() } else { t };
+            // 増えたら赤、減ったら青
+            let diff_label = |ui: &mut egui::Ui| {
+                if let Some(d) = diff {
+                    let color = if d > 0.0 { egui::Color32::RED } else if d < 0.0 { egui::Color32::BLUE } else { ui.visuals().text_color() };
+                    ui.label(style(egui::RichText::new(diff_text(d, key, value)).size(10.0).color(color)));
+                } else if pure_mint && detail {
+                    ui.label("");
+                }
+            };
             if detail {
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        diff_label(ui);
                         ui.add_sized([if key == "energy" && value { 52.0 } else { 46.0 }, 16.0], egui::Label::new(style(egui::RichText::new(text).size(11.0))));
                         ui.label(style(egui::RichText::new(after).size(10.0)));
                     });
@@ -1484,6 +1882,7 @@ fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv
             } else {
                 ui.label(style(egui::RichText::new(after).size(10.0)));
                 ui.label(style(egui::RichText::new(text).size(11.0)));
+                diff_label(ui);
             }
         }
     });
@@ -1580,6 +1979,8 @@ pub(super) enum Icon {
     Delete,
     Fix,
     Exclude,
+    /// お気に入り(本家 star-icon.vue)
+    Star,
 }
 
 /// アイコンのボタン(16×16)
@@ -1602,6 +2003,16 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -
             p.rect_filled(egui::Rect::from_min_max(at(10.0, 15.0), at(90.0, 30.0)), 0.0, color);
             p.rect_filled(egui::Rect::from_min_max(at(40.0, 0.0), at(60.0, 15.0)), 0.0, color);
             p.add(poly(&[(30.0, 100.0), (20.0, 40.0), (80.0, 40.0), (70.0, 100.0)]));
+        }
+        Icon::Star => {
+            // 本家 star-icon.vue の頂点。凹多角形は塗れないので、中心から三角形に分けて塗る
+            const PTS: [(f32, f32); 10] =
+                [(50.0, 10.0), (61.8, 38.2), (92.4, 38.2), (67.6, 56.2), (77.3, 85.0), (50.0, 67.3), (22.7, 85.0), (32.4, 56.2), (7.6, 38.2), (38.2, 38.2)];
+            let center = at(50.0, 52.0);
+            for k in 0..PTS.len() {
+                let (a, b) = (PTS[k], PTS[(k + 1) % PTS.len()]);
+                p.add(egui::Shape::convex_polygon(vec![center, at(a.0, a.1), at(b.0, b.1)], color, egui::Stroke::new(0.5, color)));
+            }
         }
         // 人の形(頭と体)。固定は右に＋、除外は斜線
         Icon::Fix | Icon::Exclude => {

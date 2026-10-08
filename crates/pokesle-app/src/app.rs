@@ -126,6 +126,13 @@ impl App {
         };
         #[cfg(not(debug_assertions))]
         let tab = Tab::Box;
+        #[allow(unused_mut)]
+        let mut box_view = BoxView::default();
+        // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_BOX_MODE=cleaning などでボックスの表示モードを変えて起動する
+        #[cfg(debug_assertions)]
+        if let Ok(mode) = std::env::var("POKESLE_DEBUG_BOX_MODE") {
+            box_view.debug_mode(&mode);
+        }
         App {
             tab,
             shared: Shared {
@@ -135,7 +142,7 @@ impl App {
                 ui_setting,
                 status: String::new(),
             },
-            box_view: BoxView::default(),
+            box_view,
             check_list_view: CheckListView::default(),
             team_view: TeamView::default(),
             evaluate_view: EvaluateView::default(),

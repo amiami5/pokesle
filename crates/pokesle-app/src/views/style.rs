@@ -224,6 +224,38 @@ pub fn danger(ui: &mut egui::Ui, text: &str) {
     });
 }
 
+/// 本家 TabList のタブの並び。選ばれたタブの位置を返す
+pub fn tab_list(ui: &mut egui::Ui, labels: &[String], active: usize) -> Option<usize> {
+    let mut clicked = None;
+    // 下の線は全幅に引き、選ばれたタブの線をその上に描く
+    let line = ui.painter().add(egui::Shape::Noop);
+    let width = ui.available_width();
+    let r = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (i, label) in labels.iter().enumerate() {
+            let on = i == active;
+            let text = egui::RichText::new(label).color(if on { PRIMARY_STRONG } else { INK });
+            let galley = egui::WidgetText::from(if on { text.strong() } else { text }).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body);
+            let size = galley.size() + egui::vec2(30.0, 10.0);
+            let (rect, r) = ui.allocate_exact_size(size, egui::Sense::click());
+            let p = ui.painter();
+            if on {
+                p.rect_filled(rect, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, PRIMARY_SOFT);
+            }
+            p.galley(rect.center() - galley.size() / 2.0, galley, INK);
+            if on {
+                p.hline(rect.x_range(), rect.bottom() - 1.0, egui::Stroke::new(2.0, PRIMARY));
+            }
+            if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                clicked = Some(i);
+            }
+        }
+    });
+    let rect = r.response.rect;
+    ui.painter().set(line, egui::Shape::hline(rect.left()..=rect.left() + width, rect.bottom() - 1.0, egui::Stroke::new(2.0, LINE)));
+    clicked
+}
+
 /// 見出し付きの区切り(本家 setting-section-title)
 pub fn section_title(ui: &mut egui::Ui, text: &str) {
     ui.add_space(4.0);
