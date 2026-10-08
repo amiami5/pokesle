@@ -8,9 +8,11 @@ use egui_extras::{Column, TableBuilder};
 use pokesle_core::box_io::{self, TsvColumns};
 use pokesle_core::box_sim::BoxResult;
 use pokesle_core::data::master;
-use pokesle_core::sim_pokemon::SimPokemon;
 use pokesle_core::evaluate_table::EvalLv;
+use pokesle_core::exp::{calc_require_info, RequireInfo};
+use pokesle_core::sim_pokemon::{BoxPokemon, SimPokemon};
 use pokesle_core::team_sim::simulate_box;
+use serde::{Deserialize, Serialize};
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
 use super::{common_setting, fmt_fixed, fmt_num, food_icon, nature_label, style};
@@ -31,66 +33,74 @@ enum Fmt {
 
 /// 「シミュ詳細」の列(本家 index.vue の `config.pokemonList.simulatedInfo`)
 const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 25] = [
-    ("speed", "おてつだい
-時間", Fmt::Num(0), |p| p.speed),
-    ("dayHelpNum", "日中おてつ
-だい回数", Fmt::Num(2), |p| p.day_help_num),
-    ("nightHelpNum", "夜間おてつ
-だい回数", Fmt::Num(2), |p| p.night_help_num),
-    ("berryNum", "きのみ
-個数", Fmt::Num(0), |p| p.berry_num),
-    ("bEpH", "きのみ
-/手伝い", Fmt::Num(1), |p| p.b_ep_h),
-    ("bEpD", "きのみ
-/日", Fmt::Num(1), |p| p.b_ep_d),
-    ("foodRate", "食材
-率", Fmt::Percent(1), |p| p.food_rate),
-    ("foodNum", "食材
-個数", Fmt::Num(1), |p| p.food_num),
-    ("fEpH", "食材
-/手伝い", Fmt::Num(1), |p| p.f_ep_h),
-    ("fEpD", "食材
-/日", Fmt::Num(1), |p| p.f_ep_d),
-    ("pickupEnergyPerHelp", "きのみ+食材
-/手伝い", Fmt::Num(1), |p| p.pickup_energy_per_help),
-    ("pickupEnergyPerDay", "きのみ+食材
-/日", Fmt::Num(1), |p| p.pickup_energy_per_day),
-    ("bag", "所持
-数", Fmt::Num(0), |p| p.bag),
-    ("bagFullHelpNum", "いつ育
-到達回数", Fmt::Num(1), |p| p.bag_full_help_num),
-    ("normalHelpNum", "通常おてつ
-だい回数", Fmt::Num(2), |p| p.normal_help_num),
-    ("berryHelpNum", "いつ育おてつ
-だい回数", Fmt::Num(2), |p| p.berry_help_num),
-    ("fixedSkillLv", "補正後
-スキルLv", Fmt::Num(0), |p| p.fixed_skill_lv),
+    ("speed", "おてつだい\n時間", Fmt::Num(0), |p| p.speed),
+    ("dayHelpNum", "日中おてつ\nだい回数", Fmt::Num(2), |p| p.day_help_num),
+    ("nightHelpNum", "夜間おてつ\nだい回数", Fmt::Num(2), |p| p.night_help_num),
+    ("berryNum", "きのみ\n個数", Fmt::Num(0), |p| p.berry_num),
+    ("bEpH", "きのみ\n/手伝い", Fmt::Num(1), |p| p.b_ep_h),
+    ("bEpD", "きのみ\n/日", Fmt::Num(1), |p| p.b_ep_d),
+    ("foodRate", "食材\n率", Fmt::Percent(1), |p| p.food_rate),
+    ("foodNum", "食材\n個数", Fmt::Num(1), |p| p.food_num),
+    ("fEpH", "食材\n/手伝い", Fmt::Num(1), |p| p.f_ep_h),
+    ("fEpD", "食材\n/日", Fmt::Num(1), |p| p.f_ep_d),
+    ("pickupEnergyPerHelp", "きのみ+食材\n/手伝い", Fmt::Num(1), |p| p.pickup_energy_per_help),
+    ("pickupEnergyPerDay", "きのみ+食材\n/日", Fmt::Num(1), |p| p.pickup_energy_per_day),
+    ("bag", "所持\n数", Fmt::Num(0), |p| p.bag),
+    ("bagFullHelpNum", "いつ育\n到達回数", Fmt::Num(1), |p| p.bag_full_help_num),
+    ("normalHelpNum", "通常おてつ\nだい回数", Fmt::Num(2), |p| p.normal_help_num),
+    ("berryHelpNum", "いつ育おてつ\nだい回数", Fmt::Num(2), |p| p.berry_help_num),
+    ("fixedSkillLv", "補正後\nスキルLv", Fmt::Num(0), |p| p.fixed_skill_lv),
     ("skillRate", "スキル確率", Fmt::Percent(2), |p| p.skill_rate),
-    ("ceilSkillRate", "天井補正
-スキル確率", Fmt::Percent(2), |p| p.ceil_skill_rate),
-    ("skillPerDay", "スキル
-回数/日", Fmt::Num(2), |p| p.skill_per_day),
-    ("skillEnergyPerDay", "スキル
-エナジー/日", Fmt::Num(1), |p| p.skill_energy_per_day),
-    ("shard", "スキル
-ゆめかけ/日", Fmt::Num(1), |p| p.shard),
-    ("energyPerDay", "エナジー
-/日", Fmt::Num(1), |p| p.energy_per_day),
-    ("supportEnergyPerDay", "サポート
-エナジー/日", Fmt::Num(1), |p| p.support_energy_per_day),
-    ("supportShardPerDay", "サポート
-ゆめかけ/日", Fmt::Num(1), |p| p.support_shard_per_day),
+    ("ceilSkillRate", "天井補正\nスキル確率", Fmt::Percent(2), |p| p.ceil_skill_rate),
+    ("skillPerDay", "スキル\n回数/日", Fmt::Num(2), |p| p.skill_per_day),
+    ("skillEnergyPerDay", "スキル\nエナジー/日", Fmt::Num(1), |p| p.skill_energy_per_day),
+    ("shard", "スキル\nゆめかけ/日", Fmt::Num(1), |p| p.shard),
+    ("energyPerDay", "エナジー\n/日", Fmt::Num(1), |p| p.energy_per_day),
+    ("supportEnergyPerDay", "サポート\nエナジー/日", Fmt::Num(1), |p| p.support_energy_per_day),
+    ("supportShardPerDay", "サポート\nゆめかけ/日", Fmt::Num(1), |p| p.support_shard_per_day),
 ];
+
+/// 厳選の列の種類(キー, 見出し)。本家 index.vue の evaluateList
+const EVAL_KINDS: [(&str, &str); 5] = [("energy", ""), ("specialty", "得意"), ("berry", "きのみ"), ("food", "食材"), ("skill", "スキル")];
+
+/// 「アメ情報」の列(キー, 見出し)。先頭3つは入力欄
+const CANDY_COLUMNS: [(&str, &str); 11] = [
+    ("candy", "所持ｱﾒ"),
+    ("training", "目標Lv"),
+    ("nextExp", "次Lv迄\nのExp"),
+    ("normalCandyNum", "通常\nｱﾒ"),
+    ("normalCandyShard", "通常\nゆめかけ"),
+    ("boostCandyNum", "ﾌﾞｰｽﾄ\nｱﾒ"),
+    ("boostCandyShard", "ﾌﾞｰｽﾄ\nゆめかけ"),
+    ("bestBoostCandyNum", "最適\nﾌﾞｰｽﾄ"),
+    ("bestBoostCandyShard", "最適ﾌﾞｰｽﾄ\nゆめかけ"),
+    ("bestNormalCandyNum", "最適\n通常"),
+    ("bestNormalCandyShard", "最適通常\nゆめかけ"),
+];
+
+fn require_value(r: &RequireInfo, n: usize) -> Option<f64> {
+    match n {
+        3 => r.normal_candy_num,
+        4 => r.normal_candy_shard,
+        5 => r.boost_candy_num,
+        6 => r.boost_candy_shard,
+        7 => r.best_boost_candy_num,
+        8 => r.best_boost_candy_shard,
+        9 => r.best_normal_candy_num,
+        10 => r.best_normal_candy_shard,
+        _ => None,
+    }
+}
+
+/// 「基礎情報」の列(キー, 見出し)
+const BASE_COLUMNS: [(&str, &str); 4] = [("no", "図鑑\nNo"), ("afterList", "最終進化"), ("berryName", "きのみ"), ("skillName", "スキル")];
 
 /// 列見出しの説明(本家 index.vue の help-button)
 fn detail_help(title: &str) -> Option<&'static str> {
     match title {
-        "エナジー
-/日" => Some("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。"),
-        "サポート
-エナジー/日" => Some("おてつだいボーナスやげんき回復系スキル、おてつだいサポートなどによる他ポケモンの効率上昇によって、追加で得られるであろうエナジーです。"),
-        "サポート
-ゆめかけ/日" => Some("おてつだいボーナスやげんき回復系スキルによる他ポケモンの効率上昇、もしくはゆめのかけらボーナスやリサーチEXPボーナスによって、得られるであろうゆめのかけらの量です。"),
+        "エナジー\n/日" => Some("おてつだいボーナスや他ポケモンに影響を与えるスキルの効果を抜きにして、自分自身だけで稼げるエナジーです。"),
+        "サポート\nエナジー/日" => Some("おてつだいボーナスやげんき回復系スキル、おてつだいサポートなどによる他ポケモンの効率上昇によって、追加で得られるであろうエナジーです。"),
+        "サポート\nゆめかけ/日" => Some("おてつだいボーナスやげんき回復系スキルによる他ポケモンの効率上昇、もしくはゆめのかけらボーナスやリサーチEXPボーナスによって、得られるであろうゆめのかけらの量です。\n現状の実装ではリサーチEXPボーナスもゆめのかけらとして扱ってこの値に含めています。"),
         _ => None,
     }
 }
@@ -103,7 +113,7 @@ fn fmt_value(v: f64, fmt: Fmt) -> String {
 }
 
 /// キーワード絞り込み(名前・食材・スキル・サブスキル・性格・メモ)
-fn keyword_match(p: &pokesle_core::sim_pokemon::BoxPokemon, query: &str) -> bool {
+fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
     let m = master();
     let skill = m.pokemon(&p.name).map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("");
     p.name.contains(query)
@@ -120,12 +130,16 @@ fn simulate_key(shared: &Shared) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let mut v = shared.config.to_value();
     if let Some(m) = v.as_object_mut() {
-        // 表示だけの設定は除く
+        // 表示だけの設定と、本家でも再計算しないアメの設定は除く
         m.remove("pokemonList");
         m.remove("summary");
+        m.remove("sortableTable");
+        m.remove("candy");
     }
     v.to_string().hash(&mut h);
-    serde_json::to_string(&shared.box_file.list).unwrap_or_default().hash(&mut h);
+    // 目標Lv・次Lv迄のExp は必要アメ数の計算だけに使う
+    let list: Vec<BoxPokemon> = shared.box_file.list.iter().map(|p| BoxPokemon { training: None, next_exp: None, ..p.clone() }).collect();
+    serde_json::to_string(&list).unwrap_or_default().hash(&mut h);
     if let Some(t) = shared.usable_evaluate_table() {
         format!("{:?}{:?}", t.healer, t.support).hash(&mut h);
         t.pokemon.len().hash(&mut h);
@@ -133,17 +147,60 @@ fn simulate_key(shared: &Shared) -> u64 {
     h.finish()
 }
 
-/// 設定 `pokemonList.simulatedInfo`(シミュ詳細)
-fn simulated_info(shared: &Shared) -> bool {
-    shared.config.extra.get("pokemonList").and_then(|v| v.get("simulatedInfo")).and_then(|v| v.as_bool()).unwrap_or(false)
+/// ボックス一覧の表示設定(本家 `config.pokemonList`)
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct ListSetting {
+    sub_skill_short: bool,
+    memo: bool,
+    /// 0: 非表示、1: 総合スコアのみ、2: 総合スコア＆とくい、3: 総合スコア＆きのみ＆食材＆スキル
+    evaluate_list: f64,
+    select_energy: bool,
+    select_detail: bool,
+    candy: bool,
+    base_info: bool,
+    food_info: bool,
+    simulated_info: bool,
+    fix_score: bool,
+    page_unit: Option<f64>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
-fn set_simulated_info(shared: &mut Shared, on: bool) {
-    let list = shared.config.extra.entry("pokemonList").or_insert_with(|| serde_json::json!({}));
-    if let Some(map) = list.as_object_mut() {
-        map.insert("simulatedInfo".into(), on.into());
+impl Default for ListSetting {
+    /// 本家 default-config.ts の初期値
+    fn default() -> Self {
+        ListSetting {
+            sub_skill_short: true,
+            memo: false,
+            evaluate_list: 2.0,
+            select_energy: false,
+            select_detail: false,
+            candy: false,
+            base_info: true,
+            food_info: false,
+            simulated_info: false,
+            fix_score: false,
+            page_unit: Some(50.0),
+            extra: Default::default(),
+        }
     }
-    shared.save_config();
+}
+
+impl ListSetting {
+    fn load(shared: &Shared) -> ListSetting {
+        shared.config.extra.get("pokemonList").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
+    }
+
+    fn save(&self, shared: &mut Shared) {
+        shared.config.extra.insert("pokemonList".into(), serde_json::to_value(self).expect("表示設定"));
+        shared.save_config();
+    }
+
+    /// 1ページの件数(0 以下・未設定ならページ分けしない)
+    fn page_unit(&self) -> Option<usize> {
+        self.page_unit.filter(|x| *x >= 1.0).map(|x| x as usize)
+    }
 }
 
 /// 並べ替えに使う値(本家 sortable-table.vue の getSortKey)
@@ -230,72 +287,143 @@ fn toggle_sort(sort: &mut Vec<(String, i8)>, key: &str, shift: bool) {
 enum Col {
     Index,
     Name,
+    Memo,
     Lv,
-    SkillLv,
     Food,
+    SkillLv,
     Sub(usize),
     Nature,
     Score,
-    Evaluate,
+    /// 厳選(EVAL_KINDS の位置, レベル, 元値なら true)
+    Eval(usize, EvalLv, bool),
+    Candy(usize),
+    Base(usize),
+    /// 食材ごとの1日の個数(食材インデックス)
+    FoodNum(usize),
     Detail(usize),
 }
 
 impl Col {
-    /// 最初の並び
-    fn all() -> Vec<Col> {
-        let mut list = vec![Col::Index, Col::Name, Col::Lv, Col::SkillLv, Col::Food];
+    /// 表示設定で出す列(最初の並び)
+    fn all(setting: &ListSetting, levels: &[u32]) -> Vec<Col> {
+        let mut list = vec![Col::Index, Col::Name];
+        if setting.memo {
+            list.push(Col::Memo);
+        }
+        list.extend([Col::Lv, Col::Food, Col::SkillLv]);
         list.extend((0..SUB_SKILL_LV.len()).map(Col::Sub));
-        list.extend([Col::Nature, Col::Score, Col::Evaluate]);
-        list.extend((0..DETAIL_COLUMNS.len()).map(Col::Detail));
+        list.extend([Col::Nature, Col::Score]);
+        let kinds: &[usize] = match setting.evaluate_list as i32 {
+            1 => &[0],
+            2 => &[0, 1],
+            3 => &[0, 2, 3, 4],
+            _ => &[],
+        };
+        for &k in kinds {
+            list.push(Col::Eval(k, EvalLv::Max, false));
+            for &lv in levels {
+                list.push(Col::Eval(k, EvalLv::Lv(lv), false));
+                if setting.select_energy {
+                    list.push(Col::Eval(k, EvalLv::Lv(lv), true));
+                }
+            }
+        }
+        if setting.candy {
+            list.extend((0..CANDY_COLUMNS.len()).map(Col::Candy));
+        }
+        if setting.base_info {
+            list.extend((0..BASE_COLUMNS.len()).map(Col::Base));
+        }
+        if setting.food_info {
+            list.extend((0..master().foods.len()).map(Col::FoodNum));
+        }
+        if setting.simulated_info {
+            list.extend((0..DETAIL_COLUMNS.len()).map(Col::Detail));
+        }
         list
     }
 
-    /// 並べ替え・列の並びの保存に使うキー
+    /// 並べ替え・列の並びの保存に使うキー(本家と同じ)
     fn key(self) -> String {
         match self {
             Col::Index => "index".into(),
             Col::Name => "name".into(),
+            Col::Memo => "memo".into(),
             Col::Lv => "lv".into(),
-            Col::SkillLv => "skillLv".into(),
             Col::Food => "foodNameList".into(),
+            Col::SkillLv => "skillLv".into(),
             Col::Sub(slot) => format!("subSkill{}", SUB_SKILL_LV[slot]),
             Col::Nature => "natureName".into(),
             Col::Score => "score".into(),
-            Col::Evaluate => "evaluate".into(),
+            Col::Eval(k, lv, value) => {
+                let lv = match lv {
+                    EvalLv::Max => "max".to_string(),
+                    EvalLv::Lv(lv) => lv.to_string(),
+                };
+                format!("{}_{}_{lv}", EVAL_KINDS[k].0, if value { "value" } else { "percentile" })
+            }
+            Col::Candy(n) => CANDY_COLUMNS[n].0.into(),
+            Col::Base(n) => BASE_COLUMNS[n].0.into(),
+            Col::FoodNum(n) => master().foods[n].name.clone(),
             Col::Detail(n) => DETAIL_COLUMNS[n].0.into(),
         }
     }
 
-    fn title(self) -> String {
+    fn title(self, setting: &ListSetting) -> String {
         match self {
             Col::Index => "No".into(),
-            Col::Name => "ポケモン".into(),
+            Col::Name => "名前".into(),
+            Col::Memo => "メモ".into(),
             Col::Lv => "Lv".into(),
-            Col::SkillLv => "スキルLv".into(),
             Col::Food => "食材".into(),
-            Col::Sub(slot) => format!("サブ{}", SUB_SKILL_LV[slot]),
-            Col::Nature => "せいかく".into(),
+            Col::SkillLv => "ｽｷﾙ\nLv".into(),
+            Col::Sub(slot) => if setting.sub_skill_short { format!("サブ{}", SUB_SKILL_LV[slot]) } else { format!("サブスキル{}", SUB_SKILL_LV[slot]) },
+            Col::Nature => "性格".into(),
             Col::Score => "スコア".into(),
-            Col::Evaluate => "厳選".into(),
+            Col::Eval(k, lv, value) => {
+                let (key, name) = EVAL_KINDS[k];
+                let lv = match lv {
+                    EvalLv::Max => "最大".to_string(),
+                    EvalLv::Lv(lv) => lv.to_string(),
+                };
+                if value {
+                    format!("{name}{}\n({lv})", if key == "energy" { "エナジー" } else { "数量" })
+                } else {
+                    format!("{name}厳選\n({lv})")
+                }
+            }
+            Col::Candy(n) => CANDY_COLUMNS[n].1.into(),
+            Col::Base(n) => BASE_COLUMNS[n].1.into(),
+            Col::FoodNum(n) => master().foods[n].name.clone(),
             Col::Detail(n) => DETAIL_COLUMNS[n].1.into(),
         }
     }
 
     /// 列の幅(width は覚えている幅。無ければ最初の幅)
-    fn width(self, width: Option<f32>) -> Column {
+    fn width(self, width: Option<f32>, setting: &ListSetting) -> Column {
         let (initial, min) = match self {
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
+            Col::Memo => (120.0, 40.0),
             Col::Lv => (40.0, 24.0),
-            Col::SkillLv => (72.0, 24.0),
+            Col::SkillLv => (40.0, 24.0),
             Col::Food => (84.0, 40.0),
-            Col::Sub(_) => (72.0, 32.0),
+            Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
             Col::Nature => (80.0, 24.0),
             Col::Score => (90.0, 24.0),
-            Col::Evaluate => (70.0, 24.0),
+            Col::Eval(..) => (if setting.select_detail { 180.0 } else { 90.0 }, 40.0),
+            Col::Candy(_) => (64.0, 32.0),
+            Col::Base(1) => (130.0, 40.0),
+            Col::Base(_) => (90.0, 32.0),
+            Col::FoodNum(_) => (60.0, 32.0),
             Col::Detail(_) => (84.0, 32.0),
         };
         Column::initial(width.unwrap_or(initial).max(min)).at_least(min)
+    }
+
+    /// 2行の見出しか
+    fn tall_header(self, setting: &ListSetting) -> bool {
+        self.title(setting).contains('\n') || matches!(self, Col::FoodNum(_))
     }
 }
 
@@ -308,23 +436,39 @@ fn column_width_id() -> egui::Id {
     egui::Id::new("box_column_width")
 }
 
-/// 保存された列の並び(保存に無い列は最初の並びのまま後ろに付ける)
-fn column_order(ctx: &egui::Context) -> Vec<Col> {
-    let all = Col::all();
+/// 保存された列の並び。保存に無い列は、最初の並びで直前にある列の後ろに入れる
+fn column_order(ctx: &egui::Context, all: &[Col]) -> Vec<Col> {
     let saved: Vec<String> = ctx.data_mut(|d| d.get_persisted(column_order_id())).unwrap_or_default();
     let mut order: Vec<Col> = saved.iter().filter_map(|k| all.iter().copied().find(|c| c.key() == *k)).collect();
-    for c in all {
-        if !order.contains(&c) {
-            order.push(c);
+    let mut last = None;
+    for &c in all {
+        match order.iter().position(|x| *x == c) {
+            Some(n) => last = Some(n),
+            None => {
+                let n = last.map_or(0, |n| n + 1);
+                order.insert(n, c);
+                last = Some(n);
+            }
         }
     }
     order
 }
 
-/// 列の並びを保存する(None は最初の並びに戻す)
+/// 列の並びを保存する(None は最初の並びに戻す)。表示していない列の位置も残す
 fn set_column_order(ctx: &egui::Context, order: Option<&[Col]>) {
     match order {
-        Some(order) => ctx.data_mut(|d| d.insert_persisted(column_order_id(), order.iter().map(|c| c.key()).collect::<Vec<_>>())),
+        Some(order) => {
+            let mut keys: Vec<String> = order.iter().map(|c| c.key()).collect();
+            let saved: Vec<String> = ctx.data_mut(|d| d.get_persisted(column_order_id())).unwrap_or_default();
+            for (i, k) in saved.iter().enumerate() {
+                if !keys.contains(k) {
+                    // 保存済みの並びで直前にあった列の後ろへ
+                    let pos = saved[..i].iter().rev().find_map(|p| keys.iter().position(|x| x == p)).map_or(0, |n| n + 1);
+                    keys.insert(pos, k.clone());
+                }
+            }
+            ctx.data_mut(|d| d.insert_persisted(column_order_id(), keys))
+        }
         None => ctx.data_mut(|d| d.remove::<Vec<String>>(column_order_id())),
     }
 }
@@ -336,6 +480,44 @@ fn column_widths(ctx: &egui::Context) -> HashMap<String, f32> {
 
 fn set_column_widths(ctx: &egui::Context, widths: HashMap<String, f32>) {
     ctx.data_mut(|d| d.insert_persisted(column_width_id(), widths));
+}
+
+/// 表の中で入力した値(描画後にまとめて反映する)
+enum CellEdit {
+    Candy(String, Option<f64>),
+    Training(usize, Option<f64>),
+    NextExp(usize, Option<f64>),
+}
+
+/// 厳選の値の表示(本家 evaluate-result.vue)
+fn eval_text(v: f64, key: &str, value: bool) -> String {
+    if !value {
+        format!("{:.1}%", v * 100.0)
+    } else if key != "energy" {
+        format!("{v:.1}")
+    } else {
+        fmt_num(v)
+    }
+}
+
+/// 厳選の値の進化先一覧(進化先名, 値, 最良か)。表示設定「最適でない進化先の厳選値も表示」なら全進化先
+fn eval_rows(result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool) -> Vec<(String, Option<f64>, bool)> {
+    let m = master();
+    let key = EVAL_KINDS[k].0;
+    let Some(r) = result else { return Vec::new() };
+    let Some(e) = r.evaluate_result.as_ref() else { return Vec::new() };
+    let best = e.best.get(&lv).and_then(|b| b.get(key)).and_then(|x| x.name.clone());
+    let after: Vec<String> = if detail { m.pokemon[r.pokemon.base].after_list.clone() } else { best.clone().into_iter().collect() };
+    let multi = after.len() > 1;
+    after
+        .into_iter()
+        .map(|a| {
+            let info = e.get(lv, &a).and_then(|x| x.get(key));
+            let v = info.map(|x| if value { x.value } else { x.score }).filter(|x| !x.is_nan());
+            let is_best = multi && best.as_deref() == Some(a.as_str());
+            (a, v, is_best)
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -352,6 +534,8 @@ pub struct BoxView {
     /// ボックス位置 → 概算結果(いつ育モードを除く)
     results: Vec<Option<BoxResult>>,
     error: String,
+    /// 表示中のページ(0 始まり)
+    page: usize,
 }
 
 impl BoxView {
@@ -363,16 +547,7 @@ impl BoxView {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
             changed |= common_setting::ui(ui, &mut shared.config, &shared.box_file.list);
-            let mut detail = simulated_info(shared);
-            style::setting(ui, "box_display", "表示設定", &style::plain("表示設定"), false, |ui| {
-                egui::Grid::new("box_display_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-                    style::th(ui, "シミュ詳細");
-                    if ui.checkbox(&mut detail, "シミュ詳細").changed() {
-                        set_simulated_info(shared, detail);
-                    }
-                    ui.end_row();
-                });
-            });
+            display_setting(ui, shared);
         });
         if changed {
             shared.save_config();
@@ -381,7 +556,9 @@ impl BoxView {
         ui.add_space(5.0);
         ui.horizontal(|ui| {
             style::th(ui, "キーワード");
-            ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0));
+            if ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0)).changed() {
+                self.page = 0;
+            }
         });
 
         // 設定・ボックス・厳選テーブルが変わったら概算し直す(本家は自動で再計算する)
@@ -408,8 +585,20 @@ impl BoxView {
         }
         ui.add_space(5.0);
 
-        // 下段: 追加・TSV
+        let setting = ListSetting::load(shared);
+        let rows = self.sorted_rows(shared);
+        // ページ分け(本家 sortable-table の pager)
+        let page_max = setting.page_unit().map(|u| rows.len().div_ceil(u).max(1));
+        if let Some(max) = page_max {
+            self.page = self.page.min(max - 1);
+        }
+
+        // 下段: ページ送り・追加・TSV
         egui::Panel::bottom("box_actions").frame(egui::Frame::new().inner_margin(egui::Margin { top: 6, ..Default::default() })).show(ui, |ui| {
+            if let Some(max) = page_max {
+                self.pager(ui, max);
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
                 if style::form_button(ui, "ポケモン新規追加", style::ButtonKind::Execute).clicked() {
                     self.edit = Some(PokemonEdit::new(None, None));
@@ -422,7 +611,11 @@ impl BoxView {
             });
         });
 
-        self.table(ui, shared);
+        let rows = match setting.page_unit() {
+            Some(u) => rows.into_iter().skip(u * self.page).take(u).collect(),
+            None => rows,
+        };
+        self.table(ui, shared, &setting, rows);
         self.import_window(ui.ctx(), shared);
 
         if let Some(edit) = &mut self.edit {
@@ -440,6 +633,27 @@ impl BoxView {
                 }
             }
         }
+    }
+
+    /// 本家 sortable-table の pager(Prev 1 2 3 … Next)
+    fn pager(&mut self, ui: &mut egui::Ui, max: usize) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            if ui.add(egui::Button::new("‹ Prev").frame(false)).clicked() {
+                self.page = self.page.saturating_sub(1);
+            }
+            for p in 0..max {
+                let text = egui::RichText::new((p + 1).to_string());
+                let text = if p == self.page { text.strong().color(egui::Color32::WHITE) } else { text };
+                let button = egui::Button::new(text).min_size(egui::vec2(26.0, 22.0)).fill(if p == self.page { style::PRIMARY } else { egui::Color32::TRANSPARENT });
+                if ui.add(button).clicked() {
+                    self.page = p;
+                }
+            }
+            if ui.add(egui::Button::new("Next ›").frame(false)).clicked() {
+                self.page = (self.page + 1).min(max - 1);
+            }
+        });
     }
 
     fn poll_jobs(&mut self, shared: &mut Shared) {
@@ -468,13 +682,13 @@ impl BoxView {
         }
     }
 
-    fn table(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
-        let m = master();
+    /// キーワードで絞り込み、並べ替えたボックス位置の一覧
+    fn sorted_rows(&self, shared: &Shared) -> Vec<usize> {
         let query = self.search.trim().to_string();
         let mut rows: Vec<usize> = (0..shared.box_file.list.len())
             .filter(|&i| query.is_empty() || keyword_match(&shared.box_file.list[i], &query))
             .collect();
-        let mut sort = sort_info(shared);
+        let sort = sort_info(shared);
         if !sort.is_empty() {
             let keys: Vec<Vec<SortValue>> = rows.iter().map(|&i| sort.iter().map(|(k, _)| self.sort_value(shared, i, k)).collect()).collect();
             // 本家と同じく安定ソート(同じ値は元の順のまま)
@@ -492,11 +706,19 @@ impl BoxView {
             });
             rows = order.into_iter().map(|n| rows[n]).collect();
         }
+        rows
+    }
+
+    fn table(&mut self, ui: &mut egui::Ui, shared: &mut Shared, setting: &ListSetting, rows: Vec<usize>) {
+        let m = master();
+        let mut sort = sort_info(shared);
         let mut sort_changed = false;
         let mut action: Option<(usize, bool)> = None; // (index, delete?)
-        let detail = simulated_info(shared);
-        let mut order = column_order(ui.ctx());
-        let columns: Vec<Col> = order.iter().copied().filter(|c| detail || !matches!(c, Col::Detail(_))).collect();
+        let mut edits: Vec<CellEdit> = Vec::new();
+        let levels = shared.config.select_evaluate.enabled_levels();
+        let all = Col::all(setting, &levels);
+        let mut order = column_order(ui.ctx(), &all);
+        let columns = order.clone();
         // 列の入れ替え(動かす列, 入れる先の列, 先の列の後ろか)、並びを最初に戻す
         let mut moved: Option<(Col, Col, bool)> = None;
         let mut reset_order = false;
@@ -504,6 +726,22 @@ impl BoxView {
         // 測っておいた各列の幅を最初の幅として渡す
         let mut widths = column_widths(ui.ctx());
         let order_salt: Vec<String> = columns.iter().map(|c| c.key()).collect();
+        let tall_header = columns.iter().any(|c| c.tall_header(setting));
+        let has_eval = columns.iter().any(|c| matches!(c, Col::Eval(..)));
+        // 行の高さ: 厳選の列は進化先名と値の2段(全進化先を出すときは進化先の数だけ)
+        let heights: Vec<f32> = rows
+            .iter()
+            .map(|&i| {
+                if !has_eval {
+                    return 26.0;
+                }
+                if !setting.select_detail {
+                    return 36.0;
+                }
+                let n = self.results.get(i).and_then(|r| r.as_ref()).map_or(1, |r| m.pokemon[r.pokemon.base].after_list.len().max(1));
+                (n as f32 * 18.0 + 6.0).max(26.0)
+            })
+            .collect();
 
         // 列が画面に収まらないときは横にスクロールする
         egui::ScrollArea::horizontal().show(ui, |ui| {
@@ -513,19 +751,18 @@ impl BoxView {
                 .resizable(true)
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center));
             for c in &columns {
-                table = table.column(c.width(widths.get(&c.key()).copied()));
+                table = table.column(c.width(widths.get(&c.key()).copied(), setting));
             }
             table
                 .column(Column::remainder())
-                // シミュ詳細の見出しは2行
-                .header(if detail { 40.0 } else { 22.0 }, |mut header| {
+                .header(if tall_header { 40.0 } else { 22.0 }, |mut header| {
                     for &col in &columns {
                         // header.col が返すのは中身の大きさなので、マスの幅はマスの中で測る
                         let mut cell_width = None;
                         header.col(|ui| {
                             cell_width = Some(ui.max_rect().width());
                             let key = col.key();
-                            let title = col.title();
+                            let title = col.title(setting);
                             // 並べ替え中の列には ▲(昇順)/▼(降順) と、条件が複数なら優先順を付ける
                             let mark = match sort.iter().position(|(k, _)| *k == key) {
                                 Some(n) => {
@@ -534,7 +771,14 @@ impl BoxView {
                                 }
                                 None => String::new(),
                             };
-                            ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+                            if let Col::FoodNum(n) = col {
+                                ui.vertical(|ui| {
+                                    food_icon::food_icon(ui, &m.foods[n].name, 20.0);
+                                    ui.add(egui::Label::new(egui::RichText::new(mark.clone()).strong()).selectable(false));
+                                });
+                            } else {
+                                ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+                            }
                             // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
                             let rect = ui.max_rect();
                             let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
@@ -588,18 +832,19 @@ impl BoxView {
                     header.col(|_| {});
                 })
                 .body(|body| {
-                    body.rows(26.0, rows.len(), |mut row| {
+                    body.heterogeneous_rows(heights.into_iter(), |mut row| {
                         let i = rows[row.index()];
                         let p = &shared.box_file.list[i];
                         let result = self.results.get(i).and_then(|r| r.as_ref());
+                        let require = setting.candy.then(|| calc_require_info(p, result.and_then(|r| r.pokemon.nature).map(|n| &m.natures[n]), &shared.config.candy));
                         for &col in &columns {
                             row.col(|ui| match col {
                                 Col::Index => {
                                     ui.label(format!("{}", i + 1));
                                 }
-                                Col::Name => {
-                                    let mark = if p.fix == Some(1.0) { "📌" } else { "" };
-                                    ui.label(format!("{mark}{}", p.name));
+                                Col::Name => name_cell(ui, p, result, setting.memo),
+                                Col::Memo => {
+                                    ui.label(egui::RichText::new(p.memo.clone().unwrap_or_default()).size(11.0));
                                 }
                                 Col::Lv => {
                                     ui.label(format!("{}", p.lv));
@@ -610,32 +855,76 @@ impl BoxView {
                                 Col::Food => food_icon::food_list(ui, p),
                                 Col::Sub(slot) => {
                                     let Some(name) = p.sub_skill_list.get(slot) else { return };
-                                    let short = m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?");
+                                    let text = if setting.sub_skill_short { m.sub_skill(name).map(|x| x.short.as_str()).unwrap_or("?") } else { name.as_str() };
                                     // まだ解放されていないサブスキルは薄く表示する
-                                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(short) } else { egui::RichText::new(short).weak() };
+                                    let text = if p.lv >= SUB_SKILL_LV[slot] as f64 { egui::RichText::new(text) } else { egui::RichText::new(text).weak() };
                                     ui.label(text).on_hover_text(name);
                                 }
                                 Col::Nature => nature_label(ui, &p.nature),
                                 Col::Score => {
                                     if let Some(r) = result {
-                                        ui.label(fmt_num(r.pokemon.score));
+                                        ui.label(fmt_fixed(r.pokemon.score, 1));
                                     }
                                 }
-                                Col::Evaluate => {
-                                    let best = result
-                                        .and_then(|r| r.evaluate_result.as_ref())
-                                        .and_then(|e| e.best.get(&EvalLv::Max))
-                                        .and_then(|b| b.energy.as_ref());
-                                    if let Some(b) = best {
-                                        ui.label(format!("{:.0}%", b.score * 100.0)).on_hover_text(b.name.clone().unwrap_or_default());
+                                Col::Eval(k, lv, value) => eval_cell(ui, result, k, lv, value, setting.select_detail),
+                                Col::Candy(0) => {
+                                    let base = m.pokemon(&p.name);
+                                    if let Some(b) = base {
+                                        let mut v = shared.config.candy.bag.get(&b.candy_name).copied();
+                                        if style::opt_number(ui, &format!("box_candy_{i}"), &mut v, false, 50.0, "") {
+                                            edits.push(CellEdit::Candy(b.candy_name.clone(), v));
+                                        }
+                                    }
+                                }
+                                Col::Candy(1) => {
+                                    let mut v = p.training;
+                                    if style::opt_number(ui, &format!("box_training_{i}"), &mut v, false, 50.0, "") {
+                                        edits.push(CellEdit::Training(i, v));
+                                    }
+                                }
+                                Col::Candy(2) => {
+                                    let mut v = p.next_exp;
+                                    if style::opt_number(ui, &format!("box_next_exp_{i}"), &mut v, false, 50.0, "") {
+                                        edits.push(CellEdit::NextExp(i, v));
+                                    }
+                                }
+                                Col::Candy(n) => {
+                                    if let Some(v) = require.as_ref().and_then(|r| require_value(r, n)) {
+                                        right(ui, fmt_fixed(v, 0));
+                                    }
+                                }
+                                Col::Base(n) => {
+                                    let Some(b) = m.pokemon(&p.name) else { return };
+                                    match n {
+                                        0 => {
+                                            ui.label(b.no.to_string());
+                                        }
+                                        1 => {
+                                            let list = result.map_or(&b.after_list, |r| &r.pokemon.after_list);
+                                            let text = match list.len() {
+                                                0 => String::new(),
+                                                1 => list[0].clone(),
+                                                _ => format!("{}等", list[0]),
+                                            };
+                                            ui.label(egui::RichText::new(text).size(11.0)).on_hover_text(list.join("、"));
+                                        }
+                                        2 => {
+                                            ui.label(&m.berries[b.berry].name);
+                                        }
+                                        _ => {
+                                            ui.label(&m.pokemon_skill(b).name);
+                                        }
+                                    }
+                                }
+                                Col::FoodNum(n) => {
+                                    if let Some(r) = result {
+                                        right(ui, fmt_fixed(r.pokemon.food_count.get(n).copied().unwrap_or(0.0), 1));
                                     }
                                 }
                                 Col::Detail(n) => {
                                     let (_, _, fmt, get) = DETAIL_COLUMNS[n];
                                     if let Some(r) = result {
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            ui.label(fmt_value(get(&r.pokemon), fmt));
-                                        });
+                                        right(ui, fmt_value(get(&r.pokemon), fmt));
                                     }
                                 }
                             });
@@ -668,6 +957,30 @@ impl BoxView {
             set_sort_info(shared, &sort);
         }
 
+        if !edits.is_empty() {
+            let mut box_changed = false;
+            for e in edits {
+                match e {
+                    // 本家は空欄を null で保存するが、計算上は 0 と同じ
+                    CellEdit::Candy(name, v) => {
+                        shared.config.candy.bag.insert(name, v.unwrap_or(0.0));
+                    }
+                    CellEdit::Training(i, v) => {
+                        shared.box_file.list[i].training = v;
+                        box_changed = true;
+                    }
+                    CellEdit::NextExp(i, v) => {
+                        shared.box_file.list[i].next_exp = v;
+                        box_changed = true;
+                    }
+                }
+            }
+            shared.save_config();
+            if box_changed {
+                shared.save_box();
+            }
+        }
+
         match action {
             Some((i, false)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
             Some((i, true)) => {
@@ -684,25 +997,44 @@ impl BoxView {
         let m = master();
         let p = &shared.box_file.list[i];
         let result = self.results.get(i).and_then(|r| r.as_ref());
+        let base = m.pokemon(&p.name);
         let num = |v: Option<f64>| SortValue::Num(v.filter(|x| !x.is_nan()).unwrap_or(0.0));
         let text = |v: &str| SortValue::Str(kana_sort_key(v));
         match key {
             "index" => num(Some(i as f64)),
             "name" => text(&p.name),
+            "memo" => text(p.memo.as_deref().unwrap_or("")),
             "lv" => num(Some(p.lv)),
             "skillLv" => num(p.skill_lv),
             "foodNameList" => text(&p.food_list.join(",")),
             "natureName" => text(&p.nature),
             "score" => num(result.map(|r| r.pokemon.score)),
-            "evaluate" => num(result
-                .and_then(|r| r.evaluate_result.as_ref())
-                .and_then(|e| e.best.get(&EvalLv::Max))
-                .and_then(|b| b.energy.as_ref())
-                .map(|b| b.score)),
+            "candy" => num(base.and_then(|b| shared.config.candy.bag.get(&b.candy_name).copied())),
+            "training" => num(p.training),
+            "nextExp" => num(p.next_exp),
+            "no" => num(base.map(|b| b.no as f64)),
+            "afterList" => text(&result.map_or_else(|| base.map(|b| b.after_list.join(",")).unwrap_or_default(), |r| r.pokemon.after_list.join(","))),
+            "berryName" => text(base.map(|b| m.berries[b.berry].name.as_str()).unwrap_or("")),
+            "skillName" => text(base.map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("")),
             _ => {
                 if let Some(slot) = SUB_SKILL_LV.iter().position(|lv| key == format!("subSkill{lv}")) {
                     let name = p.sub_skill_list.get(slot).map(|n| m.sub_skill(n).map(|x| x.short.as_str()).unwrap_or(n)).unwrap_or("");
                     return text(name);
+                }
+                if let Some(n) = CANDY_COLUMNS.iter().position(|(k, _)| *k == key) {
+                    let r = calc_require_info(p, result.and_then(|r| r.pokemon.nature).map(|n| &m.natures[n]), &shared.config.candy);
+                    return num(require_value(&r, n));
+                }
+                if let Some(n) = m.foods.iter().position(|f| f.name == key) {
+                    return num(result.and_then(|r| r.pokemon.food_count.get(n).copied()));
+                }
+                if let Some((k, kind, lv)) = parse_eval_key(key) {
+                    let v = result
+                        .and_then(|r| r.evaluate_result.as_ref())
+                        .and_then(|e| e.best.get(&lv))
+                        .and_then(|b| b.get(EVAL_KINDS[k].0))
+                        .map(|x| if kind { x.value } else { x.score });
+                    return num(v);
                 }
                 match DETAIL_COLUMNS.iter().find(|(k, _, _, _)| *k == key) {
                     Some((_, _, _, get)) => num(result.map(|r| get(&r.pokemon))),
@@ -711,7 +1043,6 @@ impl BoxView {
             }
         }
     }
-
     fn import_window(&mut self, ctx: &egui::Context, shared: &mut Shared) {
         if !self.import_open {
             return;
@@ -817,4 +1148,172 @@ fn tsv_columns_ui(ui: &mut egui::Ui, cols: &mut TsvColumns) -> bool {
         }
     });
     changed
+}
+
+/// 右寄せの数値
+fn right(ui: &mut egui::Ui, text: String) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.label(text);
+    });
+}
+
+/// "energy_percentile_60" → (EVAL_KINDS の位置, 元値か, レベル)
+fn parse_eval_key(key: &str) -> Option<(usize, bool, EvalLv)> {
+    let mut it = key.split('_');
+    let k = EVAL_KINDS.iter().position(|(x, _)| Some(*x) == it.next())?;
+    let value = match it.next()? {
+        "percentile" => false,
+        "value" => true,
+        _ => return None,
+    };
+    let lv = match it.next()? {
+        "max" => EvalLv::Max,
+        x => EvalLv::Lv(x.parse().ok()?),
+    };
+    Some((k, value, lv))
+}
+
+/// 名前(本家 name-label.vue): 進化を仮定したら「進化前→」、色違いは赤字、メモ列を出さないときは名前の下にメモ
+fn name_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, memo_column: bool) {
+    let m = master();
+    let name = result.map_or(p.name.as_str(), |r| m.pokemon[r.pokemon.base].name.as_str());
+    let mut text = String::new();
+    if p.fix == Some(1.0) {
+        text.push('📌');
+    }
+    let before = result.map(|r| r.before_name.as_str()).filter(|b| !b.is_empty() && *b != name);
+    let mut main = egui::RichText::new(format!("{text}{name}{}", if p.favorite { "⭐" } else { "" }));
+    if p.shiny {
+        main = main.strong().color(egui::Color32::from_rgb(0xee, 0x55, 0x22));
+    }
+    let memo = p.memo.as_deref().filter(|x| !x.is_empty() && !memo_column);
+    let name_line = |ui: &mut egui::Ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            if let Some(b) = before {
+                ui.label(egui::RichText::new(format!("{b}→")).size(10.0));
+            }
+            ui.label(main);
+        });
+    };
+    match memo {
+        Some(memo) => {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                name_line(ui);
+                ui.label(egui::RichText::new(memo).size(10.0).color(style::MUTED));
+            });
+        }
+        None => name_line(ui),
+    }
+}
+
+/// 厳選の値(本家 evaluate-result.vue)
+fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv, value: bool, detail: bool) {
+    let rows = eval_rows(result, k, lv, value, detail);
+    let key = EVAL_KINDS[k].0;
+    ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (after, v, best) in rows {
+            let text = v.map_or_else(|| "-".to_string(), |v| eval_text(v, key, value));
+            let style = |t: egui::RichText| if best { t.strong() } else { t };
+            if detail {
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_sized([if key == "energy" && value { 52.0 } else { 46.0 }, 16.0], egui::Label::new(style(egui::RichText::new(text).size(11.0))));
+                        ui.label(style(egui::RichText::new(after).size(10.0)));
+                    });
+                });
+            } else {
+                ui.label(style(egui::RichText::new(after).size(10.0)));
+                ui.label(style(egui::RichText::new(text).size(11.0)));
+            }
+        }
+    });
+}
+
+/// 表示設定(本家 index.vue の SettingButton「表示設定」)
+fn display_setting(ui: &mut egui::Ui, shared: &mut Shared) {
+    let mut s = ListSetting::load(shared);
+    let mut candy = (shared.config.candy.boost_multiply, shared.config.candy.boost_shard);
+    let mut changed = false;
+    style::setting(ui, "box_display", "表示設定", &style::plain("表示設定"), false, |ui| {
+        ui.set_max_width(560.0);
+        egui::Grid::new("box_display_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
+            let th = |ui: &mut egui::Ui, t: &str| {
+                ui.vertical(|ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                    style::th(ui, t);
+                });
+            };
+            th(ui, "サブスキル名省略");
+            changed |= ui.checkbox(&mut s.sub_skill_short, "サブスキル名省略").changed();
+            ui.end_row();
+
+            th(ui, "メモ");
+            changed |= ui.checkbox(&mut s.memo, "メモを列として表示").changed();
+            ui.end_row();
+
+            th(ui, "厳選");
+            ui.vertical(|ui| {
+                for (v, l) in [(0.0, "非表示"), (1.0, "総合スコアのみ"), (2.0, "総合スコア＆とくい"), (3.0, "総合スコア＆きのみ＆食材＆スキル")] {
+                    changed |= ui.radio_value(&mut s.evaluate_list, v, l).changed();
+                }
+                style::small(ui, "きのみはきのみの数、食材は食材の数、スキルは発動期待値で評価しています。", 300.0);
+                ui.add_space(5.0);
+                changed |= ui.checkbox(&mut s.select_energy, "厳選元値表示").changed();
+                style::small(ui, "厳選度の場合はエナジー、とくい厳選度の場合はその分野の数量を表示するかどうかのオプションです。", 300.0);
+                ui.add_space(5.0);
+                changed |= ui.checkbox(&mut s.select_detail, "最適でない進化先の厳選値も表示").changed();
+                style::small(ui, "進化先が複数あるポケモンについて、最も適正が高い進化先以外の結果もすべて表示します。", 300.0);
+            });
+            ui.end_row();
+
+            th(ui, "アメ情報");
+            ui.vertical(|ui| {
+                changed |= ui.checkbox(&mut s.candy, "アメ情報").changed();
+                ui.horizontal(|ui| {
+                    ui.label("ブーストEXP倍率");
+                    changed |= style::number(ui, &mut candy.0, 0.1, 50.0);
+                    ui.label("倍");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("ブーストかけら倍率");
+                    changed |= style::number(ui, &mut candy.1, 0.1, 50.0);
+                    ui.label("倍");
+                });
+            });
+            ui.end_row();
+
+            th(ui, "基礎情報");
+            changed |= ui.checkbox(&mut s.base_info, "基礎情報").changed();
+            ui.end_row();
+
+            th(ui, "食材数");
+            changed |= ui.checkbox(&mut s.food_info, "食材数").changed();
+            ui.end_row();
+
+            th(ui, "シミュ詳細");
+            changed |= ui.checkbox(&mut s.simulated_info, "シミュ詳細").changed();
+            ui.end_row();
+
+            th(ui, "表示設定");
+            ui.vertical(|ui| {
+                ui.add_enabled_ui(false, |ui| {
+                    ui.checkbox(&mut s.fix_score, "スコアまで列固定").on_disabled_hover_text("未対応です");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("1ページ表示件数");
+                    changed |= style::opt_number(ui, "box_page_unit", &mut s.page_unit, false, 50.0, "");
+                    ui.label("件");
+                });
+            });
+            ui.end_row();
+        });
+    });
+    if changed {
+        shared.config.candy.boost_multiply = candy.0;
+        shared.config.candy.boost_shard = candy.1;
+        s.save(shared);
+    }
 }

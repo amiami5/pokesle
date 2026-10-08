@@ -8,6 +8,11 @@ use pokesle_core::evaluate_table::EvaluateTable;
 use serde_json::Value;
 
 pub fn dir() -> PathBuf {
+    // 見た目の確認用(デバッグ版のみ): 実データを触らないよう保存先を差し替える
+    #[cfg(debug_assertions)]
+    if let Ok(d) = std::env::var("POKESLE_DEBUG_DATA_DIR") {
+        return PathBuf::from(d);
+    }
     let dir = directories::ProjectDirs::from("", "", "pokesle-rs")
         .map(|d| d.data_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));
