@@ -1467,7 +1467,7 @@ fn display_setting(ui: &mut egui::Ui, shared: &mut Shared) {
 
 /// 操作列のアイコン(本家 index.vue の SVG)
 #[derive(Clone, Copy)]
-enum Icon {
+pub(super) enum Icon {
     Edit,
     Delete,
     Fix,
@@ -1475,7 +1475,7 @@ enum Icon {
 }
 
 /// アイコンのボタン(16×16)
-fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -> egui::Response {
+pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
     if !ui.is_rect_visible(rect) {
         return response;

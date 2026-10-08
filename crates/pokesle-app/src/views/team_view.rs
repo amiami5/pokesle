@@ -6,6 +6,7 @@ use pokesle_core::team_sim::{run_team_simulation, TeamSimulationRequest, TeamSim
 
 use pokesle_core::config::Config;
 
+use super::pokemon_edit::{EditResult, PokemonEdit};
 use super::team_result::{self, ResultSetting};
 use super::{common_setting, fmt_num, pokemon_filter, style};
 use crate::app::Shared;
@@ -26,6 +27,8 @@ pub struct TeamView {
     /// 実行中の計算に使っている設定
     job_config: Option<Config>,
     error: String,
+    /// 結果の名前横の編集アイコンから開いた編集
+    edit: Option<PokemonEdit>,
 }
 
 impl Default for TeamView {
@@ -40,6 +43,7 @@ impl Default for TeamView {
             result: None,
             job_config: None,
             error: String::new(),
+            edit: None,
         }
     }
 }
@@ -217,6 +221,8 @@ impl TeamView {
         }
         ui.add_space(5.0);
 
+        self.edit_window(ui.ctx(), shared);
+
         let Some((result, result_config)) = &self.result else {
             ui.label("シミュレーション実行ボタンを押してください");
             return;
@@ -227,19 +233,43 @@ impl TeamView {
         }
         let setting = ResultSetting::load(&shared.config);
         let short = shared.config.extra.get("pokemonList").and_then(|v| v.get("subSkillShort")).and_then(|v| v.as_bool()).unwrap_or(true);
+        let mut edit = None;
         ui.vertical(|ui| {
             for (rank, team) in result.team_list.iter().enumerate() {
                 let title = format!("{}: {} (最終エナジー:{})", rank + 1, fmt_num(team.score), fmt_num(team.energy));
                 let header = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0);
                 let r = header.show(ui, |ui| {
                     egui::ScrollArea::horizontal().id_salt(("team_result_scroll", rank)).show(ui, |ui| {
-                        team_result::team_table(ui, team, &shared.config, result_config, setting, short);
+                        if let Some(i) = team_result::team_table(ui, team, &shared.config, result_config, setting, short) {
+                            edit = Some(i);
+                        }
                     });
                 });
                 r.header_response.on_hover_text("スコアは「エナジー✕(100% + 追加ゆめのかけら ÷ エナジーによるゆめのかけら ✕ ゆめのかけら評価倍率)」です。");
                 ui.add_space(10.0);
             }
         });
+        // 結果は計算し直さない(本家も同じ)
+        if let Some(i) = edit
+            && let Some(p) = shared.box_file.list.get(i)
+        {
+            self.edit = Some(PokemonEdit::new(Some(i), Some(p.clone())));
+        }
+    }
+
+    fn edit_window(&mut self, ctx: &egui::Context, shared: &mut Shared) {
+        let Some(edit) = &mut self.edit else { return };
+        match edit.ui(ctx) {
+            EditResult::None => {}
+            EditResult::Cancel => self.edit = None,
+            EditResult::Save(index, pokemon) => {
+                if let Some(slot) = index.and_then(|i| shared.box_file.list.get_mut(i)) {
+                    *slot = pokemon;
+                    shared.save_box();
+                }
+                self.edit = None;
+            }
+        }
     }
 }
 

@@ -9,6 +9,7 @@ use pokesle_core::js::to_fixed;
 use pokesle_core::sim_pokemon::SimPokemon;
 use pokesle_core::team_sim::{TeamMember, TeamResult};
 
+use super::box_view::{icon_button, Icon};
 use super::{fmt_num, food_icon, nature_label, style};
 
 /// 見出し列・ポケモン列・合計列の幅(本家 --result-header-column-width / .result-pokemon-column)
@@ -152,10 +153,11 @@ fn round_str(x: f64) -> String {
     fmt_num(x)
 }
 
-/// 名前(本家 name-label.vue + 固定表示)
-fn name_cell(ui: &mut egui::Ui, p: &SimPokemon) {
+/// 名前(本家 name-label.vue + 固定表示 + 編集アイコン)。編集アイコンが押されたら true
+fn name_cell(ui: &mut egui::Ui, p: &SimPokemon) -> bool {
     let base = p.base();
     let bx = p.box_pokemon.as_ref();
+    let mut edit = false;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         if let Some(before) = p.before_name.as_deref().filter(|b| *b != base.name) {
@@ -175,10 +177,16 @@ fn name_cell(ui: &mut egui::Ui, p: &SimPokemon) {
         if bx.and_then(|b| b.fix) == Some(1.0) {
             ui.label("(固定)");
         }
+        // ここでは先頭(index 0)を含む全員に編集アイコンを表示する
+        if bx.is_some() {
+            ui.add_space(5.0);
+            edit = icon_button(ui, Icon::Edit, egui::Color32::from_gray(0x88)).on_hover_text("編集").clicked();
+        }
     });
     if let Some(memo) = bx.and_then(|b| b.memo.as_deref()).filter(|m| !m.is_empty()) {
         ui.label(egui::RichText::new(memo).size(10.0));
     }
+    edit
 }
 
 /// サブスキル(本家 sub-skill-label-list.vue)
@@ -233,8 +241,8 @@ fn member_pokemon(t: &TeamMember) -> Option<&SimPokemon> {
     }
 }
 
-/// 1チーム分の表
-pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_config: &Config, setting: ResultSetting, sub_skill_short: bool) {
+/// 1チーム分の表。名前横の編集アイコンが押されたら、そのポケモンのボックス位置を返す
+pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_config: &Config, setting: ResultSetting, sub_skill_short: bool) -> Option<usize> {
     let m = master();
     let n = team.pokemon_list.len();
     // 料理
@@ -304,12 +312,18 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
     };
     let per = |f: &dyn Fn(&TeamMember) -> Cell<'static>| -> Vec<Cell<'static>> { members.iter().map(|t| f(t)).collect() };
 
+    let edit: std::cell::Cell<Option<usize>> = std::cell::Cell::new(None);
     let mut cells: Vec<Cell> = members
         .iter()
         .map(|t| match t {
             TeamMember::Pokemon { pokemon, .. } => {
                 let p = pokemon.as_ref();
-                td(1, move |ui| name_cell(ui, p))
+                let edit = &edit;
+                td(1, move |ui| {
+                    if name_cell(ui, p) {
+                        edit.set(p.box_index());
+                    }
+                })
             }
             TeamMember::NightCapPikachu(_) => td(1, |ui| {
                 ui.label("ナイトキャップピカチュウ");
@@ -481,4 +495,5 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
         }
     }
     table.close(ui);
+    edit.get()
 }
