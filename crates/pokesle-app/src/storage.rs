@@ -99,6 +99,17 @@ impl Default for UiSetting {
     }
 }
 
+/// データ画面の料理の作成数(本家 localStorage `dataCookingNum`)
+pub fn load_data_cooking_num() -> std::collections::HashMap<String, f64> {
+    read_json("data-cooking-num.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+pub fn save_data_cooking_num(map: &std::collections::HashMap<String, f64>) -> Result<(), String> {
+    // 0 は保存しない(本家と同じ)
+    let nonzero: std::collections::BTreeMap<&String, &f64> = map.iter().filter(|(_, v)| **v != 0.0).collect();
+    write_json("data-cooking-num.json", &nonzero)
+}
+
 pub fn load_ui_setting() -> UiSetting {
     read_json("ui-setting.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }

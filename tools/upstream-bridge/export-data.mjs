@@ -5,6 +5,7 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { parseHistory } from './history-parser.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -76,5 +77,8 @@ const master = {
 };
 
 writeFileSync(path.join(outDir, 'master.json'), JSON.stringify(master, null, 1) + '\n');
+const history = parseHistory(path.join(root, 'upstream/src/pages/history.vue'));
+writeFileSync(path.join(outDir, 'history.json'), JSON.stringify(history, null, 1) + '\n');
 writeFileSync(path.join(outDir, 'default-config.json'), JSON.stringify(defaultConfig, null, 1) + '\n');
+console.log(`history: ${history.entries.length} entries`);
 console.log(`exported: pokemon=${master.pokemon.length} skills=${master.skills.length} cookings=${master.cookings.length} (upstream ${master.upstreamCommit.slice(0, 7)})`);

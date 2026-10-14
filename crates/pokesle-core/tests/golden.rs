@@ -759,3 +759,76 @@ fn box_summary_matches_upstream() {
     eprintln!("checked={checked}");
     assert!(errors.is_empty(), "{} 件不一致\n{}", errors.len(), errors.iter().take(30).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+#[test]
+fn data_view_matches_upstream() {
+    use pokesle_core::data_view::{expect_simulate, food_rows, pokemon_derived, ExpectKind, ExpectParam};
+    let golden = load("data-view.json");
+    let m = master();
+    let num = |v: &Value| expected_num(v).unwrap_or(f64::NAN);
+
+    // ポケモンの表
+    for e in golden["pokemon"].as_array().unwrap() {
+        let p = m.pokemon(e["name"].as_str().unwrap()).unwrap();
+        let d = pokemon_derived(p);
+        assert!(close(d.ceil, num(&e["ceil"])), "{} ceil", p.name);
+        assert!(close(d.skill_rate_with_ceil, num(&e["skillRate2"])), "{} skillRate2", p.name);
+        assert!(close(d.skill_num, num(&e["skillNum"])), "{} skillNum", p.name);
+    }
+
+    // 食材の表
+    let types = ["カレー", "サラダ", "デザート"];
+    for case in golden["food"].as_array().unwrap() {
+        let config = Config::from_value(&case["config"]).unwrap();
+        let rows = food_rows(&config);
+        for (r, e) in rows.iter().zip(case["rows"].as_array().unwrap()) {
+            let name = &m.foods[r.food].name;
+            assert_eq!(name, e["name"].as_str().unwrap());
+            for (t, ty) in types.iter().enumerate() {
+                assert!(close(r.require[t], num(&e[format!("require_{ty}")])), "{name} require {ty}");
+                assert!(close(r.best_type_rate[t], num(&e[format!("bestTypeRate_{ty}")])), "{name} rate {ty}");
+                assert!(close(r.max_cooking_energy[t], num(&e[format!("maxCookingEnergy_{ty}")])), "{name} cookingEnergy {ty}");
+                assert!(close(r.max_energy[t], num(&e[format!("maxEnergy_{ty}")])), "{name} maxEnergy {ty}");
+            }
+            assert!(close(r.max_cooking_energy_average, num(&e["average"])), "{name} average");
+            assert!(close(r.max_cooking_energy_geometric_mean, num(&e["geometricMean"])), "{name} geometricMean");
+            assert!(close(r.max_energy_all, num(&e["maxEnergy"])), "{name} maxEnergy all");
+        }
+    }
+
+    // 食材期待値・スキル期待値
+    let config = Config::default_config();
+    for case in golden["expect"].as_array().unwrap() {
+        let kind = if case["kind"] == "food" { ExpectKind::Food } else { ExpectKind::Skill };
+        let p = &case["param"];
+        let param = ExpectParam {
+            kind,
+            lv: p["lv"].as_f64().unwrap(),
+            nature: p["nature"].as_str().unwrap().to_string(),
+            sub_skill: p["subSkill"].as_u64().unwrap() as u8,
+            speed: p["speed"].as_f64().unwrap(),
+            genki_full: p["genkiFull"].as_bool().unwrap(),
+        };
+        // 並びはワーカー分割で変わるので、(名前, 食材)で突き合わせる
+        let key = |name: &str, foods: &[String]| format!("{name}/{}", foods.join(","));
+        let mut result = expect_simulate(&config, &param).unwrap();
+        result.sort_by_key(|r| key(&r.pokemon.base().name, &r.pokemon.box_pokemon.as_ref().unwrap().food_list));
+        let mut rows: Vec<&Value> = case["rows"].as_array().unwrap().iter().collect();
+        rows.sort_by_key(|e| {
+            let foods: Vec<String> = serde_json::from_value(e["foodList"].clone()).unwrap();
+            key(e["name"].as_str().unwrap(), &foods)
+        });
+        assert_eq!(result.len(), rows.len(), "{} 件数", case["kind"]);
+        for (r, e) in result.iter().zip(rows) {
+            let label = format!("{} {}", case["kind"], e["name"]);
+            assert_eq!(r.pokemon.base().name, e["name"].as_str().unwrap(), "{label}");
+            for (fi, f) in e["foods"].as_array().unwrap().iter().enumerate() {
+                assert!(close(r.pokemon.food_count[fi], num(f)), "{label} food {fi}: {} vs {f}", r.pokemon.food_count[fi]);
+            }
+            assert!(close(r.pokemon.skill_rate, num(&e["skillRate"])), "{label} skillRate");
+            assert!(close(r.pokemon.ceil_skill_rate, num(&e["ceilSkillRate"])), "{label} ceilSkillRate");
+            assert!(close(r.pokemon.skill_ceil, num(&e["skillCeil"])), "{label} skillCeil");
+            assert!(close(r.pokemon.skill_per_day, num(&e["skillPerDay"])), "{label} skillPerDay");
+        }
+    }
+}

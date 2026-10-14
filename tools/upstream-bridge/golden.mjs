@@ -699,3 +699,89 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   writeFileSync(path.join(outDir, 'food-stock.json'), JSON.stringify(cases));
   console.log(`food-stock: ${cases.length}`);
 }
+
+// ---- データ閲覧(data/*.vue の派生値) ----
+{
+  const { Cooking } = await up('data/food_and_cooking.ts');
+  const out = {};
+
+  // ポケモンの表(ceil / skillRate2 / skillNum)
+  out.pokemon = Pokemon.list.map((p) => {
+    const ceil = p.specialty == 'スキル' ? 144000 / p.help : 78;
+    const skillRate2 = p.skillRate / (1 - (1 - p.skillRate) ** ceil);
+    return { name: p.name, ceil: num(ceil), skillRate2: num(skillRate2), skillNum: num(skillRate2 * 86400 / p.help) };
+  });
+
+  // 食材の表
+  const foodConfigs = {
+    default: variant(() => {}),
+    mode1: variant((c) => {
+      c.simulation.mode = 1;
+      c.simulation.cookingSettings[Cooking.list[0].name].lv = Cooking.maxRecipeLv;
+      for (const cooking of Cooking.list.filter((_, i) => i % 5 == 0)) c.simulation.enableCooking[cooking.name] = false;
+      c.simulation.cookingRecipeLvType1 = false; c.simulation.cookingRecipeLvType2 = true; c.simulation.cookingRecipeFixLv = 20;
+    }),
+  };
+  const types = ['カレー', 'サラダ', 'デザート'];
+  out.food = Object.entries(foodConfigs).map(([name, config]) => {
+    const enable = Cooking.getEnableCookingList(config);
+    return {
+      name, config,
+      rows: Food.list.map((food) => {
+        const r = { name: food.name };
+        for (const type of types) {
+          const l = enable.filter((x) => x.type == type && x.foodList.some((f) => f.name == food.name));
+          r[`require_${type}`] = Math.max(...l.map((x) => x.foodList.find((f) => f.name == food.name)?.num ?? 0), 0);
+          r[`bestTypeRate_${type}`] = Math.max(...l.map((x) => x.rate), 1);
+          r[`maxCookingEnergy_${type}`] = Math.max(...l.map((x) => x.energy), 0);
+          r[`maxEnergy_${type}`] = food.energy * r[`bestTypeRate_${type}`] * (r[`bestTypeRate_${type}`] > 1 ? Cooking.maxRecipeBonus : 1);
+        }
+        r.average = (r['maxCookingEnergy_カレー'] + r['maxCookingEnergy_サラダ'] + r['maxCookingEnergy_デザート']) / 3;
+        r.geometricMean = Math.cbrt(r['maxCookingEnergy_カレー'] * r['maxCookingEnergy_サラダ'] * r['maxCookingEnergy_デザート']);
+        r.maxEnergy = Math.max(r['maxEnergy_カレー'], r['maxEnergy_サラダ'], r['maxEnergy_デザート']);
+        for (const k of Object.keys(r)) if (k != 'name') r[k] = num(r[k]);
+        return r;
+      }),
+    };
+  });
+
+  // 食材期待値・スキル期待値
+  const expectCases = [];
+  for (const [kind, p] of [
+    ['food', { lv: 60, nature: 'れいせい', subSkill: 3, speed: 35, genkiFull: true }],
+    ['food', { lv: 40, nature: 'おっとり', subSkill: 1, speed: 20, genkiFull: false }],
+    ['skill', { lv: 60, nature: 'なまいき', subSkill: 3, speed: 35, genkiFull: false }],
+    ['skill', { lv: 25, nature: 'せっかち', subSkill: 2, speed: 10, genkiFull: true }],
+  ]) {
+    const targetList = Pokemon.list.filter((x) => x.afterList.length == 1 && x.afterList[0] == x.name);
+    const combos = p.lv < 30 ? ['0'] : p.lv < 60 ? ['00', '01'] : ['000', '001', '002', '010', '011', '012'];
+    const sub = kind == 'food' ? ['食材確率アップS', '食材確率アップM'] : ['スキル確率アップS', 'スキル確率アップM'];
+    const subSkillList = p.subSkill == 1 ? [sub[0]] : p.subSkill == 2 ? [sub[1]] : p.subSkill == 3 ? sub : [];
+    const list = [];
+    for (const base of targetList) {
+      for (const combo of combos) {
+        const foodList = combo.split('').map(Number).map((f) => (Food.map[base.foodList[f]?.name] ? base.foodList[f].name : null));
+        if (foodList.includes(null)) continue;
+        list.push({ name: base.name, lv: p.lv, foodList, subSkillList, nature: p.nature });
+      }
+    }
+    const config = clone({
+      ...defaultConfig,
+      simulation: { ...defaultConfig.simulation, expectType: { food: 0, skill: 0 }, helpBonus: (p.speed ?? 0) / 5, genkiFull: p.genkiFull },
+    });
+    await boxWorker({ type: 'config', config: clone(config) });
+    const basic = await boxWorker({ type: 'basic', pokemonList: clone(list), evaluateTable: null });
+    const result = await boxWorker({ type: 'assist', pokemonList: basic, basedPokemonList: basic });
+    expectCases.push({
+      kind, param: p,
+      rows: result.map((x) => ({
+        name: x.base.name, foodList: x.box.foodList,
+        foods: Food.list.map((f) => num(x[f.name])),
+        skillRate: num(x.skillRate), ceilSkillRate: num(x.ceilSkillRate), skillCeil: num(x.skillCeil), skillPerDay: num(x.skillPerDay),
+      })),
+    });
+  }
+  out.expect = expectCases;
+  writeFileSync(path.join(outDir, 'data-view.json'), JSON.stringify(out));
+  console.log(`data-view: ${out.pokemon.length} pokemon, ${out.food.length} food configs, ${expectCases.map((c) => c.rows.length).join('/')}`);
+}
