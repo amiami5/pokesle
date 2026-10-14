@@ -246,7 +246,7 @@ impl eframe::App for App {
             Tab::FoodStock => self.food_stock_view.ui(ui, &mut self.shared),
             Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
-            Tab::UiSetting => self.ui_setting_view.ui(ui, &mut self.shared.ui_setting, &mut self.shared.status),
+            Tab::UiSetting => self.ui_setting_view.ui(ui, &mut self.shared),
             _ => {
                 ui.label("未実装です");
             }
