@@ -108,7 +108,7 @@ impl App {
         ui_setting_view::apply(&cc.egui_ctx, &ui_setting);
         // 表示倍率は設定画面だけで変える(Ctrl+/- で変わると設定とずれるため)
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-        style::apply(&cc.egui_ctx);
+        style::apply(&cc.egui_ctx, ui_setting.theme.is_dark(&cc.egui_ctx));
         // 見た目の確認用(デバッグ版のみ): POKESLE_DEBUG_POPUP=field などで設定ポップアップを開いて起動する。
         // 入れ子のポップアップは fix,resource のようにカンマ区切りで指定する
         #[cfg(debug_assertions)]
@@ -212,7 +212,7 @@ fn nav_item(ui: &mut egui::Ui, label: &str, active: bool, disabled: bool, cautio
     p.galley(pos, galley, color);
     if caution {
         let c = egui::pos2(rect.right() - pad.x - 10.0, rect.center().y);
-        p.circle(c, 10.0, style::ACCENT, egui::Stroke::new(2.0, egui::Color32::WHITE));
+        p.circle(c, 10.0, style::accent(), egui::Stroke::new(2.0, egui::Color32::WHITE));
         p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(12.0), egui::Color32::WHITE);
     }
     if !implemented {
@@ -237,7 +237,7 @@ impl eframe::App for App {
                 });
             });
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(style::SURFACE_SUBTLE).inner_margin(10)).show(ui, |ui| match self.tab {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(style::surface_subtle()).inner_margin(10)).show(ui, |ui| match self.tab {
             Tab::Box => self.box_view.ui(ui, &mut self.shared),
             Tab::CheckList => self.check_list_view.ui(ui, &mut self.shared),
             Tab::Team => {

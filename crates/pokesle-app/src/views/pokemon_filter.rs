@@ -118,7 +118,7 @@ fn editor_body(ui: &mut egui::Ui, id: &str, filter: &mut FilterConfig, box_list:
     let mut action: Option<(usize, char)> = None;
     let mut toggle: Option<usize> = None;
 
-    egui::Frame::new().stroke(egui::Stroke::new(1.0, Color32::BLACK)).show(ui, |ui| {
+    egui::Frame::new().stroke(egui::Stroke::new(1.0, super::style::line_color())).show(ui, |ui| {
         ui.set_width(498.0);
         ui.set_height(300.0);
         egui::ScrollArea::vertical().id_salt(("filter_list", id)).auto_shrink([false, false]).show(ui, |ui| {
@@ -155,13 +155,13 @@ fn editor_body(ui: &mut egui::Ui, id: &str, filter: &mut FilterConfig, box_list:
                 });
             };
 
-            row(ui, Color32::from_gray(0xee), &mut |ui| {
+            row(ui, super::style::pick(0xeeeeee, 0x2c3342), &mut |ui| {
                 ui.label("ボックスすべて");
             }, Some(box_list.len()), &mut |_| {});
 
             for (i, step) in result.step_list.iter().enumerate() {
                 let disabled = filter.condition_list[i].disabled;
-                let fill = if step.mode { Color32::from_rgb(0xee, 0xff, 0xdd) } else { Color32::from_rgb(0xff, 0xee, 0xee) };
+                let fill = if step.mode { super::style::pick(0xeeffdd, 0x253a2b) } else { super::style::pick(0xffeeee, 0x3e2a2d) };
                 row(ui, fill, &mut |ui| {
                     if switch(ui, !disabled).clicked() {
                         toggle = Some(i);
@@ -243,7 +243,7 @@ fn editor_body(ui: &mut egui::Ui, id: &str, filter: &mut FilterConfig, box_list:
                     if skills.is_empty() {
                         continue;
                     }
-                    ui.label(egui::RichText::new(&cat.name).strong().color(style::TH));
+                    ui.label(egui::RichText::new(&cat.name).strong().color(style::th_color()));
                     for s in skills {
                         ui.selectable_value(v, Some(s.name.clone()), format!("  {}", s.name));
                     }

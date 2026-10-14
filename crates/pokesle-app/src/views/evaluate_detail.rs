@@ -194,7 +194,7 @@ fn percentile_chart(ui: &mut egui::Ui, list: &[f64], score: f64, label: &str, bo
     let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 280.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let font = egui::FontId::proportional(10.0);
-    let text_color = style::MUTED;
+    let text_color = style::muted();
     let mut min = list.iter().copied().fold(f64::INFINITY, f64::min).min(score);
     let mut max = list.iter().copied().fold(f64::NEG_INFINITY, f64::max).max(score);
     if let Some(b) = border {
@@ -209,7 +209,7 @@ fn percentile_chart(ui: &mut egui::Ui, list: &[f64], score: f64, label: &str, bo
     let to_screen = |x: f64, y: f64| {
         egui::pos2(plot.left() + (x / 100.0) as f32 * plot.width(), plot.bottom() - ((y - min) / (max - min)) as f32 * plot.height())
     };
-    let grid = egui::Stroke::new(1.0, style::LINE);
+    let grid = egui::Stroke::new(1.0, style::line_color());
     let mut y = min;
     while y <= max + step * 0.01 {
         let pos = to_screen(0.0, y);
@@ -625,8 +625,8 @@ fn energy_table(ui: &mut egui::Ui, config: &Config, base: &Pokemon, c: &Computed
 
     egui::Grid::new("evaluate_detail_grid").num_columns(4).striped(true).spacing([14.0, 8.0]).show(ui, |ui| {
         for (group, item, formula, value) in &rows {
-            ui.label(egui::RichText::new(group).strong().color(style::TH));
-            ui.label(egui::RichText::new(item).strong().color(style::TH));
+            ui.label(egui::RichText::new(group).strong().color(style::th_color()));
+            ui.label(egui::RichText::new(item).strong().color(style::th_color()));
             ui.scope(|ui| {
                 ui.set_max_width(460.0);
                 if item == "せいかく" && nature.is_some() {

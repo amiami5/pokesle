@@ -85,7 +85,7 @@ impl TeamView {
         ui.add_space(5.0);
 
         // 条件(本家の SettingList)
-        egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+        egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(10).show(ui, |ui| {
             ui.set_width(ui.available_width());
             egui::Grid::new("team_req").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 style::th(ui, "現在のエナジー");
@@ -160,7 +160,7 @@ impl TeamView {
             });
         });
         ui.add_space(5.0);
-        egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+        egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(10).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_top(|ui| {
                 style::th(ui, "所持食材");
@@ -390,7 +390,7 @@ fn require_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                 row(ui, &format!("{k}とくい"), r.specialty_num.entry(k.to_string()).or_insert(0.0), "匹以上");
             }
             for ty in TYPE_ORDER {
-                let color = m.berries.iter().find(|b| b.type_name == ty).and_then(|b| parse_color(&b.type_color)).unwrap_or(style::TH);
+                let color = m.berries.iter().find(|b| b.type_name == ty).and_then(|b| parse_color(&b.type_color)).unwrap_or(style::th_color());
                 ui.label(egui::RichText::new(ty).strong().color(color));
                 let v = r.type_num.entry(ty.to_string()).or_insert(0.0);
                 let mut on = *v == 1.0;

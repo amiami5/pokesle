@@ -269,7 +269,7 @@ fn event_bonus_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
         let s = &mut c.simulation;
         let mut delete = None;
         for (index, ev) in s.event_bonus_list.iter_mut().enumerate() {
-            egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(8).show(ui, |ui| {
+            egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(8).show(ui, |ui| {
                 egui::Grid::new(("event_bonus", index)).num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                     th(ui, "対象");
                     ui.vertical(|ui| {
@@ -461,7 +461,7 @@ fn skill_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
             egui::Grid::new("skill_common").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("食材ゲット・食材アシスト評価方法");
-                    ui.label(egui::RichText::new("?").strong().color(style::PRIMARY)).on_hover_text(FOOD_GET_HELP);
+                    ui.label(egui::RichText::new("?").strong().color(style::primary())).on_hover_text(FOOD_GET_HELP);
                 });
                 ui.vertical(|ui| {
                     for (v, l) in [(1.0, "食材のまま評価"), (2.0, "今日のエナジーとして評価"), (3.0, "翌日のエナジーとして評価")] {
@@ -820,7 +820,7 @@ pub fn cooking_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                     s.enable_cooking.insert(cook.name.clone(), v);
                     changed = true;
                 }
-                let weak = |t: String| if enabled { egui::RichText::new(t) } else { egui::RichText::new(t).color(style::TH) };
+                let weak = |t: String| if enabled { egui::RichText::new(t) } else { egui::RichText::new(t).color(style::th_color()) };
                 ui.label(weak(cook.cooking_type.name().into()));
                 ui.label(weak(cook.name.clone()));
                 ui.label(weak(cook.food_list.iter().map(|f| format!("{}×{}", f.name, js_num(f.num))).collect::<Vec<_>>().join("\n")));

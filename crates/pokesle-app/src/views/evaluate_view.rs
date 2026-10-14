@@ -581,11 +581,11 @@ fn rule_list(ui: &mut egui::Ui, e: &mut EvaluateConfig) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
         for (index, rule) in e.rule_list.iter_mut().enumerate() {
-            egui::Frame::new().stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(7).inner_margin(10).show(ui, |ui| {
+            egui::Frame::new().stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(7).inner_margin(10).show(ui, |ui| {
                 ui.set_width(450.0);
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("設定 {}", index + 1)).strong().color(style::PRIMARY_STRONG));
+                        ui.label(egui::RichText::new(format!("設定 {}", index + 1)).strong().color(style::primary_strong()));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if style::form_button(ui, "削除", ButtonKind::Normal).clicked() {
                                 remove_rule = Some(index);
@@ -614,7 +614,7 @@ fn rule_list(ui: &mut egui::Ui, e: &mut EvaluateConfig) {
                                         if skills.is_empty() {
                                             continue;
                                         }
-                                        ui.label(egui::RichText::new(&cat.name).strong().color(style::MUTED));
+                                        ui.label(egui::RichText::new(&cat.name).strong().color(style::muted()));
                                         for s in skills {
                                             let selected = setting.setting_type == "skillLv" && setting.skill_name.as_deref() == Some(&s.name);
                                             if ui.selectable_label(selected, format!("　{}", s.name)).clicked() {

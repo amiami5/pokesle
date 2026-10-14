@@ -7,7 +7,7 @@ use pokesle_core::browser_import::{self, BrowserImport};
 use crate::app::Shared;
 use crate::fonts::{self, FontChoice};
 use crate::job::Job;
-use crate::storage::{self, UiSetting};
+use crate::storage::{self, ThemeSetting, UiSetting};
 
 #[derive(Default)]
 pub struct UiSettingView {
@@ -42,6 +42,7 @@ impl UiSettingView {
 
         let mut font_changed = false;
         let mut zoom_changed = false;
+        let mut theme_changed = false;
         ui.heading("設定");
         ui.add_space(6.0);
         egui::Grid::new("ui_setting").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -71,6 +72,16 @@ impl UiSettingView {
             }
             ui.end_row();
 
+            ui.label("配色");
+            ui.horizontal(|ui| {
+                for (v, l) in [(ThemeSetting::Light, "ライト"), (ThemeSetting::Dark, "ダーク"), (ThemeSetting::System, "OS に合わせる")] {
+                    if ui.radio_value(&mut setting.theme, v, l).changed() {
+                        theme_changed = true;
+                    }
+                }
+            });
+            ui.end_row();
+
             ui.label("文字の大きさ");
             ui.horizontal(|ui| {
                 let mut percent = (setting.zoom * 100.0).round();
@@ -88,7 +99,7 @@ impl UiSettingView {
             ui.end_row();
         });
         ui.add_space(6.0);
-        ui.label(egui::RichText::new("文字の大きさは画面全体の表示倍率として反映します。").color(crate::views::style::MUTED));
+        ui.label(egui::RichText::new("文字の大きさは画面全体の表示倍率として反映します。").color(crate::views::style::muted()));
 
         ui.add_space(16.0);
         ui.separator();
@@ -98,10 +109,13 @@ impl UiSettingView {
         if font_changed {
             fonts::install(ui.ctx(), setting.font.as_ref());
         }
+        if theme_changed {
+            crate::views::style::apply(ui.ctx(), setting.theme.is_dark(ui.ctx()));
+        }
         if zoom_changed {
             ui.ctx().set_zoom_factor(setting.zoom);
         }
-        if (font_changed || zoom_changed)
+        if (font_changed || zoom_changed || theme_changed)
             && let Err(e) = storage::save_ui_setting(setting)
         {
             *status = format!("設定を保存できませんでした: {e}");
@@ -166,6 +180,6 @@ impl UiSettingView {
             }
         }
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("取り込むと現在の内容は置き換わります。厳選テーブル(ブラウザの IndexedDB に保存されています)は移行できないので、取り込み後に基準生成で作り直してください。").color(style::MUTED));
+        ui.label(egui::RichText::new("取り込むと現在の内容は置き換わります。厳選テーブル(ブラウザの IndexedDB に保存されています)は移行できないので、取り込み後に基準生成で作り直してください。").color(style::muted()));
     }
 }

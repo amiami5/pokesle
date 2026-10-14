@@ -41,7 +41,7 @@ impl FoodStockView {
         });
         ui.add_space(5.0);
 
-        egui::Frame::new().fill(style::SURFACE).stroke(egui::Stroke::new(1.0, style::LINE)).corner_radius(6).inner_margin(10).show(ui, |ui| {
+        egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(10).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let fs = &mut shared.config.food_stock;
             egui::Grid::new("food_stock_setting").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
@@ -121,7 +121,7 @@ impl FoodStockView {
             job.show_progress(ui);
         }
         if !self.error.is_empty() {
-            ui.colored_label(egui::Color32::from_rgb(0xb2, 0x1d, 0x1d), &self.error);
+            ui.colored_label(style::shortage(), &self.error);
         }
 
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
@@ -136,7 +136,6 @@ impl FoodStockView {
     }
 }
 
-const SHORTAGE: egui::Color32 = egui::Color32::from_rgb(0xb2, 0x1d, 0x1d);
 
 /// 設定が変わったら true
 fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, list: &[pokesle_core::cooking::EvaluatedCooking]) -> bool {
@@ -162,7 +161,7 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
     let cell = |ui: &mut egui::Ui, width: f32, right: bool, add: &mut dyn FnMut(&mut egui::Ui)| {
         // 幅・高さを固定した枠を確保し、その中にだけ内容を描く(内容で枠が広がらないようにする)
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::hover());
-        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, style::LINE), egui::StrokeKind::Inside);
+        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, style::line_color()), egui::StrokeKind::Inside);
         let inner = rect.shrink2(egui::vec2(4.0, 2.0));
         let layout = if right { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(layout));
@@ -257,7 +256,7 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
                     cell(ui, W_FOOD, true, &mut |ui| {
                         let mut t = egui::RichText::new(fmt_num(diff));
                         if diff < 0.0 {
-                            t = t.color(SHORTAGE).strong();
+                            t = t.color(style::shortage()).strong();
                         }
                         ui.label(t);
                     });
@@ -294,11 +293,11 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
                 })
                 .collect();
             cookings.sort_by(|a, b| b.fix_energy.partial_cmp(&a.fix_energy).unwrap_or(std::cmp::Ordering::Equal));
-            egui::Frame::new().stroke(egui::Stroke::new(1.0, style::LINE)).fill(style::SURFACE).corner_radius(4).inner_margin(6).show(ui, |ui| {
+            egui::Frame::new().stroke(egui::Stroke::new(1.0, style::line_color())).fill(style::surface()).corner_radius(4).inner_margin(6).show(ui, |ui| {
                 ui.set_width(260.0);
-                ui.label(egui::RichText::new(ty.name()).strong().color(style::PRIMARY_STRONG));
+                ui.label(egui::RichText::new(ty.name()).strong().color(style::primary_strong()));
                 if cookings.is_empty() {
-                    ui.label(egui::RichText::new("作れる料理はありません。").size(12.0).color(style::MUTED));
+                    ui.label(egui::RichText::new("作れる料理はありません。").size(12.0).color(style::muted()));
                 }
                 for c in cookings {
                     let cooking = c.cooking();
@@ -307,7 +306,7 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
                             ui.set_width(190.0);
                             ui.label(egui::RichText::new(&cooking.name).strong());
                             let foods = cooking.food_list.iter().map(|f| format!("{}×{}", f.name, f.num)).collect::<Vec<_>>().join("、");
-                            ui.label(egui::RichText::new(foods).size(11.0).color(style::MUTED));
+                            ui.label(egui::RichText::new(foods).size(11.0).color(style::muted()));
                         });
                         ui.label(fmt_num(c.fix_energy));
                     });

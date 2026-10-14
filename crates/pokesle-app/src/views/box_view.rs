@@ -878,7 +878,7 @@ impl BoxView {
             for p in 0..max {
                 let text = egui::RichText::new((p + 1).to_string());
                 let text = if p == self.page { text.strong().color(egui::Color32::WHITE) } else { text };
-                let button = egui::Button::new(text).min_size(egui::vec2(26.0, 22.0)).fill(if p == self.page { style::PRIMARY } else { egui::Color32::TRANSPARENT });
+                let button = egui::Button::new(text).min_size(egui::vec2(26.0, 22.0)).fill(if p == self.page { style::primary() } else { egui::Color32::TRANSPARENT });
                 if ui.add(button).clicked() {
                     self.page = p;
                 }
@@ -1859,7 +1859,7 @@ fn name_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, memo
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 name_line(ui);
-                ui.label(egui::RichText::new(memo).size(10.0).color(style::MUTED));
+                ui.label(egui::RichText::new(memo).size(10.0).color(style::muted()));
             });
         }
         None => name_line(ui),
@@ -1942,7 +1942,7 @@ fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv
         if lv == EvalLv::Max || !has_value {
             return ui.add(egui::Label::new(text));
         }
-        let r = ui.add(egui::Label::new(text.color(egui::Color32::from_rgb(0x00, 0x44, 0xcc)).underline()).sense(egui::Sense::click()));
+        let r = ui.add(egui::Label::new(text.color(style::pick(0x0044cc, 0x7fb0ff)).underline()).sense(egui::Sense::click()));
         if r.hovered() {
             ui.painter().rect_filled(r.rect, 0.0, egui::Color32::from_rgba_unmultiplied(0x00, 0x44, 0x88, 0x11));
         }

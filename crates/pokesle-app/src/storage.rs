@@ -71,11 +71,31 @@ pub struct UiSetting {
     pub font: Option<crate::fonts::FontChoice>,
     /// 表示倍率(文字の大きさ)
     pub zoom: f32,
+    /// 配色(ライト・ダーク・OS に合わせる)
+    pub theme: ThemeSetting,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum ThemeSetting {
+    #[default]
+    Light,
+    Dark,
+    System,
+}
+
+impl ThemeSetting {
+    pub fn is_dark(self, ctx: &eframe::egui::Context) -> bool {
+        match self {
+            ThemeSetting::Light => false,
+            ThemeSetting::Dark => true,
+            ThemeSetting::System => ctx.system_theme() == Some(eframe::egui::Theme::Dark),
+        }
+    }
 }
 
 impl Default for UiSetting {
     fn default() -> Self {
-        UiSetting { font: None, zoom: 1.0 }
+        UiSetting { font: None, zoom: 1.0, theme: ThemeSetting::Light }
     }
 }
 

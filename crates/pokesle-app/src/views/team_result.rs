@@ -123,9 +123,9 @@ impl Table {
             let r = egui::Rect::from_x_y_ranges(rect.x_range(), top..=bottom);
             let group_cell = i == 0 && group.is_some();
             if *header {
-                bg_shapes.push(egui::Shape::rect_filled(r, 0.0, style::SURFACE_SUBTLE));
+                bg_shapes.push(egui::Shape::rect_filled(r, 0.0, style::surface_subtle()));
             } else {
-                bg_shapes.push(egui::Shape::rect_filled(r, 0.0, egui::Color32::WHITE));
+                bg_shapes.push(egui::Shape::rect_filled(r, 0.0, style::surface()));
             }
             // 縦に結合した見出しは、結合の途中で上の罫線を引かない
             if !group_cell || first_in_group {
