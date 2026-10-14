@@ -523,7 +523,7 @@ impl Col {
             Col::Memo => (120.0, 40.0),
             Col::Lv => (40.0, 24.0),
             Col::SkillLv => (40.0, 24.0),
-            Col::Food => (92.0, 40.0),
+            Col::Food => (84.0, 40.0),
             Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
             Col::Nature => (80.0, 24.0),
             Col::Score => (90.0, 24.0),
@@ -1483,6 +1483,8 @@ impl BoxView {
                         draw(ui, "box_table_left", &left, false)
                     })
                     .inner;
+                // 左の表の最後の列の罫線は、表の幅より少し右に引かれる。右の表の文字が罫線に掛からないよう間を空ける
+                ui.add_space(spacing_x + 5.0);
                 // 列が画面に収まらないときは横にスクロールする
                 let r = egui::ScrollArea::horizontal()
                     .id_salt("box_table_right_scroll")
