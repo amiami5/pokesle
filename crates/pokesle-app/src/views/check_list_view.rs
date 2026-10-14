@@ -42,6 +42,8 @@ enum Detail {
     Pokemon(usize),
     Food(usize),
     Skill(usize),
+    /// 食材の取得数のグラフ(本家 check-list/food/_name.vue)
+    FoodGraph(usize),
 }
 
 /// 小窓の1行(ボックス内の位置, 値1, 値2)
@@ -68,6 +70,8 @@ pub struct CheckListView {
     target_edit: Option<usize>,
     hidden_open: bool,
     error: String,
+    /// 食材グラフの横軸の表示範囲(%)
+    graph_x: (f64, f64),
 }
 
 impl Default for CheckListView {
@@ -84,8 +88,26 @@ impl Default for CheckListView {
             target_edit: None,
             hidden_open: false,
             error: String::new(),
+            graph_x: (0.0, 100.0),
         }
     }
+}
+
+/// HSL(色相は度、彩度・輝度は 0〜1)から色を作る
+fn hsl(h: f32, s: f32, l: f32) -> egui::Color32 {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h / 60.0) as u32 % 6 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let to = |v: f32| ((v + m) * 255.0).round() as u8;
+    egui::Color32::from_rgb(to(r), to(g), to(b))
 }
 
 fn percent(x: Option<f64>) -> String {
@@ -235,10 +257,17 @@ impl CheckListView {
             }
             Tab::Setting => None,
         };
-        if open.is_some() {
-            self.detail = open;
+        if let Some(d) = open {
+            if matches!(d, Detail::FoodGraph(_)) {
+                self.graph_x = (0.0, 100.0);
+            }
+            self.detail = Some(d);
         }
-        self.detail_window(ui.ctx(), &shared.config);
+        if let Some(Detail::FoodGraph(i)) = self.detail {
+            self.graph_window(ui.ctx(), &shared.config, shared.usable_evaluate_table(), i);
+        } else {
+            self.detail_window(ui.ctx(), &shared.config);
+        }
     }
 
     fn poll_job(&mut self) {
@@ -413,7 +442,11 @@ impl CheckListView {
                                 open = Some(Detail::Food(i));
                             }
                         });
-                        row.col(|_| {});
+                        row.col(|ui| {
+                            if ui.small_button("グラフ").on_hover_text("全食材構成×全サブスキル×全せいかくの食材取得数のグラフ").clicked() {
+                                open = Some(Detail::FoodGraph(i));
+                            }
+                        });
                     });
                 });
         });
@@ -475,6 +508,162 @@ impl CheckListView {
         open
     }
 
+    /// 食材の取得数のグラフ。全食材構成×全サブスキル×全せいかくの分布を、ポケモンごとの線で出す。
+    /// 赤線は設定した厳選基準、青線はボックスの最良(本家と同じく2段階評価のときだけ)。
+    /// マウスホイールで横軸を拡大・縮小、ドラッグで横に移動する
+    fn graph_window(&mut self, ctx: &egui::Context, config: &Config, table: Option<&EvaluateTable>, row: usize) {
+        let (Some(c), Some(table)) = (&self.computed, table) else { return };
+        let Some(r) = c.food.rows.get(row) else { return };
+        let m = master();
+        let food_name = m.foods[r.food].name.clone();
+        let lv = config.summary.checklist.food.border_lv.map(|v| v as u32);
+        let (border, best) = (r.border, r.score);
+
+        // ポケモンごとの点列(昇順に並べた個数を、0〜100% の位置に並べる)
+        struct Line {
+            label: String,
+            points: Vec<(f64, f64)>,
+        }
+        let mut lines: Vec<Line> = Vec::new();
+        for (name, by_lv) in &table.pokemon {
+            let Some(pokemon) = m.pokemon(name) else { continue };
+            let Some(combos) = lv.and_then(|lv| by_lv.get(&lv)) else { continue };
+            let mut matched = false;
+            let mut scores: Vec<f64> = Vec::new();
+            for set in combos.values() {
+                for (index, food) in pokemon.food_list.iter().enumerate() {
+                    let list = match index {
+                        0 => &set.food1,
+                        1 => &set.food2,
+                        _ => &set.food3,
+                    };
+                    if list.is_empty() || food.name != food_name {
+                        continue;
+                    }
+                    if list.iter().any(|s| border <= *s) {
+                        matched = true;
+                    }
+                    scores.extend(list.iter().copied());
+                }
+            }
+            if matched && !scores.is_empty() {
+                scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let n = scores.len();
+                let last = scores[n - 1];
+                let points = scores.iter().enumerate().map(|(i, s)| (if n > 1 { i as f64 / (n - 1) as f64 * 100.0 } else { 0.0 }, *s)).collect();
+                lines.push(Line { label: format!("{name}({})", fmt_fixed(last, 1)), points });
+            }
+        }
+        lines.sort_by(|a, b| b.points.last().map(|p| p.1).partial_cmp(&a.points.last().map(|p| p.1)).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut open = true;
+        egui::Window::new(format!("{food_name}の取得数")).id(egui::Id::new("checklist_food_graph")).open(&mut open).default_size([820.0, 600.0]).show(ctx, |ui| {
+            ui.label("全食材構成×全サブスキル×全せいかくの組み合わせの食材取得数のグラフです。赤線は設定した厳選基準のスコア、青線はあなたのボックスにいる最良のポケモンのスコアです。ホイールで横軸を拡大・縮小、ドラッグで横に移動できます。");
+            let size = egui::vec2(ui.available_width().max(400.0), 380.0);
+            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+            let plot = egui::Rect::from_min_max(rect.min + egui::vec2(48.0, 8.0), rect.max - egui::vec2(10.0, 26.0));
+            let painter = ui.painter_at(rect);
+            let (mut x0, mut x1) = self.graph_x;
+
+            // 縦軸は全データの範囲
+            let show_lines = config.simulation.select_type == 1.0;
+            let mut y_min = f64::INFINITY;
+            let mut y_max = f64::NEG_INFINITY;
+            for l in &lines {
+                for (_, y) in &l.points {
+                    y_min = y_min.min(*y);
+                    y_max = y_max.max(*y);
+                }
+            }
+            if show_lines {
+                for v in [border, best] {
+                    if v.is_finite() {
+                        y_min = y_min.min(v);
+                        y_max = y_max.max(v);
+                    }
+                }
+            }
+            if !y_min.is_finite() || y_max <= y_min {
+                y_min = 0.0;
+                y_max = y_max.max(1.0);
+            }
+
+            // 拡大・縮小(ポインタの位置を中心に)とドラッグでの移動
+            let range = x1 - x0;
+            if resp.hovered() {
+                let wheel = ui.input(|i| i.smooth_scroll_delta.y);
+                if wheel != 0.0
+                    && let Some(pos) = resp.hover_pos()
+                {
+                    let pos_rate = ((pos.x - plot.left()) / plot.width()).clamp(0.0, 1.0) as f64;
+                    let next = (range * if wheel > 0.0 { 0.8 } else { 1.25 }).clamp(1.0, 100.0);
+                    let at = x0 + range * pos_rate;
+                    x0 = (at - next * pos_rate).clamp(0.0, 100.0 - next);
+                    x1 = x0 + next;
+                }
+            }
+            if resp.dragged() {
+                let dx = -resp.drag_delta().x as f64 / plot.width() as f64 * (x1 - x0);
+                let r = x1 - x0;
+                x0 = (x0 + dx).clamp(0.0, 100.0 - r);
+                x1 = x0 + r;
+            }
+            self.graph_x = (x0, x1);
+
+            let to_px = |x: f64, y: f64| {
+                egui::pos2(
+                    plot.left() + ((x - x0) / (x1 - x0)) as f32 * plot.width(),
+                    plot.bottom() - ((y - y_min) / (y_max - y_min)) as f32 * plot.height(),
+                )
+            };
+            let grid = super::style::line_color();
+            let muted = super::style::muted();
+            let font = egui::FontId::proportional(11.0);
+            for k in 0..=5 {
+                let y = y_min + (y_max - y_min) * k as f64 / 5.0;
+                let pos = to_px(x0, y);
+                painter.hline(plot.x_range(), pos.y, egui::Stroke::new(1.0, grid));
+                painter.text(egui::pos2(plot.left() - 4.0, pos.y), egui::Align2::RIGHT_CENTER, fmt_fixed(y, 1), font.clone(), muted);
+            }
+            for k in 0..=5 {
+                let x = x0 + (x1 - x0) * k as f64 / 5.0;
+                let pos = to_px(x, y_min);
+                painter.vline(pos.x, plot.y_range(), egui::Stroke::new(1.0, grid));
+                painter.text(egui::pos2(pos.x, plot.bottom() + 4.0), egui::Align2::CENTER_TOP, format!("{x:.0}"), font.clone(), muted);
+            }
+            let clip = ui.painter_at(plot);
+            let total = lines.len().max(1);
+            for (n, l) in lines.iter().enumerate() {
+                let color = hsl(n as f32 * 360.0 / total as f32, 1.0, 0.5);
+                let pts: Vec<egui::Pos2> = l.points.iter().map(|(x, y)| to_px(*x, *y)).collect();
+                clip.add(egui::Shape::line(pts, egui::Stroke::new(1.5, color)));
+            }
+            if show_lines {
+                for (v, color) in [(border, egui::Color32::RED), (best, egui::Color32::BLUE)] {
+                    if v.is_finite() {
+                        clip.hline(plot.x_range(), to_px(x0, v).y, egui::Stroke::new(1.0, color));
+                    }
+                }
+            }
+
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (n, l) in lines.iter().enumerate() {
+                        let color = hsl(n as f32 * 360.0 / total as f32, 1.0, 0.5);
+                        let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter().rect_filled(r, 2.0, color);
+                        ui.label(&l.label);
+                        ui.add_space(8.0);
+                    }
+                });
+            });
+        });
+        if !open {
+            self.detail = None;
+        }
+    }
+
     /// 「ボックス」ボタンで開く、ボックス内の全ポケモンの値
     fn detail_window(&mut self, ctx: &egui::Context, config: &Config) {
         let (Some(detail), Some(c)) = (self.detail, &self.computed) else { return };
@@ -499,6 +688,8 @@ impl CheckListView {
                 let Some(r) = c.food.rows.get(i) else { return };
                 (m.foods[r.food].name.clone(), ["個数", "レベル", "ポケモン"], score_lines(&r.list))
             }
+            // グラフは別の窓(graph_window)で描く
+            Detail::FoodGraph(_) => return,
             Detail::Skill(i) => {
                 let Some(r) = c.skill.rows.get(i) else { return };
                 (m.skills[r.skill].name.clone(), ["回数", "レベル", "ポケモン"], score_lines(&r.list))

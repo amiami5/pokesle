@@ -154,16 +154,45 @@ fn fmt_value(v: f64, fmt: Fmt) -> String {
     }
 }
 
-/// キーワード絞り込み(名前・食材・スキル・サブスキル・性格・メモ)
+/// キーワード絞り込み(本家 index.vue の keyword)。名前・メモ・タイプ・きのみ・最終進化・食材(名前とABC)・
+/// サブスキル(名前と略称)・性格・スキルのどれかに含まれていればよい
 fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
     let m = master();
-    let skill = m.pokemon(&p.name).map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("");
+    let base = m.pokemon(&p.name);
+    let skill = base.map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("");
+    let food_abc: String = p
+        .food_list
+        .iter()
+        .map(|f| {
+            // 本家は見つからないと -1 + 65 = '@'
+            let n = base.and_then(|b| b.food_list.iter().position(|x| &x.name == f)).map_or(-1, |i| i as i64);
+            char::from_u32((n + 65) as u32).unwrap_or('@')
+        })
+        .collect();
+    let sub_short: Vec<&str> = p.sub_skill_list.iter().filter_map(|n| m.sub_skill(n).map(|s| s.short.as_str())).collect();
     p.name.contains(query)
-        || p.food_list.iter().any(|x| x.contains(query))
-        || skill.contains(query)
-        || p.sub_skill_list.iter().any(|x| x.contains(query))
-        || p.nature.contains(query)
         || p.memo.as_deref().is_some_and(|x| x.contains(query))
+        || base.is_some_and(|b| b.type_name.contains(query) || m.berries[b.berry].name.contains(query) || b.after_list.join(" ").contains(query))
+        || p.food_list.join(" ").contains(query)
+        || food_abc.contains(query)
+        || p.sub_skill_list.join(" ").contains(query)
+        || sub_short.join(" ").contains(query)
+        || p.nature.contains(query)
+        || skill.contains(query)
+}
+
+/// ポケモン編集で厳選情報・アメ情報を出すための材料
+fn edit_env(shared: &Shared) -> super::pokemon_edit::EditEnv {
+    super::pokemon_edit::EditEnv {
+        config: shared.config.clone(),
+        box_list: shared.box_file.list.clone(),
+        table: shared.usable_evaluate_table().cloned(),
+    }
+}
+
+/// 小数がなければ整数で表示する(JS の数値の文字列化)
+fn fmt_js_num(v: f64) -> String {
+    super::style::js_num(v)
 }
 
 /// 概算をやり直す必要があるかの判定に使う指紋
@@ -539,6 +568,10 @@ enum TableEvent {
     /// 列の入れ替え(動かす列, 入れる先の列, 先の列の後ろか)
     Move(Col, Col, bool),
     ResetOrder,
+    /// 列を非表示にする(列のキー)
+    Hide(String),
+    /// 非表示の列を表示する(列のキー。None は全て)
+    Show(Option<String>),
     SelectAll(bool),
     Toggle(usize),
     Action(RowAction),
@@ -550,6 +583,23 @@ enum TableEvent {
 /// 列の並びと幅の保存場所(本家に無い項目なので、設定ではなくウインドウ位置と同じ window.ron に入れる)
 fn column_order_id() -> egui::Id {
     egui::Id::new("box_column_order")
+}
+
+fn hidden_columns_id() -> egui::Id {
+    egui::Id::new("box_hidden_columns")
+}
+
+/// 非表示にした列のキー
+fn hidden_columns(ctx: &egui::Context) -> Vec<String> {
+    ctx.data_mut(|d| d.get_persisted(hidden_columns_id())).unwrap_or_default()
+}
+
+fn set_hidden_columns(ctx: &egui::Context, keys: Vec<String>) {
+    if keys.is_empty() {
+        ctx.data_mut(|d| d.remove::<Vec<String>>(hidden_columns_id()));
+    } else {
+        ctx.data_mut(|d| d.insert_persisted(hidden_columns_id(), keys));
+    }
 }
 
 fn column_width_id() -> egui::Id {
@@ -706,6 +756,8 @@ enum RowAction {
     Fix(usize, Option<Option<f64>>),
     /// お気に入りの切り替え(ボックス整理)
     Favorite(usize),
+    /// ボックス内の位置を動かす(ボックス位置, 動かす数)
+    Move(usize, i32),
 }
 
 impl BoxView {
@@ -824,7 +876,7 @@ impl BoxView {
             }
             ui.horizontal(|ui| {
                 if style::form_button(ui, "ポケモン新規追加", style::ButtonKind::Execute).clicked() {
-                    self.edit = Some(PokemonEdit::new(None, None));
+                    self.edit = Some(PokemonEdit::new(None, None).with_env(edit_env(shared)));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if style::form_button(ui, "TSVインポート/エクスポート", style::ButtonKind::Normal).clicked() {
@@ -856,9 +908,28 @@ impl BoxView {
                 EditResult::None => {}
                 EditResult::Cancel => self.edit = None,
                 EditResult::Save(index, pokemon) => {
+                    // 本家 PokemonBox.post: 挿入先No があればその位置へ(編集中のものは元の位置から外して入れる)
+                    let insert_to = edit.insert_to;
+                    let candy = edit.candy_change();
+                    let list = &mut shared.box_file.list;
+                    let mut new_index = index.filter(|i| *i < list.len()).unwrap_or(list.len());
+                    if let Some(to) = insert_to {
+                        new_index = to.saturating_sub(1).min(list.len());
+                    }
                     match index {
-                        Some(i) if i < shared.box_file.list.len() => shared.box_file.list[i] = pokemon,
-                        _ => shared.box_file.list.push(pokemon),
+                        Some(i) if i < list.len() => {
+                            list.remove(i);
+                            let at = new_index.min(list.len());
+                            list.insert(at, pokemon);
+                        }
+                        _ => {
+                            let at = new_index.min(list.len());
+                            list.insert(at, pokemon);
+                        }
+                    }
+                    if let Some((seed, v)) = candy {
+                        shared.config.candy.bag.insert(seed, v);
+                        shared.save_config();
                     }
                     shared.save_box();
                     self.results.clear();
@@ -960,7 +1031,14 @@ impl BoxView {
         let levels = shared.config.select_evaluate.enabled_levels();
         let all = Col::all(setting, &levels, self.mode);
         let mut order = column_order(ui.ctx(), &all);
-        let columns = order.clone();
+        // 本家 sortable-table の hiddenColumn: 見出しの右クリックで列を隠す(操作列は隠せない)
+        let hidden = hidden_columns(ui.ctx());
+        let hidden_titles: Vec<(String, String)> = order
+            .iter()
+            .filter(|c| **c != Col::Op && hidden.contains(&c.key()))
+            .map(|c| (c.key(), c.title(setting).replace('\n', "")))
+            .collect();
+        let columns: Vec<Col> = order.iter().copied().filter(|c| *c == Col::Op || !hidden.contains(&c.key())).collect();
         // 表は列の幅を位置ごとに覚えるので、並びが変わったら別の表として作り直し、
         // 測っておいた各列の幅を最初の幅として渡す
         let mut widths = column_widths(ui.ctx());
@@ -968,6 +1046,12 @@ impl BoxView {
         let tall_header = columns.iter().any(|c| c.tall_header(setting));
         let has_eval = columns.iter().any(|c| matches!(c, Col::Eval(..)));
         let has_hit = columns.contains(&Col::HitCheck);
+        // 本家: 絞り込みが無く、並び順が「No」だけ(または並べ替え無し)のときだけ上下に動かせる
+        let movable_dir: Option<i32> = (self.search.trim().is_empty()
+            && self.detail_seed.is_none()
+            && self.detail_pokemon.is_none()
+            && (sort.is_empty() || (sort.len() == 1 && sort[0].0 == Col::Index.key())))
+        .then(|| sort.first().map_or(1, |s| s.1 as i32));
         let shiny_lock = setting.cleaning.shiny_lock;
         let pure_mint = self.mode == Mode::PureMint;
         // 行の高さ: 厳選の列は進化先名と値の2段(全進化先を出すときは進化先の数だけ)
@@ -1063,9 +1147,26 @@ impl BoxView {
                 ev.push(TableEvent::Sort(key.clone(), ui.input(|i| i.modifiers.shift)));
             }
             r.context_menu(|ui| {
+                if ui.button("この列を非表示").clicked() {
+                    ev.push(TableEvent::Hide(key.clone()));
+                    ui.close();
+                }
                 if ui.button("列の並びを最初に戻す").clicked() {
                     ev.push(TableEvent::ResetOrder);
                     ui.close();
+                }
+                if !hidden_titles.is_empty() {
+                    ui.separator();
+                    for (k, t) in &hidden_titles {
+                        if ui.button(format!("「{t}」を表示")).clicked() {
+                            ev.push(TableEvent::Show(Some(k.clone())));
+                            ui.close();
+                        }
+                    }
+                    if ui.button("非表示の列をすべて表示").clicked() {
+                        ev.push(TableEvent::Show(None));
+                        ui.close();
+                    }
                 }
             });
 
@@ -1114,6 +1215,23 @@ impl BoxView {
                     if icon_button(ui, Icon::Delete, delete_color).on_hover_text("削除").clicked() && !p.favorite {
                         return Some(TableEvent::Action(RowAction::Delete(i)));
                     }
+                    if let Some(dir) = movable_dir {
+                        // 上下の矢印(本家 PokemonBox.move)
+                        for up in [true, false] {
+                            let (rect, r) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), egui::Sense::click());
+                            let color = if r.hovered() { egui::Color32::from_gray(0x55) } else { egui::Color32::from_gray(0x88) };
+                            let c = rect.center();
+                            let pts = if up {
+                                vec![c + egui::vec2(-6.0, 3.0), c + egui::vec2(0.0, -4.0), c + egui::vec2(6.0, 3.0)]
+                            } else {
+                                vec![c + egui::vec2(-6.0, -3.0), c + egui::vec2(0.0, 4.0), c + egui::vec2(6.0, -3.0)]
+                            };
+                            ui.painter().add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+                            if r.on_hover_text(if up { "上へ" } else { "下へ" }).clicked() {
+                                return Some(TableEvent::Action(RowAction::Move(i, if up { -dir } else { dir })));
+                            }
+                        }
+                    }
                     let (icon, color) = match p.fix {
                         Some(1.0) => (Icon::Fix, egui::Color32::from_rgb(0x66, 0xcc, 0x44)),
                         Some(-1.0) => (Icon::Exclude, egui::Color32::from_rgb(0xee, 0x44, 0x00)),
@@ -1152,12 +1270,53 @@ impl BoxView {
                     ui.label(egui::RichText::new(p.memo.clone().unwrap_or_default()).size(11.0));
                 }
                 Col::Lv => {
-                    ui.label(format!("{}", p.lv));
+                    // 本家 LvLabel: 仮定計算で上がったときは「元のLv→Lv」
+                    match result {
+                        Some(r) if r.pokemon.lv != p.lv => {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 1.0;
+                                ui.label(egui::RichText::new(format!("{}→", fmt_js_num(p.lv))).size(10.0));
+                                ui.label(fmt_js_num(r.pokemon.lv));
+                            });
+                        }
+                        _ => {
+                            ui.label(fmt_js_num(p.lv));
+                        }
+                    }
                 }
                 Col::SkillLv => {
-                    // 本家と同じく補正後のスキルLv
+                    // 本家 SkillLvLabel: 元のスキルLv(未入力は薄く)と、補正後のスキルLv
                     if let Some(r) = result {
-                        ui.label(r.pokemon.fixed_skill_lv.to_string());
+                        let sim = &r.pokemon;
+                        let base = sim.base();
+                        let input = p.skill_lv.filter(|v| *v != 0.0);
+                        let original = match input {
+                            Some(v) => v,
+                            None => {
+                                let names = sim.sub_skill_names();
+                                let has = |n: &str| names.iter().any(|x| *x == Some(n));
+                                let mut lv = base.evolve_lv as f64;
+                                if has("スキルレベルアップM") {
+                                    lv += 2.0;
+                                }
+                                if has("スキルレベルアップS") {
+                                    lv += 1.0;
+                                }
+                                lv.min(master().pokemon_skill(base).max_lv() as f64)
+                            }
+                        };
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            let mut t = egui::RichText::new(fmt_js_num(original)).strong();
+                            if p.skill_lv.is_none() {
+                                t = t.color(egui::Color32::from_gray(0xaa));
+                            }
+                            ui.label(t);
+                            if original < sim.fixed_skill_lv {
+                                ui.label(egui::RichText::new("→").size(10.0));
+                                ui.label(egui::RichText::new(fmt_js_num(sim.fixed_skill_lv)).strong());
+                            }
+                        });
                     }
                 }
                 Col::Food => food_icon::food_list(ui, p),
@@ -1349,6 +1508,8 @@ impl BoxView {
         let mut sort_changed = false;
         let mut moved: Option<(Col, Col, bool)> = None;
         let mut reset_order = false;
+        let mut hidden_now = hidden.clone();
+        let mut hidden_changed = false;
         let mut action: Option<RowAction> = None;
         let mut toggle_select: Option<usize> = None;
         let mut select_all: Option<bool> = None;
@@ -1365,6 +1526,19 @@ impl BoxView {
                 }
                 TableEvent::Move(src, dst, after) => moved = Some((src, dst, after)),
                 TableEvent::ResetOrder => reset_order = true,
+                TableEvent::Hide(key) => {
+                    if !hidden_now.contains(&key) {
+                        hidden_now.push(key);
+                        hidden_changed = true;
+                    }
+                }
+                TableEvent::Show(key) => {
+                    match key {
+                        Some(k) => hidden_now.retain(|x| *x != k),
+                        None => hidden_now.clear(),
+                    }
+                    hidden_changed = true;
+                }
                 TableEvent::SelectAll(v) => select_all = Some(v),
                 TableEvent::Toggle(i) => toggle_select = Some(i),
                 TableEvent::Action(a) => action = Some(a),
@@ -1392,6 +1566,10 @@ impl BoxView {
         }
         if reset_order {
             set_column_order(ui.ctx(), None);
+            widths.clear();
+        }
+        if hidden_changed {
+            set_hidden_columns(ui.ctx(), hidden_now);
             widths.clear();
         }
         set_column_widths(ui.ctx(), widths);
@@ -1434,7 +1612,7 @@ impl BoxView {
             None => {}
         }
         match action {
-            Some(RowAction::Edit(i)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone()))),
+            Some(RowAction::Edit(i)) => self.edit = Some(PokemonEdit::new(Some(i), Some(shared.box_file.list[i].clone())).with_env(edit_env(shared))),
             Some(RowAction::Delete(i)) => {
                 let p = &shared.box_file.list[i];
                 self.confirm_delete = Some((format!("{}(Lv{})を削除します。よろしいですか？", p.name, p.lv), vec![i]));
@@ -1450,6 +1628,15 @@ impl BoxView {
                 shared.save_box();
             }
             // 本家 toggleFavorite
+            Some(RowAction::Move(i, delta)) => {
+                let j = i as i64 + delta as i64;
+                if j >= 0 && (j as usize) < shared.box_file.list.len() {
+                    let item = shared.box_file.list.remove(i);
+                    shared.box_file.list.insert(j as usize, item);
+                    shared.save_box();
+                    self.results.clear();
+                }
+            }
             Some(RowAction::Favorite(i)) => {
                 let p = &mut shared.box_file.list[i];
                 p.favorite = !p.favorite;

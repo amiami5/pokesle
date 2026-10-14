@@ -15,11 +15,6 @@ const EVALUATE_SETTING_MIGRATION_VERSION: f64 = 20260919.0;
 const CHECK_LIST_POKEMON_TARGET_MIGRATION_VERSION: f64 = 20260928.0;
 const SPECIALTY_LIST: [&str; 4] = ["きのみ", "食材", "スキル", "オール"];
 
-/// JS の `x ?? null` 相当で、キーが無いか null なら None
-fn present<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
-    v.get(key).filter(|x| !x.is_null())
-}
-
 fn truthy(v: Option<&Value>) -> bool {
     v.is_some_and(crate::config::js_truthy)
 }
