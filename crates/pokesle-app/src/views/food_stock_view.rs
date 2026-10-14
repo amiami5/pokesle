@@ -152,85 +152,117 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
         if unlimited { 9999.0 } else { shared.config.food_default_num.get(name).copied().unwrap_or(0.0) }
     };
 
-    egui::Grid::new("food_stock_result").striped(true).spacing([8.0, 4.0]).show(ui, |ui| {
-        style::th(ui, "料理の種類");
-        style::th(ui, "料理名");
-        style::th(ui, "回数");
-        for food in &m.foods {
-            food_icon::food_icon(ui, &food.name, 24.0);
-        }
-        style::th(ui, "種類合計エナジー");
-        ui.end_row();
-
-        for (t, ty) in CookingType::ALL.iter().enumerate() {
-            let plan = &result.plans[t];
-            if plan.cooking_list.is_empty() {
-                style::th(ui, ty.name());
-                ui.label("重みが0%のため、最適化の対象外です。");
-                ui.end_row();
-                continue;
-            }
-            for (i, item) in plan.cooking_list.iter().enumerate() {
-                if i == 0 {
-                    ui.label(egui::RichText::new(ty.name()).strong());
-                } else {
-                    ui.label("");
+    // 罫線つきの表。列幅を固定し、各セルを枠で囲む
+    const W_TYPE: f32 = 90.0;
+    const W_NAME: f32 = 150.0;
+    const W_NUM: f32 = 50.0;
+    const W_FOOD: f32 = 46.0;
+    const W_ENERGY: f32 = 110.0;
+    const H: f32 = 26.0;
+    let cell = |ui: &mut egui::Ui, width: f32, right: bool, add: &mut dyn FnMut(&mut egui::Ui)| {
+        egui::Frame::new().stroke(egui::Stroke::new(1.0, style::LINE)).inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
+            ui.set_min_size(egui::vec2(width - 8.0, H - 4.0));
+            ui.set_max_width(width - 8.0);
+            let layout = if right { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+            ui.with_layout(layout, |ui| add(ui));
+        });
+    };
+    let text = |s: String| move |ui: &mut egui::Ui| {
+        ui.label(s.clone());
+    };
+    let head = |s: &'static str| move |ui: &mut egui::Ui| {
+        style::th(ui, s);
+    };
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        egui::ScrollArea::horizontal().id_salt("food_stock_table").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                cell(ui, W_TYPE, false, &mut head("料理の種類"));
+                cell(ui, W_NAME, false, &mut head("料理名"));
+                cell(ui, W_NUM, false, &mut head("回数"));
+                for food in &m.foods {
+                    cell(ui, W_FOOD, false, &mut |ui| {
+                        food_icon::food_icon(ui, &food.name, 22.0);
+                    });
                 }
-                ui.label(&item.name);
-                ui.label(format!("{}食", item.num));
-                for fi in 0..m.foods.len() {
-                    match item.food_num_map.get(&fi) {
-                        Some(n) => ui.label(fmt_num(*n)),
-                        None => ui.label(""),
-                    };
+                cell(ui, W_ENERGY, false, &mut head("種類合計エナジー"));
+            });
+            for (t, ty) in CookingType::ALL.iter().enumerate() {
+                let plan = &result.plans[t];
+                if plan.cooking_list.is_empty() {
+                    ui.horizontal(|ui| {
+                        cell(ui, W_TYPE, false, &mut head(ty.name()));
+                        cell(ui, W_NAME + W_NUM + W_FOOD * m.foods.len() as f32 + W_ENERGY, false, &mut text("重みが0%のため、最適化の対象外です。".into()));
+                    });
+                    continue;
                 }
-                if i == 0 {
-                    ui.label(fmt_num(plan.energy));
-                } else {
-                    ui.label("");
+                for (i, item) in plan.cooking_list.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if i == 0 {
+                            cell(ui, W_TYPE, false, &mut |ui| {
+                                ui.label(egui::RichText::new(ty.name()).strong());
+                            });
+                        } else {
+                            cell(ui, W_TYPE, false, &mut |_| {});
+                        }
+                        cell(ui, W_NAME, false, &mut text(item.name.clone()));
+                        cell(ui, W_NUM, true, &mut text(format!("{}食", item.num)));
+                        for fi in 0..m.foods.len() {
+                            let s = item.food_num_map.get(&fi).map(|n| fmt_num(*n)).unwrap_or_default();
+                            cell(ui, W_FOOD, true, &mut text(s));
+                        }
+                        let s = if i == 0 { fmt_num(plan.energy) } else { String::new() };
+                        cell(ui, W_ENERGY, true, &mut text(s));
+                    });
                 }
-                ui.end_row();
             }
-        }
 
-        // 合計
-        style::th(ui, "準備食材量(3種類の相乗平均)");
-        ui.label("");
-        ui.label("");
-        for n in &result.food_num_list {
-            ui.label(egui::RichText::new(fmt_num(*n)).strong());
-        }
-        ui.label(egui::RichText::new(fmt_num(geometric_mean)).strong());
-        ui.end_row();
+            // 合計
+            ui.horizontal(|ui| {
+                cell(ui, W_TYPE + W_NAME + W_NUM, false, &mut head("準備食材量(3種類の相乗平均)"));
+                for n in &result.food_num_list {
+                    let s = fmt_num(*n);
+                    cell(ui, W_FOOD, true, &mut |ui| {
+                        ui.label(egui::RichText::new(&s).strong());
+                    });
+                }
+                let s = fmt_num(geometric_mean);
+                cell(ui, W_ENERGY, true, &mut |ui| {
+                    ui.label(egui::RichText::new(&s).strong());
+                });
+            });
 
-        style::th(ui, "所持食材");
-        ui.label("");
-        ui.label("");
-        for food in &m.foods {
-            if unlimited {
-                let mut v = 9999.0;
-                ui.add_enabled(false, egui::DragValue::new(&mut v));
-            } else {
-                let v = shared.config.food_default_num.entry(food.name.clone()).or_insert(0.0);
-                changed |= ui.add_sized([44.0, 20.0], egui::DragValue::new(v).range(0.0..=9999.0)).changed();
-            }
-        }
-        ui.label("");
-        ui.end_row();
+            ui.horizontal(|ui| {
+                cell(ui, W_TYPE + W_NAME + W_NUM, false, &mut head("所持食材"));
+                for food in &m.foods {
+                    cell(ui, W_FOOD, true, &mut |ui| {
+                        if unlimited {
+                            let mut v = 9999.0;
+                            ui.add_enabled(false, egui::DragValue::new(&mut v));
+                        } else {
+                            let v = shared.config.food_default_num.entry(food.name.clone()).or_insert(0.0);
+                            changed |= ui.add(egui::DragValue::new(v).range(0.0..=9999.0)).changed();
+                        }
+                    });
+                }
+                cell(ui, W_ENERGY, false, &mut |_| {});
+            });
 
-        style::th(ui, "所持数との差分");
-        ui.label("");
-        ui.label("");
-        for (fi, food) in m.foods.iter().enumerate() {
-            let diff = stocked(shared, &food.name) - result.food_num_list[fi];
-            let mut text = egui::RichText::new(fmt_num(diff));
-            if diff < 0.0 {
-                text = text.color(SHORTAGE).strong();
-            }
-            ui.label(text);
-        }
-        ui.label("");
-        ui.end_row();
+            ui.horizontal(|ui| {
+                cell(ui, W_TYPE + W_NAME + W_NUM, false, &mut head("所持数との差分"));
+                for (fi, food) in m.foods.iter().enumerate() {
+                    let diff = stocked(shared, &food.name) - result.food_num_list[fi];
+                    cell(ui, W_FOOD, true, &mut |ui| {
+                        let mut t = egui::RichText::new(fmt_num(diff));
+                        if diff < 0.0 {
+                            t = t.color(SHORTAGE).strong();
+                        }
+                        ui.label(t);
+                    });
+                }
+                cell(ui, W_ENERGY, false, &mut |_| {});
+            });
+        });
     });
 
     // 余った食材で作れる料理
