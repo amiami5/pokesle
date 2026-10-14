@@ -7,7 +7,7 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
+use crate::views::{tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -34,7 +34,7 @@ type NavItem = (Tab, &'static str, bool);
 const NAV: [(&str, &[NavItem]); 4] = [
     ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
-    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", false)]),
+    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", true)]),
     ("その他", &[(Tab::Data, "データ", true), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", true), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
 ];
 
@@ -98,6 +98,7 @@ pub struct App {
     check_list_view: CheckListView,
     box_summary_view: BoxSummaryView,
     data_page_view: DataPageView,
+    tmp_evaluate_view: TmpEvaluateView,
     team_view: TeamView,
     food_stock_view: FoodStockView,
     evaluate_view: EvaluateView,
@@ -126,6 +127,7 @@ impl App {
             Ok("foodstock") => Tab::FoodStock,
             Ok("summary") => Tab::Summary,
             Ok("data") => Tab::Data,
+            Ok("tmp") => Tab::TmpEvaluate,
             Ok("history") => Tab::History,
             Ok("setting") => Tab::Setting,
             Ok("ui") => Tab::UiSetting,
@@ -153,6 +155,7 @@ impl App {
             check_list_view: CheckListView::default(),
             box_summary_view: BoxSummaryView::default(),
             data_page_view: DataPageView::default(),
+            tmp_evaluate_view: TmpEvaluateView::default(),
             team_view: TeamView::default(),
             food_stock_view: FoodStockView::default(),
             evaluate_view: EvaluateView::default(),
@@ -253,6 +256,7 @@ impl eframe::App for App {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.team_view.ui(ui, &mut self.shared));
             }
             Tab::Summary => self.box_summary_view.ui(ui, &mut self.shared),
+            Tab::TmpEvaluate => self.tmp_evaluate_view.ui(ui, &mut self.shared),
             Tab::Data => self.data_page_view.ui(ui, &mut self.shared),
             Tab::History => {
                 // 開いたら既読にする(本家 history.vue)

@@ -84,6 +84,10 @@ impl TeamView {
         });
         ui.add_space(5.0);
 
+        // 実行ボタンと結果を先に出す(条件は何度も書き換える場所ではないので下に置く)
+        self.run_and_results(ui, shared);
+        ui.add_space(8.0);
+
         // 条件(本家の SettingList)
         egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(10).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -189,7 +193,10 @@ impl TeamView {
             shared.save_config();
         }
         ui.add_space(5.0);
+    }
 
+    /// 実行ボタン・進捗・結果
+    fn run_and_results(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         let can_run = self.job.is_none() && !shared.box_file.list.is_empty();
         ui.add_enabled_ui(can_run, |ui| {
             if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
@@ -255,6 +262,7 @@ impl TeamView {
         {
             self.edit = Some(PokemonEdit::new(Some(i), Some(p.clone())));
         }
+    
     }
 
     fn edit_window(&mut self, ctx: &egui::Context, shared: &mut Shared) {

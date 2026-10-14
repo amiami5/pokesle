@@ -785,3 +785,67 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   writeFileSync(path.join(outDir, 'data-view.json'), JSON.stringify(out));
   console.log(`data-view: ${out.pokemon.length} pokemon, ${out.food.length} food configs, ${expectCases.map((c) => c.rows.length).join('/')}`);
 }
+
+// ---- 簡易診断(EvaluateTable.simulateTemporary + 入力個体の概算) ----
+{
+  const cases = [];
+  const defs = [
+    { pokemon: { name: 'ピカチュウ', lv: 1, skillLv: 1, foodList: ['とくせんリンゴ', 'とくせんリンゴ', 'あったかジンジャー'], subSkillList: ['きのみの数S', 'おてつだいスピードS', '食材確率アップS', 'スキル確率アップM', '最大所持数アップS'], nature: 'がんばりや' }, tweak: () => {} },
+    { pokemon: { name: 'イーブイ(ホリデー)', lv: 1, skillLv: 1, foodList: ['モーモーミルク', 'モーモーミルク', 'リラックスカカオ'], subSkillList: ['おてつだいボーナス', 'スキルレベルアップM', '', 'おてつだいスピードM', 'スキル確率アップS'], nature: 'いじっぱり' }, tweak: (c) => { c.tmpEvaluate.scoreForHealerEvaluate = 20000; c.tmpEvaluate.scoreForSupportEvaluate = 300; c.tmpEvaluate.sleepTime = 7; c.tmpEvaluate.checkFreq = 4; } },
+  ];
+  for (const d of defs) {
+    const config = clone(defaultConfig);
+    d.tweak(config);
+    // simulateTemporary(config, name) の再現
+    const fixed = clone(config);
+    const evaluateConfig = fixed.tmpEvaluate;
+    fixed.selectEvaluate = evaluateConfig;
+    fixed.selectEvaluate.levelList = { 10: false, 25: false, 30: true, 50: true, 60: true, 70: true, 80: true };
+    const after = Pokemon.map[d.pokemon.name].afterList.map((n) => Pokemon.map[n]).filter((x) => x != null);
+    const combos = await subSkillCombinationWorker({ config: fixed });
+    const table = { scoreForHealerEvaluate: {}, scoreForSupportEvaluate: {} };
+    for (const lv of [30, 50, 60, 70, 80]) {
+      const foodCombinationList = lv < 60 ? ['00', '01'] : ['000', '001', '002', '010', '011', '012'];
+      const n = lv < 50 ? 2 : lv < 70 ? 3 : lv < 80 ? 4 : 5;
+      const rate = 1.025 ** (lv - 1) / (1 - 0.002 * (lv - 1));
+      const healer = evaluateConfig.scoreForHealerEvaluate * rate;
+      const support = evaluateConfig.scoreForSupportEvaluate * rate;
+      const r = await evaluateWorker({ lv, config: fixed, pokemonList: after, foodCombinationList, subSkillCombinationList: combos[n] ?? [[1]], scoreForHealerEvaluate: healer, scoreForSupportEvaluate: support });
+      table.scoreForHealerEvaluate[lv] = { '': { energy: healer } };
+      table.scoreForSupportEvaluate[lv] = { '': { energy: support } };
+      for (const [name, res] of Object.entries(r.result)) {
+        table[name] ??= {};
+        table[name][lv] = {};
+        for (const [food, perc] of Object.entries(res)) {
+          table[name][lv][food] = Object.fromEntries(['energy', 'berry', 'food', 'skill'].map((k) => [k, perc[k].map((x) => x.score)]));
+        }
+      }
+    }
+    // evaluate() の後半
+    const c = clone(config);
+    c.tmpEvaluate.levelList = { 10: false, 25: false, 30: true, 50: true, 60: true, 70: true, 80: true };
+    c.selectEvaluate = c.tmpEvaluate;
+    c.sleepTime = c.tmpEvaluate.sleepTime;
+    c.checkFreq = c.tmpEvaluate.checkFreq;
+    c.workerNum = c.tmpEvaluate.workerNum;
+    c.pureMint = false;
+    await boxWorker({ type: 'config', config: clone(c) });
+    const [sim] = await boxWorker({ type: 'basic', pokemonList: [clone(d.pokemon)], evaluateTable: table });
+    const evolutions = {};
+    for (const [name, byKey] of Object.entries(sim.evaluateResult[30] ?? {})) {
+      if (name == 'best') continue;
+      evolutions[name] = Object.fromEntries([30, 50, 60, 70, 80].map((lv) => {
+        const e = sim.evaluateResult[lv]?.[name];
+        return [lv, {
+          rate: Object.fromEntries(['energy', 'berry', 'food', 'skill'].map((k) => [k, num(e?.[k]?.rate)])),
+          berryEnergy: num(e?.diagnostic?.berryEnergy),
+          skillActivationNum: num(e?.diagnostic?.skillActivationNum),
+          foodNumMap: Object.fromEntries(Object.entries(e?.diagnostic?.foodNumMap ?? {}).map(([k, v]) => [k, num(v)])),
+        }];
+      }));
+    }
+    cases.push({ config, pokemon: d.pokemon, evolutions });
+  }
+  writeFileSync(path.join(outDir, 'tmp-evaluate.json'), JSON.stringify(cases));
+  console.log(`tmp-evaluate: ${cases.map((c) => Object.keys(c.evolutions).length).join(',')}`);
+}

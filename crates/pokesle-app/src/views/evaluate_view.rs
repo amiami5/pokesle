@@ -74,7 +74,7 @@ impl EvaluateView {
             );
 
             let edit = self.edit.as_mut().expect("編集中の設定");
-            evaluate_setting(ui, edit);
+            evaluate_setting(ui, edit, false);
 
             if self.done {
                 style::alert(ui, "厳選情報の計算が完了しました。ボックス画面から厳選情報を確認できます。");
@@ -181,7 +181,8 @@ fn max_energy_per_exp() -> MaxEnergyPerExp {
 }
 
 /// 本家 EvaluateSetting(isTmpEvaluate = false)
-fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config) {
+/// 基準生成・簡易診断の設定。`tmp` は簡易診断(厳選レベルとサポートスキル評価用の欄を出さない)
+pub fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config, tmp: bool) {
     let m = master();
     let e = &mut c.select_evaluate;
 
@@ -220,17 +221,19 @@ fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config) {
             });
             ui.end_row();
 
-            lbl(ui, "厳選レベル");
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    for lv in [10, 25, 30, 50, 60, 70, 80] {
-                        let v = e.level_list.entry(lv).or_insert(false);
-                        ui.checkbox(v, lv.to_string());
-                    }
+            if !tmp {
+                lbl(ui, "厳選レベル");
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        for lv in [10, 25, 30, 50, 60, 70, 80] {
+                            let v = e.level_list.entry(lv).or_insert(false);
+                            ui.checkbox(v, lv.to_string());
+                        }
+                    });
+                    small(ui, "どのLv時点の評価で厳選するか設定します。", 400.0);
                 });
-                small(ui, "どのLv時点の評価で厳選するか設定します。", 400.0);
-            });
-            ui.end_row();
+                ui.end_row();
+            }
         });
     });
 
@@ -321,19 +324,21 @@ fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config) {
             });
             ui.end_row();
 
-            lbl(ui, "サポートスキル評価用");
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("厳選ライン：");
-                    num_unit(ui, &mut e.support_border, 1.0, 40.0, "%");
+            if !tmp {
+                lbl(ui, "サポートスキル評価用");
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("厳選ライン：");
+                        num_unit(ui, &mut e.support_border, 1.0, 40.0, "%");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("上位：");
+                        num_unit(ui, &mut e.support_rank_num, 1.0, 40.0, "%");
+                    });
+                    small(ui, "サポートスキル評価時に参照する他ポケモンの厳選度と上位何%を使用するか", 200.0);
                 });
-                ui.horizontal(|ui| {
-                    ui.label("上位：");
-                    num_unit(ui, &mut e.support_rank_num, 1.0, 40.0, "%");
-                });
-                small(ui, "サポートスキル評価時に参照する他ポケモンの厳選度と上位何%を使用するか", 200.0);
-            });
-            ui.end_row();
+                ui.end_row();
+            }
 
             lbl(ui, "料理パワーアップ評価方法");
             ui.vertical(|ui| {

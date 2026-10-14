@@ -671,6 +671,22 @@ pub struct TeamSimulationResult {
     pub team_list: Vec<TeamResult>,
 }
 
+/// 簡易診断(本家 `pages/tmp-evaluate.vue` の `evaluate()`)。簡易診断表を作り、入力した個体だけを概算する
+pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, progress: &dyn crate::evaluate_table::Progress) -> Result<BoxResult, String> {
+    let mut c = config.clone();
+    // 簡易診断は設定画面の選択状態にかかわらず、常にグラフの5レベルを計算する
+    c.tmp_evaluate.level_list = [(10, false), (25, false), (30, true), (50, true), (60, true), (70, true), (80, true)].into_iter().collect();
+    let table = crate::evaluate_table::simulate_temporary(&c, &pokemon.name, progress)?;
+    c.select_evaluate = c.tmp_evaluate.clone();
+    c.sleep_time = c.tmp_evaluate.sleep_time.unwrap_or(c.sleep_time);
+    c.check_freq = c.tmp_evaluate.check_freq.unwrap_or(c.check_freq);
+    c.worker_num = c.tmp_evaluate.worker_num.unwrap_or(c.worker_num);
+    c.pure_mint = false;
+    progress.set(0.9, "選択したポケモンを評価しています…");
+    let result = simulate_box(&c, std::slice::from_ref(pokemon), Some(&table), false)?;
+    result.into_iter().next().ok_or_else(|| "評価できませんでした".to_string())
+}
+
 /// ボックス概算(本家 `PokemonBox.simulation` の basic → assist)
 pub fn simulate_box(config: &Config, box_list: &[BoxPokemon], evaluate_table: Option<&EvaluateTable>, with_assist: bool) -> Result<Vec<BoxResult>, String> {
     let n = config.worker_num.max(1.0) as usize;

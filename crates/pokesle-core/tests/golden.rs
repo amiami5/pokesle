@@ -832,3 +832,51 @@ fn data_view_matches_upstream() {
         }
     }
 }
+
+#[test]
+fn tmp_evaluate_matches_upstream() {
+    use pokesle_core::evaluate_table::EvalLv;
+    use pokesle_core::team_sim::simulate_tmp_evaluate;
+    let golden = load("tmp-evaluate.json");
+    let num = |v: &Value| expected_num(v);
+    for (ci, case) in golden.as_array().unwrap().iter().enumerate() {
+        let mut value = pokesle_core::config::default_config_value();
+        pokesle_core::config::merge_object(&mut value, &case["config"]);
+        let config = Config::from_value(&value).unwrap();
+        let pokemon: BoxPokemon = serde_json::from_value(case["pokemon"].clone()).unwrap();
+        let r = simulate_tmp_evaluate(&config, &pokemon, &()).unwrap();
+        let er = r.evaluate_result.expect("evaluate_result");
+        let expected = case["evolutions"].as_object().unwrap();
+        assert!(!expected.is_empty(), "case {ci}: 本家の結果が空");
+        let mut names = er.names(EvalLv::Lv(30));
+        names.sort();
+        let mut exp_names: Vec<&String> = expected.keys().collect();
+        exp_names.sort();
+        assert_eq!(names.iter().collect::<Vec<_>>(), exp_names, "case {ci}: 進化先");
+        for (name, by_lv) in expected {
+            for lv in [30u32, 50, 60, 70, 80] {
+                let e = &by_lv[lv.to_string()];
+                let entry = er.get(EvalLv::Lv(lv), name).unwrap_or_else(|| panic!("case {ci} {name} Lv{lv}: 評価なし"));
+                for key in ["energy", "berry", "food", "skill"] {
+                    let a = entry.get(key).map(|i| i.rate);
+                    let x = num(&e["rate"][key]);
+                    assert!(
+                        match (a, x) {
+                            (Some(a), Some(x)) => close(a, x),
+                            (None, None) => true,
+                            _ => false,
+                        },
+                        "case {ci} {name} Lv{lv} {key}: rust={a:?} js={x:?}"
+                    );
+                }
+                let d = entry.diagnostic.as_ref().expect("diagnostic");
+                assert!(close(d.berry_energy, num(&e["berryEnergy"]).unwrap()), "case {ci} {name} Lv{lv} berryEnergy");
+                assert!(close(d.skill_activation_num, num(&e["skillActivationNum"]).unwrap()), "case {ci} {name} Lv{lv} skillActivationNum");
+                for (food, v) in e["foodNumMap"].as_object().unwrap() {
+                    let a = d.food_num_map.iter().find(|(n, _)| n == food).map(|(_, v)| *v).unwrap_or(f64::NAN);
+                    assert!(close(a, num(v).unwrap()), "case {ci} {name} Lv{lv} food {food}: {a} vs {v}");
+                }
+            }
+        }
+    }
+}
