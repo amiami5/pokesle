@@ -160,12 +160,14 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
     const W_ENERGY: f32 = 110.0;
     const H: f32 = 26.0;
     let cell = |ui: &mut egui::Ui, width: f32, right: bool, add: &mut dyn FnMut(&mut egui::Ui)| {
-        egui::Frame::new().stroke(egui::Stroke::new(1.0, style::LINE)).inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
-            ui.set_min_size(egui::vec2(width - 8.0, H - 4.0));
-            ui.set_max_width(width - 8.0);
-            let layout = if right { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
-            ui.with_layout(layout, |ui| add(ui));
-        });
+        // 幅・高さを固定した枠を確保し、その中にだけ内容を描く(内容で枠が広がらないようにする)
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, H), egui::Sense::hover());
+        ui.painter().rect_stroke(rect, 0.0, egui::Stroke::new(1.0, style::LINE), egui::StrokeKind::Inside);
+        let inner = rect.shrink2(egui::vec2(4.0, 2.0));
+        let layout = if right { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(layout));
+        child.set_clip_rect(inner.intersect(ui.clip_rect()));
+        add(&mut child);
     };
     let text = |s: String| move |ui: &mut egui::Ui| {
         ui.label(s.clone());
