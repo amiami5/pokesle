@@ -65,6 +65,11 @@ pub fn caution_color() -> Color32 {
 pub fn th_color() -> Color32 {
     pick(0x888888, 0x9ea6b6)
 }
+/// 未解放(無効)の表示の不透明度。暗い背景では沈みすぎないよう高めにする
+pub fn disabled_alpha() -> f32 {
+    if is_dark() { 0.8 } else { 0.5 }
+}
+
 /// 不足などの警告の文字色
 pub fn shortage() -> Color32 {
     pick(0xb21d1d, 0xff7b7b)

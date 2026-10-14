@@ -1886,7 +1886,7 @@ fn sub_skill_label(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon, r
         _ => (0xf6f7fc, 0xbfc8de, 0x3b4663),
     };
     let hex = |c: u32| egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
-    let alpha = |c: egui::Color32| if disabled { c.gamma_multiply(0.5) } else { c };
+    let alpha = |c: egui::Color32| if disabled { c.gamma_multiply(style::disabled_alpha()) } else { c };
     let size = egui::TextStyle::Body.resolve(ui.style()).size * 0.8;
     let width = size * if short { 5.0 } else { 11.5 };
     let text_color = alpha(if fix { egui::Color32::RED } else { hex(color) });

@@ -217,7 +217,7 @@ fn sub_skill_label(ui: &mut egui::Ui, sub: Option<(&str, &str, u32)>, short: boo
         _ => (hex(0xf6f7fc), hex(0xbfc8de), hex(0x3b4663)),
     };
     let color = if fixed { egui::Color32::RED } else { color };
-    let alpha = if disabled { 0.5 } else { 1.0 };
+    let alpha = if disabled { style::disabled_alpha() } else { 1.0 };
     let text = sub.map_or("-", |s| if short { s.1 } else { s.0 });
     let font = egui::FontId::proportional(11.0);
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color.gamma_multiply(alpha));
