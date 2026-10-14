@@ -479,6 +479,148 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   }
   writeFileSync(path.join(outDir, 'check-list.json'), JSON.stringify({ box: fixBox, table, cases: checklistCases }));
   console.log(`check-list: ${checklistCases.map((c) => `${c.page.pokemon.rows.length}/${c.page.food.rows.length}/${c.page.skill.rows.length}`).join(',')}`);
+
+  // ---- ボックス集計(box-summary の きのみ・食材・スキル・ポケモン) ----
+  {
+    const { default: Berry } = await up('data/berry.ts');
+    const { default: Skill } = await up('data/skill.ts');
+    const { Cooking } = await up('data/food_and_cooking.ts');
+    const { default: PokemonSimulator } = await up('models/simulation/pokemon-simulator.ts');
+    const summaryConfigs = {
+      sum_default: variant(() => {}),
+      sum_fix: variant((c) => {
+        c.simulation.fixEvolve = true; c.simulation.fixSubSkillSeed = true; c.simulation.fixSkillSeed = 1; c.simulation.selectType = 1;
+        c.selectEvaluate.levelList = { 30: false, 50: true, 60: true, 70: true };
+      }),
+    };
+    const simulate = async (config, list, tbl) => {
+      await boxWorker({ type: 'config', config: clone(config) });
+      const basic = await boxWorker({ type: 'basic', pokemonList: clone(list), evaluateTable: tbl });
+      return await boxWorker({ type: 'assist', pokemonList: basic, basedPokemonList: basic });
+    };
+    const withSim = (config, extra) => ({
+      ...config,
+      simulation: { ...config.simulation, field: 'ワカクサ本島', fieldBonus: 0, berryList: ['', '', ''], mode: 0, ...extra },
+    });
+    const settings = [{ fix: false }, { fix: true, fixLv: 30 }, { fix: true, fixLv: 50 }, { fix: true, fixLv: 60 }, { fix: true, fixLv: 70 }];
+    const ident = (p) => (p ? { name: p.base.name, index: p.box?.index ?? null } : null);
+    const summaryCases = [];
+
+    for (const [cname, config] of Object.entries(summaryConfigs)) {
+      const c = { name: cname, config };
+
+      // きのみ
+      const sims = [];
+      for (const s of settings) sims.push(await simulate(withSim(config, s), fixBox, table));
+      c.berry = Berry.list.map((berry) => ({
+        name: berry.name,
+        cols: sims.map((list) => {
+          const l = list.filter((x) => x.base.berry.name == berry.name).sort((a, b) => b.bEpD - a.bEpD);
+          return { value: num(l[0]?.bEpD), pokemon: ident(l[0]) };
+        }),
+      }));
+
+      // 食材
+      const foodSims = [];
+      for (const s of settings) foodSims.push(await simulate(withSim(config, { ...s, genkiFull: true, helpBonus: 3 }), fixBox, table));
+      const foodMax = Object.fromEntries(Food.list.map((x) => [x.name, { num: 0, pokemon: null, foodList: [] }]));
+      Pokemon.list.forEach((pokemon) => {
+        const foodHelpNum = pokemon.foodRate * 86400 / pokemon.help / 0.45;
+        for (const food1 of pokemon.foodList.filter((x) => x?.name && x.numList[0])) {
+          for (const food2 of pokemon.foodList.filter((x) => x?.name && x.numList[1])) {
+            for (const food3 of pokemon.foodList.filter((x) => x?.name && x.numList[2])) {
+              const numMap = {};
+              numMap[food1.name] = (numMap[food1.name] ?? 0) + food1.numList[0] / 3;
+              numMap[food2.name] = (numMap[food2.name] ?? 0) + food2.numList[1] / 3;
+              numMap[food3.name] = (numMap[food3.name] ?? 0) + food3.numList[2] / 3;
+              for (let [name, n] of Object.entries(numMap)) {
+                n *= foodHelpNum;
+                if (foodMax[name].num < n) foodMax[name] = { num: n, pokemon, foodList: [food1.name, food2.name, food3.name] };
+              }
+            }
+          }
+        }
+      });
+      c.food = Food.list.map((food) => ({
+        name: food.name,
+        require: Math.max(...Cooking.list.map((x) => x.foodList.find((f) => f.name == food.name)?.num ?? 0)),
+        max: num(foodMax[food.name].num),
+        maxPokemon: foodMax[food.name].pokemon?.name ?? null,
+        maxFoodList: foodMax[food.name].foodList,
+        cols: foodSims.map((list) => {
+          const l = [...list].sort((a, b) => b[food.name] - a[food.name]);
+          return { value: num(l[0]?.[food.name]), pokemon: ident(l[0]) };
+        }),
+      }));
+
+      // スキル
+      const subSkillList = ['おてつだいボーナス', 'おてつだいスピードM', 'スキル確率アップM', 'スキル確率アップS', '所持数アップL'];
+      const boxPokemonList = [];
+      for (const base of Pokemon.list.filter((p) => p.afterList.length == 1 && p.afterList[0] == p.name)) {
+        for (const combo of ['000', '001', '002', '010', '011', '012']) {
+          const foodList = combo.split('').map(Number).map((f) => (Food.map[base.foodList[f]?.name] ? base.foodList[f].name : null));
+          if (foodList.includes(null)) continue;
+          boxPokemonList.push({ name: base.name, lv: 100, foodList, subSkillList, nature: 'なまいき' });
+        }
+      }
+      const skillPokemonList = await simulate({ ...config, simulation: { ...config.simulation, expectType: { food: 0, skill: 0 }, helpBonus: 5 } }, boxPokemonList, null);
+      const skillNum = Object.fromEntries(Skill.list.map((x) => [x.name, { num: 0, pokemon: null }]));
+      for (const p of skillPokemonList) {
+        if ((skillNum[p.base.skill.name]?.num ?? 0) < p.skillPerDay) skillNum[p.base.skill.name] = { num: p.skillPerDay, pokemon: p.base.name };
+      }
+      c.skill = Skill.list.map((skill) => ({
+        name: skill.name,
+        max: num(skillNum[skill.name]?.num ?? 0),
+        maxPokemon: skillNum[skill.name]?.pokemon ?? null,
+        cols: sims.map((list) => {
+          const l = list.filter((x) => x.base.skill.name == skill.name).sort((a, b) => b.skillPerDay - a.skillPerDay);
+          return { value: num(l[0]?.skillPerDay), pokemon: ident(l[0]) };
+        }),
+      }));
+
+      // ポケモン(食材構成ごと・総合/とくい分野)
+      const pokemonSim = await simulate(withSim(config, { fix: false }), fixBox, table);
+      const lvs = Object.entries(config.selectEvaluate.levelList).filter(([, e]) => e).map(([lv]) => Number(lv));
+      await PokemonSimulator.isReady;
+      const foodNumSim = new PokemonSimulator({ ...config, simulation: { ...config.simulation, expectType: { food: 0, skill: 0 } } }, PokemonSimulator.MODE_ABOUT);
+      const foodNumList = [];
+      for (const base of Pokemon.list.filter((p) => p.afterList.length == 1 && p.afterList[0] == p.name)) {
+        for (const combo of ['000', '001', '002', '010', '011', '012']) {
+          const foodList = combo.split('').map(Number).map((f) => (Food.map[base.foodList[f]?.name] ? base.foodList[f].name : null));
+          if (foodList.includes(null)) continue;
+          const pokemon = foodNumSim.fromBox({ name: base.name, lv: 60, foodList, subSkillList: [], nature: 'まじめ' });
+          foodNumSim.calcStatus(pokemon, 0);
+          foodNumSim.calcTeamHeal([pokemon]);
+          foodNumSim.calcHelp(pokemon, 0, 0);
+          foodNumList.push(pokemon);
+        }
+      }
+      c.pokemon = {};
+      for (const [key, eachFood, type] of [['all_energy', false, 'energy'], ['food_specialty', true, 'specialty']]) {
+        const targets = eachFood ? foodNumList.map((p) => ({ base: p.base, foodList: p.box.foodList })) : Pokemon.list.filter((x) => x.isLast).map((x) => ({ base: x, foodList: null }));
+        c.pokemon[key] = targets.map((target) => {
+          let max = null;
+          let maxP = null;
+          const byLv = {};
+          for (const lv of lvs) {
+            let l = pokemonSim.filter((x) => x.evaluateResult[lv]?.[target.base.name]);
+            if (eachFood) l = l.filter((p) => target.foodList.every((f, i) => f == p.box?.foodList[i]));
+            l.sort((a, b) => b.evaluateResult[lv][target.base.name][type].score - a.evaluateResult[lv][target.base.name][type].score);
+            const score = l[0]?.evaluateResult[lv][target.base.name][type].score;
+            byLv[lv] = { value: num(score), pokemon: ident(l[0]) };
+            if (max == null || max < score) {
+              max = score;
+              maxP = l[0];
+            }
+          }
+          return { name: target.base.name, foodList: target.foodList, max: { value: num(max), pokemon: ident(maxP) }, byLv };
+        });
+      }
+      summaryCases.push(c);
+    }
+    writeFileSync(path.join(outDir, 'box-summary.json'), JSON.stringify({ cases: summaryCases }));
+    console.log(`box-summary: ${summaryCases.length}`);
+  }
 }
 
 // ---- 育成に必要なアメ・ゆめのかけら(Exp.calcRequireInfo) ----

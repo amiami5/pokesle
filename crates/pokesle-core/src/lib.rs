@@ -4,6 +4,7 @@
 
 pub mod box_io;
 pub mod box_sim;
+pub mod box_summary;
 pub mod browser_import;
 pub mod check_list;
 pub mod config;

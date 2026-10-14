@@ -664,3 +664,98 @@ fn food_stock_matches_upstream() {
         }
     }
 }
+
+#[test]
+fn box_summary_matches_upstream() {
+    use pokesle_core::box_summary::{berry_summary, food_summary, pokemon_summary, skill_summary, EvaluateType, Ranked};
+    let fix = load("box-fix.json");
+    let box_list: Vec<BoxPokemon> = serde_json::from_value(fix["box"].clone()).unwrap();
+    let table = table_from_js(&fix["table"]);
+    let golden = load("box-summary.json");
+    let m = master();
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut checked = 0;
+    let mut check = |label: String, actual: &Ranked, expected: &Value| {
+        checked += 1;
+        let a = actual.value;
+        let e = expected_num(&expected["value"]);
+        let ok = match (a, e) {
+            (Some(a), Some(e)) => close(a, e),
+            (None, None) => true,
+            (Some(a), None) => a.is_nan(),
+            (None, Some(e)) => e.is_nan(),
+        };
+        if !ok {
+            errors.push(format!("{label}: rust={a:?} js={}", expected["value"]));
+            return;
+        }
+        let act = actual.pokemon.as_ref().map(|p| (p.base().name.clone(), p.box_index().map(|i| i as u64)));
+        let exp = expected["pokemon"].as_object().map(|o| (o["name"].as_str().unwrap().to_string(), o["index"].as_u64()));
+        if act != exp {
+            errors.push(format!("{label}: pokemon rust={act:?} js={exp:?}"));
+        }
+    };
+
+    for case in golden["cases"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let config = Config::from_value(&case["config"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let noop = |_: f64| {};
+
+        // きのみ
+        let berry = berry_summary(&config, &box_list, Some(&table), &noop).unwrap();
+        let expected = case["berry"].as_array().unwrap();
+        assert_eq!(berry.len(), expected.len());
+        for (r, e) in berry.iter().zip(expected) {
+            assert_eq!(r.name, e["name"].as_str().unwrap());
+            for (i, c) in r.cols.iter().enumerate() {
+                check(format!("{name} berry {} col{i}", r.name), c, &e["cols"][i]);
+            }
+        }
+
+        // 食材
+        let food = food_summary(&config, &box_list, Some(&table), &noop).unwrap();
+        let expected = case["food"].as_array().unwrap();
+        for (r, e) in food.iter().zip(expected) {
+            assert_eq!(r.name, e["name"].as_str().unwrap());
+            assert_eq!(r.require, e["require"].as_f64().unwrap(), "{name} food {} require", r.name);
+            assert!(close(r.max, expected_num(&e["max"]).unwrap()), "{name} food {} max {} vs {}", r.name, r.max, e["max"]);
+            let mp = r.max_pokemon.map(|i| m.pokemon[i].name.clone());
+            assert_eq!(mp.as_deref(), e["maxPokemon"].as_str(), "{name} food {} maxPokemon", r.name);
+            let fl: Vec<String> = serde_json::from_value(e["maxFoodList"].clone()).unwrap();
+            assert_eq!(r.max_food_list, fl, "{name} food {} maxFoodList", r.name);
+            for (i, c) in r.cols.iter().enumerate() {
+                check(format!("{name} food {} col{i}", r.name), c, &e["cols"][i]);
+            }
+        }
+
+        // スキル
+        let skill = skill_summary(&config, &box_list, Some(&table), &noop).unwrap();
+        let expected = case["skill"].as_array().unwrap();
+        for (r, e) in skill.iter().zip(expected) {
+            assert_eq!(r.name, e["name"].as_str().unwrap());
+            assert!(close(r.max, expected_num(&e["max"]).unwrap()), "{name} skill {} max {} vs {}", r.name, r.max, e["max"]);
+            assert_eq!(r.max_pokemon.as_deref(), e["maxPokemon"].as_str(), "{name} skill {} maxPokemon", r.name);
+            for (i, c) in r.cols.iter().enumerate() {
+                check(format!("{name} skill {} col{i}", r.name), c, &e["cols"][i]);
+            }
+        }
+
+        // ポケモン
+        for (key, each_food, ty) in [("all_energy", false, EvaluateType::Energy), ("food_specialty", true, EvaluateType::Specialty)] {
+            let summary = pokemon_summary(&config, &box_list, Some(&table), each_food, ty, &noop).unwrap();
+            let expected = case["pokemon"][key].as_array().unwrap();
+            assert_eq!(summary.rows.len(), expected.len(), "{name} {key} 行数");
+            for (r, e) in summary.rows.iter().zip(expected) {
+                let label = format!("{name} {key} {}", m.pokemon[r.base].name);
+                assert_eq!(m.pokemon[r.base].name, e["name"].as_str().unwrap(), "{label}");
+                check(format!("{label} max"), &r.max, &e["max"]);
+                for (lv, c) in &r.by_lv {
+                    check(format!("{label} lv{lv}"), c, &e["byLv"][lv.to_string()]);
+                }
+            }
+        }
+    }
+    eprintln!("checked={checked}");
+    assert!(errors.is_empty(), "{} 件不一致\n{}", errors.len(), errors.iter().take(30).cloned().collect::<Vec<_>>().join("\n"));
+}

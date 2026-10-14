@@ -190,7 +190,7 @@ fn name_cell(ui: &mut egui::Ui, p: &SimPokemon) -> bool {
 }
 
 /// サブスキル(本家 sub-skill-label-list.vue)
-fn sub_skill_cell(ui: &mut egui::Ui, p: &SimPokemon, short: bool) {
+pub(crate) fn sub_skill_cell(ui: &mut egui::Ui, p: &SimPokemon, short: bool) {
     let m = master();
     let Some(bx) = p.box_pokemon.as_ref() else { return };
     ui.horizontal_wrapped(|ui| {

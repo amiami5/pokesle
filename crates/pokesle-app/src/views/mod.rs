@@ -1,3 +1,4 @@
+pub mod box_summary_view;
 pub mod box_view;
 pub mod check_list_view;
 pub mod common_setting;
