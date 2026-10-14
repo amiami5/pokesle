@@ -7,7 +7,7 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
+use crate::views::{box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -33,7 +33,7 @@ type NavItem = (Tab, &'static str, bool);
 /// ヘッダーのグループ(本家 app.vue)。(見出し, リンク)
 const NAV: [(&str, &[NavItem]); 4] = [
     ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", false)]),
-    ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", false)]),
+    ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
     ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", false)]),
     ("その他", &[(Tab::Data, "データ", false), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", false), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
 ];
@@ -97,6 +97,7 @@ pub struct App {
     box_view: BoxView,
     check_list_view: CheckListView,
     team_view: TeamView,
+    food_stock_view: FoodStockView,
     evaluate_view: EvaluateView,
     ui_setting_view: UiSettingView,
 }
@@ -120,6 +121,7 @@ impl App {
         let tab = match std::env::var("POKESLE_DEBUG_TAB").as_deref() {
             Ok("team") => Tab::Team,
             Ok("checklist") => Tab::CheckList,
+            Ok("foodstock") => Tab::FoodStock,
             Ok("setting") => Tab::Setting,
             Ok("ui") => Tab::UiSetting,
             _ => Tab::Box,
@@ -145,6 +147,7 @@ impl App {
             box_view,
             check_list_view: CheckListView::default(),
             team_view: TeamView::default(),
+            food_stock_view: FoodStockView::default(),
             evaluate_view: EvaluateView::default(),
             ui_setting_view: UiSettingView::default(),
         }
@@ -240,6 +243,7 @@ impl eframe::App for App {
             Tab::Team => {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.team_view.ui(ui, &mut self.shared));
             }
+            Tab::FoodStock => self.food_stock_view.ui(ui, &mut self.shared),
             Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
             Tab::UiSetting => self.ui_setting_view.ui(ui, &mut self.shared.ui_setting, &mut self.shared.status),

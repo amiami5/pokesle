@@ -83,7 +83,7 @@ pub struct Config {
     pub select_evaluate: EvaluateConfig,
     pub tmp_evaluate: EvaluateConfig,
     pub candy: CandyConfig,
-    pub food_stock: Value,
+    pub food_stock: FoodStockConfig,
     pub worker_num: f64,
     pub summary: SummaryConfig,
     /// 実行時にだけ指定される: 純粋なミントでの評価も行う
@@ -94,6 +94,35 @@ pub struct Config {
     pub cleaning: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+/// 食材準備(本家 `config.foodStock`)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoodStockConfig {
+    /// 料理の種類名 → 重み(%)
+    #[serde(default)]
+    pub weight: BTreeMap<String, f64>,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub bag_size: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub cooking_num: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub candidate_num: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub min_food_num: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub max_food_num: f64,
+    #[serde(default, deserialize_with = "de_js_num")]
+    pub surplus_food_num: f64,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub exclude_max_recipe_lv: bool,
+}
+
+impl FoodStockConfig {
+    pub fn weight_of(&self, t: crate::data::CookingType) -> f64 {
+        self.weight.get(t.name()).copied().unwrap_or(0.0)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

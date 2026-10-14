@@ -586,3 +586,81 @@ fn exp_require_info_matches_upstream() {
         }
     }
 }
+
+#[test]
+fn food_stock_matches_upstream() {
+    use pokesle_core::config::{merge_object, default_config_value};
+    use pokesle_core::data::CookingType;
+    use pokesle_core::food_stock::{enable_cooking_list, max_candidate_num, run_worker, Input, Recipe};
+
+    let m = master();
+    let golden = load("food-stock.json");
+    let types = ["カレー", "サラダ", "デザート"];
+    for (i, case) in golden.as_array().unwrap().iter().enumerate() {
+        let label = format!("case {i} {}", case["variant"]);
+
+        // 設定 → 有効な料理・候補数の上限
+        let mut value = default_config_value();
+        merge_object(&mut value, &case["config"]);
+        let config: Config = serde_json::from_value(value).unwrap();
+        let list = enable_cooking_list(&config);
+        let names: Vec<&str> = list.iter().map(|c| c.cooking().name.as_str()).collect();
+        let expected_names: Vec<&str> = case["enableNames"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+        assert_eq!(names, expected_names, "{label}: 有効な料理");
+        assert_eq!(max_candidate_num(&config, &list) as f64, case["maxCandidateNum"].as_f64().unwrap(), "{label}: 候補数の上限");
+
+        // ワーカー
+        let inp = &case["input"];
+        let weights = types.map(|t| inp["weights"][t].as_f64().unwrap());
+        let cooking_list: Vec<Recipe> = inp["cookingList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| Recipe {
+                name: c["name"].as_str().unwrap().to_string(),
+                cooking_type: CookingType::from_name(c["type"].as_str().unwrap()).unwrap(),
+                food_num: c["foodNum"].as_f64().unwrap(),
+                food_list: c["foodList"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|f| (m.foods.iter().position(|x| x.name == f["name"].as_str().unwrap()).unwrap(), f["num"].as_f64().unwrap()))
+                    .collect(),
+                energy: c["energy"].as_f64().unwrap(),
+            })
+            .collect();
+        let input = Input {
+            bag_size: inp["bagSize"].as_f64().unwrap(),
+            cooking_num: inp["cookingNum"].as_f64().unwrap(),
+            candidate_num: inp["candidateNum"].as_f64().unwrap(),
+            min_food_num: inp["minFoodNum"].as_f64().unwrap(),
+            max_food_num: inp["maxFoodNum"].as_f64().unwrap(),
+            weights,
+            cooking_list,
+            seed: inp["seed"].as_u64().unwrap() as u32,
+        };
+        let actual = run_worker(&input, &|_| {}).unwrap();
+        let expected = &case["result"];
+        let Some(actual) = actual else {
+            assert!(expected.is_null(), "{label}: 本家は結果あり");
+            continue;
+        };
+        assert!(!expected.is_null(), "{label}: 本家は結果なし");
+        assert!(close(actual.score, expected["score"].as_f64().unwrap()), "{label}: score {} vs {}", actual.score, expected["score"]);
+        assert_eq!(actual.total_food_num, expected["totalFoodNum"].as_f64().unwrap(), "{label}: totalFoodNum");
+        for (fi, food) in m.foods.iter().enumerate() {
+            assert_eq!(actual.food_num_list[fi], expected["foodNumMap"][&food.name].as_f64().unwrap(), "{label}: {}", food.name);
+        }
+        for (t, name) in types.iter().enumerate() {
+            let e = &expected["plans"][*name];
+            assert!(close(actual.plans[t].energy, e["energy"].as_f64().unwrap()), "{label}: {name} energy");
+            let ecl = e["cookingList"].as_array().unwrap();
+            assert_eq!(actual.plans[t].cooking_list.len(), ecl.len(), "{label}: {name} 料理数");
+            for (a, e) in actual.plans[t].cooking_list.iter().zip(ecl) {
+                assert_eq!(a.name, e["name"].as_str().unwrap(), "{label}: {name}");
+                assert_eq!(a.num, e["num"].as_f64().unwrap(), "{label}: {name} {}", a.name);
+                assert!(close(a.energy, e["energy"].as_f64().unwrap()), "{label}: {name} {} energy", a.name);
+            }
+        }
+    }
+}

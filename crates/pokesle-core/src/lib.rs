@@ -12,6 +12,7 @@ pub mod evaluate_setting;
 pub mod evaluate_table;
 pub mod exp;
 pub mod filter;
+pub mod food_stock;
 pub mod help_rate;
 pub mod js;
 pub mod prob_border;

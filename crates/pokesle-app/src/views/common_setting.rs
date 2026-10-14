@@ -742,7 +742,7 @@ fn select_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
 
 // ---- 料理設定 ----
 
-fn cooking_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
+pub fn cooking_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
     let m = master();
     let mut changed = false;
     let disabled = evaluate_lv_list(Some(&c.simulation)).iter().filter(|x| !x.enable).count();

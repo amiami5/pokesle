@@ -5,6 +5,7 @@ pub mod credit_view;
 pub mod evaluate_detail;
 pub mod evaluate_view;
 pub mod food_icon;
+pub mod food_stock_view;
 pub mod pokemon_edit;
 pub mod pokemon_filter;
 pub mod pokemon_target;

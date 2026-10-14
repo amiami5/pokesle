@@ -509,3 +509,51 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   writeFileSync(path.join(outDir, 'exp.json'), JSON.stringify(expCases));
   console.log(`exp: ${expCases.length}`);
 }
+
+// ---- 食材ストック(food-stock-worker と food_stock.vue の有効料理・候補数) ----
+{
+  const foodStockWorker = await loadWorker('models/simulation/food-stock-worker.ts');
+  const { Cooking } = await up('data/food_and_cooking.ts');
+  const cases = [];
+  const variants = [
+    { name: 'default', fn: () => {} },
+    { name: 'weights', fn: (c) => { c.foodStock.weight = { カレー: 100, サラダ: 30, デザート: 0 }; } },
+    { name: 'small-bag', fn: (c) => { c.foodStock.bagSize = 300; c.foodStock.cookingNum = 12; } },
+    { name: 'range', fn: (c) => { c.foodStock.minFoodNum = 20; c.foodStock.maxFoodNum = 40; c.foodStock.candidateNum = 5; } },
+    { name: 'disabled', fn: (c) => {
+      for (const cooking of Cooking.list.filter((_, i) => i % 3 == 0)) c.simulation.enableCooking[cooking.name] = false;
+    } },
+    { name: 'exclude-max', fn: (c) => {
+      for (const cooking of Cooking.list.filter((_, i) => i % 4 == 0)) c.simulation.cookingSettings[cooking.name].lv = Cooking.maxRecipeLv;
+      c.foodStock.excludeMaxRecipeLv = true;
+      c.simulation.mode = 1;
+    } },
+    { name: 'lv-type', fn: (c) => { c.simulation.cookingRecipeLvType1 = false; c.simulation.cookingRecipeLvType2 = true; c.simulation.cookingRecipeFixLv = 30; c.foodStock.cookingNum = 7.9; } },
+  ];
+  for (const [vi, v] of variants.entries()) {
+    const config = clone(defaultConfig);
+    v.fn(config);
+    const enable = Cooking.getEnableCookingList({ ...config, simulation: { ...config.simulation, mode: 0 } })
+      .filter((c) => !config.foodStock.excludeMaxRecipeLv || config.simulation.cookingSettings[c.name].lv < Cooking.maxRecipeLv);
+    const types = ['カレー', 'サラダ', 'デザート'];
+    const maxCandidateNum = Math.min(...types.filter((t) => config.foodStock.weight[t] > 0).map((t) => enable.filter((c) =>
+      c.type == t && c.foodNum >= Math.max(Number(config.foodStock.minFoodNum) || 0, 0) && c.foodNum <= Math.max(Number(config.foodStock.maxFoodNum) || 0, 0)).length));
+    const candidates = Math.min(Math.max(Math.floor(Number(config.foodStock.candidateNum) || 1), 1), maxCandidateNum);
+    for (const seed of [1, 12345, 1760000000000 + vi * 100003]) {
+      const input = {
+        bagSize: Math.max(Math.floor(Number(config.foodStock.bagSize) || 0), 0),
+        cookingNum: Math.min(Math.max(Math.floor(Number(config.foodStock.cookingNum) || 1), 1), 21),
+        candidateNum: candidates,
+        minFoodNum: Math.max(Math.floor(Number(config.foodStock.minFoodNum) || 0), 0),
+        maxFoodNum: Math.max(Math.floor(Number(config.foodStock.maxFoodNum) || 0), 0),
+        weights: clone(config.foodStock.weight),
+        cookingList: enable.map((c) => ({ name: c.name, type: c.type, foodNum: c.foodNum, foodList: c.foodList.map((f) => ({ name: f.name, num: f.num })), energy: c.fixEnergy })),
+        seed,
+      };
+      const result = await foodStockWorker(clone(input));
+      cases.push({ variant: v.name, config, enableNames: enable.map((c) => c.name), maxCandidateNum, input, result });
+    }
+  }
+  writeFileSync(path.join(outDir, 'food-stock.json'), JSON.stringify(cases));
+  console.log(`food-stock: ${cases.length}`);
+}
