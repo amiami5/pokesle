@@ -6,16 +6,21 @@
 
 mod app;
 mod fonts;
+mod icon;
 mod job;
 mod storage;
 mod views;
 
 fn main() -> eframe::Result {
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_title("ポケスリシミュレーター")
+        .with_inner_size([1280.0, 800.0])
+        .with_min_inner_size([640.0, 480.0]);
+    if let Some(icon) = icon::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("ポケスリシミュレーター")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([640.0, 480.0]),
+        viewport,
         // メインウィンドウの位置・サイズと、小窓の位置・サイズ(egui のメモリ)を保存する
         persist_window: true,
         persistence_path: Some(storage::dir().join("window.ron")),

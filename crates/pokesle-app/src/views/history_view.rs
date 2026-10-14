@@ -10,11 +10,6 @@ pub fn ui(ui: &mut egui::Ui) -> Option<String> {
     let h = history();
     let mut route = None;
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        egui::Frame::new().fill(style::surface()).stroke(egui::Stroke::new(1.0, style::line_color())).corner_radius(6).inner_margin(10).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            segments(ui, &h.senden, &mut route);
-        });
-        ui.add_space(12.0);
         ui.label(egui::RichText::new("更新履歴").size(20.0).strong());
         ui.add_space(6.0);
         for entry in &h.entries {

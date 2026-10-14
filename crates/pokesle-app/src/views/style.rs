@@ -203,41 +203,64 @@ pub fn is_popup_open(ctx: &egui::Context, id: &str) -> bool {
     ctx.data(|d| d.get_temp::<bool>(popup_id(id))).unwrap_or(false)
 }
 
-/// 本家 setting-button のポップアップ(見出し付き・外側クリックで閉じる)。
-/// 開いていればモーダルで表示し、中身を描く。
+/// 小窓の位置(外枠の左上)とサイズ(内側)。終了後も復元できるよう egui のメモリに保存する
+fn popup_geometry_id(id: &str) -> egui::Id {
+    egui::Id::new(("setting_popup_geometry", id))
+}
+
+/// 本家 setting-button のポップアップ。
+/// メインウィンドウとは別の OS ウィンドウとして開き、移動・サイズ変更ができる(位置とサイズは保存される)。
 pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     if !is_popup_open(ctx, id) {
         return;
     }
-    let max_h = (ctx.content_rect().height() - 140.0).max(200.0);
-    let max_w = (ctx.content_rect().width() - 100.0).max(300.0);
-    let frame = egui::Frame::new().fill(surface()).stroke(egui::Stroke::new(1.0, line_color())).corner_radius(10).shadow(egui::Shadow {
-        offset: [0, 10],
-        blur: 28,
-        spread: 0,
-        color: Color32::from_rgba_unmultiplied(40, 49, 91, 50),
-    });
+    let saved: Option<[f32; 4]> = ctx.data_mut(|d| d.get_persisted(popup_geometry_id(id)));
+    let size = saved.map_or(egui::vec2(520.0, 480.0), |g| egui::vec2(g[2], g[3]));
+    let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size([300.0, 160.0]);
+    if let Some(icon) = crate::icon::window_icon() {
+        builder = builder.with_icon(icon);
+    }
+    if let Some(g) = saved {
+        builder = builder.with_position(egui::pos2(g[0], g[1]));
+    } else if let Some(parent) = ctx.input(|i| i.viewport().outer_rect) {
+        builder = builder.with_position(parent.center() - size / 2.0);
+    }
+
+    let mut contents = Some(add_contents);
     let mut close = false;
-    let r = egui::Modal::new(popup_id(id).with("modal")).frame(frame).show(ctx, |ui| {
-        ui.set_max_width(max_w);
-        // 見出し
-        let header = ui.allocate_ui_with_layout(egui::vec2(ui.available_width().max(320.0), 44.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.add_space(15.0);
-            ui.label(egui::RichText::new(title).size(20.0).strong().color(primary_strong()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(12.0);
-                if ui.add(egui::Button::new(egui::RichText::new("×").size(22.0).color(th_color())).frame(false)).clicked() {
-                    close = true;
-                }
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(("setting_popup", id)), builder, |ctx, class| {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            close = true;
+        }
+        let Some(add_contents) = contents.take() else { return };
+        let body = |ui: &mut egui::Ui| {
+            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                egui::Frame::new().inner_margin(20).show(ui, add_contents);
             });
-        });
-        let hr = header.response.rect;
-        ui.painter().with_clip_rect(hr).hline(hr.x_range(), hr.bottom(), egui::Stroke::new(1.0, line_color()));
-        egui::ScrollArea::vertical().max_height(max_h - 44.0).auto_shrink([false, true]).show(ui, |ui| {
-            egui::Frame::new().inner_margin(20).show(ui, add_contents);
-        });
+        };
+        if class == egui::ViewportClass::EmbeddedWindow {
+            // 別ウィンドウに対応しない環境では、従来どおりアプリ内の小窓にする
+            let mut open = true;
+            egui::Window::new(title).id(popup_id(id).with("win")).open(&mut open).collapsible(false).resizable(true).default_size(size).show(ctx, body);
+            if !open {
+                close = true;
+            }
+            return;
+        }
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(surface())).show(ctx, |ui| body(ui));
+        // 位置とサイズを覚える
+        let (outer, inner) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect));
+        if let (Some(o), Some(i)) = (outer, inner)
+            && o.min.x > -10000.0
+            && i.width() > 0.0
+        {
+            let g = [o.min.x, o.min.y, i.width(), i.height()];
+            if saved != Some(g) {
+                ctx.data_mut(|d| d.insert_persisted(popup_geometry_id(id), g));
+            }
+        }
     });
-    if close || r.should_close() {
+    if close {
         ctx.data_mut(|d| d.remove::<bool>(popup_id(id)));
     }
 }
