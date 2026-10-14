@@ -132,6 +132,7 @@ impl BoxSimulator {
                                     &simulated,
                                     sub_skill_list.iter().any(|x| x == "ゆめのかけらボーナス"),
                                     sub_skill_list.iter().any(|x| x == "リサーチEXPボーナス"),
+                                    true,
                                 );
 
                                 let entry = er.entry_mut(EvalLv::Lv(lv), after);

@@ -69,6 +69,7 @@ impl EvaluateDetail {
             &p,
             sub_skill_list.iter().any(|x| x == "ゆめのかけらボーナス"),
             sub_skill_list.iter().any(|x| x == "リサーチEXPボーナス"),
+            true,
         );
         let mut help_rate = HelpRate::new(config, None);
         let healer_help_rate = help_rate.get_help_rate(&p.other_heal_list);

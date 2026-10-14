@@ -871,16 +871,13 @@ impl PokemonSimulator {
                 weight *= sim.skill_rate.get(&skill.name).copied().unwrap_or(f64::NAN);
             }
 
-            let mut kind = skill.kind;
-            // ほっぺすりすりは本家の switch でサイコブレイクへフォールスルーする
-            if kind == SkillKind::Hoppesurisuri {
-                if matches!(self.mode, Mode::Select | Mode::About) {
-                    energy_per_skill = self.select_skill_energy(skill, skill_lv_index);
+            match skill.kind {
+                SkillKind::Hoppesurisuri => {
+                    // 追加発動はチーム計算側(TeamSimulator)で反復計算するので、チーム計算時はここでは評価しない
+                    if matches!(self.mode, Mode::Select | Mode::About) {
+                        energy_per_skill = self.select_skill_energy(skill, skill_lv_index);
+                    }
                 }
-                kind = SkillKind::PsychoBreak;
-            }
-
-            match kind {
                 SkillKind::EnergyChargeS | SkillKind::EnergyChargeSRandom | SkillKind::EnergyChargeM => {
                     energy_per_skill = ev(|e| e.value);
                 }
@@ -1137,7 +1134,7 @@ impl PokemonSimulator {
                 SkillKind::GenkiAllS | SkillKind::BerryJuice | SkillKind::GenkiYellS | SkillKind::GenkiChargeS | SkillKind::Tsukinohikari => {
                     // 別の場所で計算
                 }
-                SkillKind::Hoppesurisuri | SkillKind::Metronome | SkillKind::Unknown => {
+                SkillKind::Metronome | SkillKind::Unknown => {
                     return Err(format!("未実装のスキル: {}", skill.name));
                 }
             }
@@ -1367,7 +1364,8 @@ impl PokemonSimulator {
     }
 
     /// 本家 `selectEvaluateToScore`
-    pub fn select_evaluate_to_score(&self, pokemon: &SimPokemon, yumebo: bool, risabo: bool) -> f64 {
+    /// `apply_experience_bonus` が true のときは、睡眠EXPボーナス・性格(EXP獲得量)の補正も掛ける
+    pub fn select_evaluate_to_score(&self, pokemon: &SimPokemon, yumebo: bool, risabo: bool, apply_experience_bonus: bool) -> f64 {
         let se = &self.config.select_evaluate;
         let mut score = pokemon.energy_per_day;
         if yumebo {
@@ -1377,6 +1375,27 @@ impl PokemonSimulator {
             score *= 1.0 + 0.09 * se.shard_bonus / 100.0 / 2.0;
         }
         score += pokemon.shard * se.shard_energy * se.shard_bonus / 100.0;
+        if !apply_experience_bonus {
+            return score;
+        }
+
+        // 経験値系の評価はエナジー計算とは別の任意補正だが、基準テーブルと実個体で同じ値を使う
+        let m = master();
+        let raw = score;
+        let has_suimin = pokemon.sub_skill_list.iter().flatten().any(|&i| m.sub_skills[i].name == "睡眠EXPボーナス");
+        if has_suimin {
+            score += se.sub_skill.suimin_exp_bonus.add;
+            score += raw * (se.sub_skill.suimin_exp_bonus.rate - 1.0);
+        }
+        let nature = pokemon.nature.map(|i| &m.natures[i]);
+        if nature.is_some_and(|n| n.good_stat == Some(NatureStat::Exp)) {
+            score += se.nature.exp_up.add;
+            score += raw * (se.nature.exp_up.rate - 1.0);
+        }
+        if nature.is_some_and(|n| n.weak_stat == Some(NatureStat::Exp)) {
+            score += se.nature.exp_down.add;
+            score += raw * (se.nature.exp_down.rate - 1.0);
+        }
         score
     }
 }

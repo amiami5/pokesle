@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, EvaluateConfig};
-use crate::data::{master, NatureStat, Pokemon};
+use crate::data::{master, Pokemon};
 use crate::js;
 use crate::simulator::{Mode, PokemonSimulator};
 
@@ -263,8 +263,7 @@ pub fn evaluate_pokemon(
             let mut simulated = simulator.from_evaluate(pokemon, lv as f64, &food_name_list)?;
             let head_foods: Vec<Option<usize>> = pokemon.food_name_list.iter().take(3).map(|n| m.food_index(n)).collect();
 
-            for (sub_skill_list, weights, names) in &combos {
-                let suimin = names.iter().any(|x| x == "睡眠EXPボーナス");
+            for (sub_skill_list, weights, _) in &combos {
                 for &nature in &nature_list {
                     let nature_weight = if nature.is_none() { 5.0 } else { 1.0 };
                     simulator.select_evaluate(&mut simulated, sub_skill_list, nature, score_for_healer_evaluate, score_for_support_evaluate)?;
@@ -273,23 +272,10 @@ pub fn evaluate_pokemon(
                     if r.energy_per_day.is_nan() {
                         return Err(format!("計算エラーが発生しました。({})", pokemon.name));
                     }
-                    let nature_ref = nature.map(|i| &m.natures[i]);
                     let mut common_weight = 0.0;
                     for w in weights {
-                        let mut score = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo);
-                        let raw = score;
-                        if suimin {
-                            score += se.sub_skill.suimin_exp_bonus.add;
-                            score += raw * (se.sub_skill.suimin_exp_bonus.rate - 1.0);
-                        }
-                        if nature_ref.is_some_and(|n| n.good_stat == Some(NatureStat::Exp)) {
-                            score += se.nature.exp_up.add;
-                            score += raw * (se.nature.exp_up.rate - 1.0);
-                        }
-                        if nature_ref.is_some_and(|n| n.weak_stat == Some(NatureStat::Exp)) {
-                            score += se.nature.exp_down.add;
-                            score += raw * (se.nature.exp_down.rate - 1.0);
-                        }
+                        let raw = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, false);
+                        let score = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, true);
                         energy_list.push([score, raw / r.average_help_rate, r.pickup_energy_per_help, w.weight * nature_weight]);
                         common_weight += w.weight * nature_weight;
                     }
