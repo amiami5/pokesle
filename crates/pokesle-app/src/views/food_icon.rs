@@ -64,6 +64,8 @@ pub fn food_list(ui: &mut egui::Ui, pokemon: &BoxPokemon) {
     let unlock = if pokemon.lv >= 60.0 { 3 } else if pokemon.lv >= 30.0 { 2 } else { 1 };
     let size = (ui.available_height() - 2.0).clamp(16.0, 24.0);
     ui.spacing_mut().item_spacing.x = 2.0;
+    // 列の罫線にアイコンが掛からないよう左に余白を取る
+    ui.add_space(5.0);
     for (slot, name) in pokemon.food_list.iter().enumerate() {
         let num = base.and_then(|b| b.food_list.iter().find(|f| &f.name == name)).and_then(|f| f.num_list.get(slot).copied().flatten());
         let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());

@@ -523,7 +523,7 @@ impl Col {
             Col::Memo => (120.0, 40.0),
             Col::Lv => (40.0, 24.0),
             Col::SkillLv => (40.0, 24.0),
-            Col::Food => (84.0, 40.0),
+            Col::Food => (92.0, 40.0),
             Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
             Col::Nature => (80.0, 24.0),
             Col::Score => (90.0, 24.0),
