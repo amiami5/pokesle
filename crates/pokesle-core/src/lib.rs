@@ -8,6 +8,7 @@ pub mod box_summary;
 pub mod browser_import;
 pub mod check_list;
 pub mod config;
+pub mod config_migrate;
 pub mod cooking;
 pub mod data_view;
 pub mod data;

@@ -849,3 +849,115 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
   writeFileSync(path.join(outDir, 'tmp-evaluate.json'), JSON.stringify(cases));
   console.log(`tmp-evaluate: ${cases.map((c) => Object.keys(c.evolutions).length).join(',')}`);
 }
+
+// ---- 旧形式設定の変換(config.ts の読み込み時の移行処理) ----
+{
+  const { migrateEvaluateConfig } = await up('models/evaluate-setting.ts');
+  const { migratePokemonTargetFriendPoint, migrateCheckListPokemonCondition, needsCheckListPokemonConditionMigration } = await up('models/pokemon-target.ts');
+  const { default: Skill } = await up('data/skill.ts');
+  const migrate = (cookieConfig) => {
+    // config.ts と同じ手順(mergeObject の前まで)
+    const savedConfigVersion = Number(cookieConfig.v) || 0;
+    if (cookieConfig.selectEvaluate.silverSeedUse != null) {
+      cookieConfig.selectEvaluate.silverSeed = Object.fromEntries(
+        SubSkill.list.filter((x) => x.next != null).map((x) => [x.name, cookieConfig.selectEvaluate.silverSeedUse]),
+      );
+    }
+    if (cookieConfig.pokemonList?.cleaning?.mintCalculation == null) {
+      cookieConfig.pokemonList ??= {};
+      cookieConfig.pokemonList.cleaning ??= {};
+      cookieConfig.pokemonList.cleaning.mintCalculation = cookieConfig.pokemonList.cleaning.useMint ? 2 : 0;
+    }
+    if (savedConfigVersion < 20260919) {
+      migrateEvaluateConfig(cookieConfig.selectEvaluate);
+      migrateEvaluateConfig(cookieConfig.tmpEvaluate);
+    }
+    migratePokemonTargetFriendPoint(cookieConfig.selectEvaluate?.ruleList);
+    migratePokemonTargetFriendPoint(cookieConfig.tmpEvaluate?.ruleList);
+    if (savedConfigVersion < 20260928 || needsCheckListPokemonConditionMigration(cookieConfig.summary?.checklist)) {
+      migrateCheckListPokemonCondition(cookieConfig.summary?.checklist);
+    }
+    return cookieConfig;
+  };
+
+  const skills = Skill.list.map((s) => s.name);
+  const specialties = ['きのみ', '食材', 'スキル', 'オール'];
+  // 旧形式: とくいごとの skillLv 設定
+  const oldSpecialty = (assign) => {
+    const sp = Object.fromEntries(specialties.map((s) => [s, { berryEnergyRate: 100, foodEnergyRate: 100, foodGetRate: 100, skillLv: {} }]));
+    assign(sp);
+    return sp;
+  };
+  const legend = Pokemon.list.filter((p) => p.isLast && p.fieldList.length && p.legend).map((p) => p.name);
+  const lastNames = Pokemon.list.filter((p) => p.isLast && p.fieldList.length).map((p) => p.name);
+  const inputs = {
+    old_specialty: (() => {
+      const c = clone(defaultConfig);
+      c.v = 20260101;
+      c.selectEvaluate.silverSeedUse = true;
+      delete c.selectEvaluate.silverSeed;
+      delete c.selectEvaluate.ruleList;
+      delete c.selectEvaluate.maxSkillLvSkillNameList;
+      c.selectEvaluate.specialty = oldSpecialty((sp) => {
+        for (const s of specialties) sp[s].skillLv[skills[0]] = { type: 2 };
+        for (const s of specialties) sp[s].skillLv[skills[1]] = { type: 3, lv: 4 };
+        sp['きのみ'].skillLv[skills[2]] = { type: 3, lv: 2 };
+        sp['食材'].skillLv[skills[2]] = { type: 1 };
+        sp['スキル'].skillLv[skills[2]] = { type: 2 };
+        sp['オール'].skillLv[skills[2]] = { type: 3, lv: 5 };
+        sp['きのみ'].skillLv[skills[3]] = { type: 2 };
+        sp['食材'].skillLv[skills[3]] = { type: 2 };
+        sp['スキル'].skillLv[skills[3]] = { type: 1 };
+        sp['オール'].skillLv[skills[3]] = { type: 3, lv: 3 };
+        // 一部のとくいにしか設定が無い(変換しない)
+        sp['きのみ'].skillLv[skills[4]] = { type: 3, lv: 2 };
+      });
+      c.tmpEvaluate = clone(c.selectEvaluate);
+      c.pokemonList.cleaning = { useMint: true };
+      return c;
+    })(),
+    old_rulelist: (() => {
+      const c = clone(defaultConfig);
+      c.v = 20260101;
+      c.selectEvaluate.ruleList = [
+        { target: { all: true, specialties: {}, skillNameList: [], pokemonNameList: [] }, setting: { type: 'skillLv', skillName: skills[0], value: null, skillLvType: 2, skillLv: 1 } },
+        { target: { all: true, specialties: {}, skillNameList: [], pokemonNameList: [] }, settingList: [{ type: 'berryEnergyRate', value: 50 }, { type: 'skillLv', skillName: skills[1], skillLvType: 2 }] },
+        { target: { all: false, specialties: { きのみ: true }, skillNameList: [], pokemonNameList: [] }, setting: { type: 'skillLv', skillName: skills[2], skillLvType: 3, skillLv: 3 } },
+        { target: { all: false, specialties: { きのみ: true }, skillNameList: [], pokemonNameList: [] }, setting: { type: 'skillLv', skillName: skills[3], skillLvType: 3, skillLv: 2 } },
+        { target: { all: false, specialties: {}, skillNameList: [], pokemonNameList: [lastNames[0]] }, setting: { type: 'foodEnergyRate', value: 120 } },
+        { target: { all: false, specialties: {}, skillNameList: [], pokemonNameList: [] }, settingList: [] },
+      ];
+      c.tmpEvaluate.ruleList = [{ target: { type: 'condition', all: false, specialties: { 食材: true }, skillNameList: [], pokemonNameList: [] }, settingList: [{ type: 'foodGetRate', value: 90 }] }];
+      return c;
+    })(),
+    old_checklist: (() => {
+      const c = clone(defaultConfig);
+      c.v = 20260926;
+      c.summary.checklist.pokemonCondition.list = [
+        { type: 1, target: 'きのみ', aaa: true },
+        { type: 1, target: 'スキル', aaa: false },
+        { type: 2, target: lastNames[1] },
+        { type: 2, target: null },
+        { type: 3, target: null },
+        { type: 2, target: legend[0] },
+        { target: { all: true, specialties: {}, skillNameList: [], pokemonNameList: [] } },
+        { target: { type: 'pokemon', specialties: { きのみ: true, 食材: false }, skillNameList: ['x'], pokemonNameList: legend, friendPoint: 20 } },
+        { target: { all: false, specialties: { スキル: true }, skillNameList: [], pokemonNameList: [lastNames[0]], friendPoint: null } },
+      ];
+      return c;
+    })(),
+    current_checklist: (() => {
+      const c = clone(defaultConfig);
+      c.v = 20260928;
+      c.summary.checklist.pokemonCondition.list = [
+        { target: { type: 'pokemon', all: false, specialties: { きのみ: false, 食材: false, スキル: false, オール: false }, skillNameList: [], friendPoint: null, pokemonNameList: legend }, aaa: true },
+        { target: { type: 'condition', all: false, specialties: { きのみ: true, 食材: false, スキル: false, オール: false }, skillNameList: [], friendPoint: 10, pokemonNameList: [] } },
+      ];
+      c.selectEvaluate.ruleList = [{ target: { type: 'condition', all: false, specialties: { きのみ: true }, skillNameList: [], pokemonNameList: [] }, settingList: [] }];
+      return c;
+    })(),
+  };
+  const cases = Object.entries(inputs).map(([name, input]) => ({ name, input: clone(input), output: migrate(clone(input)) }));
+  writeFileSync(path.join(outDir, 'config-migrate.json'), JSON.stringify(cases));
+  console.log(`config-migrate: ${cases.length}`);
+}

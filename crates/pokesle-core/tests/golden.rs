@@ -880,3 +880,18 @@ fn tmp_evaluate_matches_upstream() {
         }
     }
 }
+
+#[test]
+fn config_migrate_matches_upstream() {
+    use pokesle_core::config_migrate::migrate_saved;
+    let golden = load("config-migrate.json");
+    for case in golden.as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let mut input = case["input"].clone();
+        migrate_saved(&mut input);
+        // 変換結果は本家と完全に一致する(キーの並びは問わない)
+        assert_eq!(input, case["output"], "{name}");
+        // 変換後は設定として読み込める
+        Config::from_saved(&case["input"]).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
+}

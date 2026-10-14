@@ -676,8 +676,11 @@ impl Config {
 
     /// 保存済み設定を初期設定へマージして読み込む
     pub fn from_saved(saved: &Value) -> Result<Config, String> {
+        // 旧形式の設定は読み込み前に現在の形式へ直す(本家 config.ts と同じ)
+        let mut saved = saved.clone();
+        crate::config_migrate::migrate_saved(&mut saved);
         let mut base = default_config_value();
-        merge_object(&mut base, saved);
+        merge_object(&mut base, &saved);
         Self::from_value(&base)
     }
 
