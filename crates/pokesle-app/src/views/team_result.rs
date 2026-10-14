@@ -234,6 +234,36 @@ fn sub_skill_label(ui: &mut egui::Ui, sub: Option<(&str, &str, u32)>, short: boo
     }
 }
 
+/// おてスピの内訳(本家 `getHelpSpeedFormula`)。いずれも % の整数
+struct SpeedFormula {
+    sub_skill: f64,
+    help_bonus: f64,
+    ex: f64,
+    result: f64,
+}
+
+fn help_speed_formula(p: &SimPokemon, sim: &pokesle_core::config::SimulationConfig) -> SpeedFormula {
+    let m = master();
+    let names = p.sub_skill_names();
+    let has = |n: &str| names.iter().any(|x| *x == Some(n));
+    let sub_skill = if has("おてつだいスピードS") { 0.07 } else { 0.0 } + if has("おてつだいスピードM") { 0.14 } else { 0.0 };
+    let help_bonus = (p.speed_bonus - sub_skill).max(0.0);
+    let field = m.field(&sim.field).or_else(|| m.fields.first());
+    let berry = &m.berries[p.base().berry].name;
+    let mut ex = 1.0;
+    if let Some(f) = field.filter(|f| f.ex)
+        && let Some(buff) = &f.ex_buff
+    {
+        if sim.berry_list.first() == Some(berry) {
+            ex = buff.match_.speed.unwrap_or(1.0);
+        } else if !sim.berry_list.contains(berry) {
+            ex = buff.not_match.speed.unwrap_or(1.0);
+        }
+    }
+    let r = pokesle_core::js::round;
+    SpeedFormula { sub_skill: r(sub_skill * 100.0), help_bonus: r(help_bonus * 100.0), ex: r(ex * 100.0), result: r((1.0 - p.speed_bonus) * ex * 100.0) }
+}
+
 fn member_pokemon(t: &TeamMember) -> Option<&SimPokemon> {
     match t {
         TeamMember::Pokemon { pokemon, .. } => Some(pokemon.as_ref()),
@@ -400,9 +430,40 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
     // 0 や未定義なら空欄(本家の v-if)
     let pct = |x: f64| if x != 0.0 && !x.is_nan() { format!("{}%", fmt_num(x * 100.0)) } else { String::new() };
     if setting.detail {
+        // おてスピ(本家 getHelpSpeedFormula): (100% - サブスキル - おてボ) × EX = 結果
+        let sim = &result_config.simulation;
+        let mut cells: Vec<Cell> = members
+            .iter()
+            .map(|t| match pokemon(t) {
+                Some(p) => {
+                    let f = help_speed_formula(p, sim);
+                    td(1, move |ui| {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
+                            let mut line = String::from("(100%");
+                            if f.sub_skill != 0.0 {
+                                line += &format!(" - サブスキル{}%", f.sub_skill);
+                            }
+                            if f.help_bonus != 0.0 {
+                                line += &format!(" - おてボ{}%", f.help_bonus);
+                            }
+                            line.push(')');
+                            ui.label(egui::RichText::new(line).size(10.0));
+                            if f.ex != 100.0 {
+                                let color = if f.ex < 100.0 { egui::Color32::RED } else { egui::Color32::BLUE };
+                                let color = if style::is_dark() { if f.ex < 100.0 { egui::Color32::from_rgb(255, 100, 100) } else { egui::Color32::from_rgb(120, 160, 255) } } else { color };
+                                ui.label(egui::RichText::new(format!("× EX {}%", f.ex)).size(10.0).color(color));
+                            }
+                            ui.label(format!("= {}%", f.result));
+                        });
+                    })
+                }
+                None => empty(1),
+            })
+            .collect();
+        cells.push(empty(1));
+        group(ui, "おてスピ", cells);
         for (title, get) in [
-            ("おてスピ短縮", (|p: &SimPokemon| p.speed_bonus) as fn(&SimPokemon) -> f64),
-            ("日中手伝い倍率", |p: &SimPokemon| p.day_help_rate),
+            ("日中手伝い倍率", (|p: &SimPokemon| p.day_help_rate) as fn(&SimPokemon) -> f64),
             ("夜間手伝い倍率", |p: &SimPokemon| p.night_help_rate),
         ] {
             let mut cells = per(&|t| num(1, pokemon(t).map(|p| pct(get(p))).unwrap_or_default()));
