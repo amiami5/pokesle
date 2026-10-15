@@ -105,15 +105,40 @@ impl PokemonEdit {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) -> EditResult {
-        let m = master();
         let mut result = EditResult::None;
         let mut open = true;
         let title = if self.index.is_some() { "ポケモンを編集" } else { "ポケモンを追加" };
         // 追加と編集でタイトルが違っても同じ位置を使う
-        egui::Window::new(title).id(egui::Id::new("pokemon_edit")).open(&mut open).collapsible(false).resizable(true).default_width(520.0).show(ctx, |ui| {
-            if let Some(r) = self.assist_area(ui) {
-                result = r;
-            }
+        egui::Window::new(title).id(egui::Id::new("pokemon_edit")).open(&mut open).collapsible(false).resizable(true).default_width(960.0).show(ctx, |ui| {
+            style::alert(
+                ui,
+                "入力アシスト欄に、名前・Lv・食材・サブスキル・せいかくを1行ずつ入力することでも入力できます。
+ローマ字でも反応します。必須項目がそろった状態でEnterを押すと、保存して続けて登録します(そろっていない間のEnterは改行です)。
+Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
+            );
+            ui.add_space(6.0);
+            ui.horizontal_top(|ui| {
+                // 左に入力アシスト、右にフォーム(本家と同じ並び)
+                ui.vertical(|ui| {
+                    ui.set_width(300.0);
+                    if let Some(r) = self.assist_area(ui) {
+                        result = r;
+                    }
+                });
+                ui.add_space(10.0);
+                ui.vertical(|ui| self.form(ui, ctx, &mut result));
+            });
+        });
+        if !open {
+            return EditResult::Cancel;
+        }
+        result
+    }
+
+    /// 入力フォーム(右側)
+    fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, result: &mut EditResult) {
+        let m = master();
+        {
             egui::Grid::new("edit_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 // ポケモン名(日本語入力での検索)
                 ui.label("ポケモン");
@@ -235,19 +260,15 @@ impl PokemonEdit {
             ui.horizontal(|ui| {
                 if ui.button("保存").clicked() {
                     match box_io::check(&self.pokemon) {
-                        Ok(()) => result = EditResult::Save(self.index, self.pokemon.clone()),
+                        Ok(()) => *result = EditResult::Save(self.index, self.pokemon.clone()),
                         Err(e) => self.error = e,
                     }
                 }
                 if ui.button("キャンセル").clicked() {
-                    result = EditResult::Cancel;
+                    *result = EditResult::Cancel;
                 }
             });
-        });
-        if !open {
-            return EditResult::Cancel;
         }
-        result
     }
 
     /// 入力アシスト欄(本家 pokemon-edit-popup.vue)。Enter で保存して続けて登録、ESC で全てクリア、Alt+C で色違い
@@ -267,13 +288,6 @@ nonki
 shiny / irochi(色違い)
 favorite / okiniiri(お気に入り)
 s:5 (スキルレベル)";
-        style::alert(
-            ui,
-            "入力アシスト欄に、名前・Lv・食材・サブスキル・せいかくを1行ずつ入力することでも入力できます。
-ローマ字でも反応します。必須項目がそろった状態でEnterを押すと、保存して続けて登録します。
-Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
-        );
-        ui.add_space(6.0);
         ui.label(egui::RichText::new("入力アシスト").strong().color(style::th_color()));
         let id = egui::Id::new("pokemon_assist_input");
         if !self.assist_focused {
@@ -281,13 +295,14 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
             self.assist_focused = true;
         }
         let focused = ui.memory(|m| m.has_focus(id));
+        let complete = box_io::check(&self.pokemon).is_ok();
         let mut result = None;
         let mut text_changed = false;
         if focused {
             let (enter, esc, alt_c) = ui.input_mut(|i| {
                 let plain = !i.modifiers.shift && !i.modifiers.alt;
                 (
-                    plain && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    plain && complete && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
                     i.consume_key(egui::Modifiers::ALT, egui::Key::C),
                 )
@@ -303,13 +318,8 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                 self.reset();
             }
             if enter {
-                match box_io::check(&self.pokemon) {
-                    Ok(()) => {
-                        self.continue_next = self.index.is_none();
-                        result = Some(EditResult::Save(self.index, self.pokemon.clone()));
-                    }
-                    Err(e) => self.error = e,
-                }
+                self.continue_next = self.index.is_none();
+                result = Some(EditResult::Save(self.index, self.pokemon.clone()));
             }
         }
         let response = ui.add(egui::TextEdit::multiline(&mut self.assist_text).id(id).desired_rows(5).desired_width(f32::INFINITY).hint_text(HINT));
