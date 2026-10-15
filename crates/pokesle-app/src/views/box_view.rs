@@ -2078,7 +2078,12 @@ fn sub_skill_label(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon, r
     let alpha = |c: egui::Color32| if disabled { c.gamma_multiply(style::disabled_alpha()) } else { c };
     let size = egui::TextStyle::Body.resolve(ui.style()).size * 0.8;
     let width = size * if short { 5.0 } else { 11.5 };
-    let text_color = alpha(if fix { egui::Color32::RED } else { hex(color) });
+    // ダークの未解放は背景を沈ませる代わりに、文字は明るい灰色にして読めるようにする
+    let text_color = if disabled && style::is_dark() {
+        if fix { egui::Color32::from_rgb(0xff, 0x8a, 0x8a) } else { style::muted() }
+    } else {
+        alpha(if fix { egui::Color32::RED } else { hex(color) })
+    };
     let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(size), text_color);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(width.max(galley.size().x + 4.0), galley.size().y + 4.0), egui::Sense::hover());
     let painter = ui.painter();

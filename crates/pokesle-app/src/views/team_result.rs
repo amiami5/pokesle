@@ -220,7 +220,9 @@ fn sub_skill_label(ui: &mut egui::Ui, sub: Option<(&str, &str, u32)>, short: boo
     let alpha = if disabled { style::disabled_alpha() } else { 1.0 };
     let text = sub.map_or("-", |s| if short { s.1 } else { s.0 });
     let font = egui::FontId::proportional(11.0);
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font, color.gamma_multiply(alpha));
+    // ダークの未解放は背景を沈ませる代わりに、文字は明るい灰色にして読めるようにする
+    let color = if disabled && style::is_dark() { if fixed { egui::Color32::from_rgb(0xff, 0x8a, 0x8a) } else { style::muted() } } else { color.gamma_multiply(alpha) };
+    let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let width = if short { 52.0_f32 } else { 112.0_f32 }.max(galley.size().x + 6.0);
     let (rect, r) = ui.allocate_exact_size(egui::vec2(width, galley.size().y + 4.0), egui::Sense::hover());
     let p = ui.painter();
