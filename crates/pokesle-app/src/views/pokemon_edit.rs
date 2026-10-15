@@ -12,7 +12,7 @@ use pokesle_core::evaluate_table::{EvalLv, EvaluateTable};
 use pokesle_core::exp::calc_require_info;
 use pokesle_core::team_sim::simulate_box;
 
-use super::{combo, fmt_fixed, food_icon, style};
+use super::{fmt_fixed, food_icon, style};
 use crate::job::Job;
 
 /// 厳選情報・アメ情報の計算に使う、開いたときの設定・ボックス・厳選テーブル
@@ -46,6 +46,10 @@ pub struct PokemonEdit {
     assist_focused: bool,
     /// Enter で保存した(続けて新規登録する)
     pub continue_next: bool,
+    /// サブスキルの選択中の枠
+    sub_active: usize,
+    select_open: bool,
+    select_query: String,
 }
 
 pub enum EditResult {
@@ -76,6 +80,9 @@ impl PokemonEdit {
             assist_text,
             assist_focused: false,
             continue_next: false,
+            sub_active: 0,
+            select_open: false,
+            select_query: String::new(),
             pokemon,
             insert_to: None,
             error: String::new(),
@@ -129,6 +136,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                 ui.vertical(|ui| self.form(ui, ctx, &mut result));
             });
         });
+        self.select_window(ctx);
         if !open {
             return EditResult::Cancel;
         }
@@ -139,116 +147,81 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
     fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, result: &mut EditResult) {
         let m = master();
         {
-            egui::Grid::new("edit_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                // ポケモン名(日本語入力での検索)
-                ui.label("ポケモン");
-                ui.vertical(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前で検索").desired_width(240.0));
-                    let query = self.search.trim();
-                    if !query.is_empty() && query != self.pokemon.name {
-                        let hits: Vec<_> = m.pokemon.iter().filter(|p| p.name.contains(query)).take(12).collect();
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            if hits.is_empty() {
-                                ui.label("該当なし");
+            // 名前・Lv・食材・サブスキル・せいかく(本家の DesignTable)
+            self.name_row(ui);
+            let Some(base) = m.pokemon(&self.pokemon.name) else {
+                return;
+            };
+            design_row(ui, "Lv", |ui| {
+                ui.spacing_mut().slider_width = 320.0;
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut self.pokemon.lv, 1.0..=100.0).step_by(1.0).show_value(false));
+                    ui.add_sized([56.0, 24.0], egui::DragValue::new(&mut self.pokemon.lv).range(1.0..=100.0).speed(0.2));
+                });
+            });
+            design_row(ui, "食材", |ui| {
+                self.pokemon.food_list.resize(3, base.food_name_list[0].clone());
+                ui.horizontal_top(|ui| {
+                    for slot in 0..3 {
+                        if slot > 0 {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(9.0, 36.0), egui::Sense::hover());
+                            ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, style::line_color()));
+                        }
+                        let options: Vec<&str> = base.food_list.iter().filter(|f| f.num_list.get(slot).copied().flatten().is_some()).map(|f| f.name.as_str()).collect();
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            if options.is_empty() {
+                                ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
                             }
-                            for p in hits {
-                                if ui.selectable_label(false, format!("{} ({}・{})", p.name, p.specialty.name(), m.pokemon_skill(p).name)).clicked() {
-                                    self.set_pokemon(&p.name);
+                            for name in options {
+                                let selected = self.pokemon.food_list[slot] == name;
+                                if food_choice(ui, name, selected).clicked() {
+                                    self.pokemon.food_list[slot] = if base.kaihou && selected { String::new() } else { name.to_string() };
                                 }
                             }
                         });
                     }
                 });
-                ui.end_row();
+            });
+            design_row(ui, "サブスキル", |ui| self.sub_skill_select(ui));
+            design_row(ui, "せいかく", |ui| nature_select(ui, &mut self.pokemon.nature));
 
-                let Some(base) = m.pokemon(&self.pokemon.name) else { return };
-                ui.label("");
-                ui.label(format!("{}とくい / {} / {}", base.specialty.name(), m.pokemon_skill(base).name, base.type_name));
-                ui.end_row();
-
-                ui.label("レベル");
-                ui.add(egui::DragValue::new(&mut self.pokemon.lv).range(1.0..=100.0).speed(0.2));
-                ui.end_row();
-
-                ui.label("スキルレベル");
-                ui.horizontal(|ui| {
-                    let mut specified = self.pokemon.skill_lv.is_some();
-                    if ui.checkbox(&mut specified, "指定する").changed() {
-                        self.pokemon.skill_lv = specified.then_some(base.evolve_lv as f64);
-                    }
-                    if let Some(lv) = &mut self.pokemon.skill_lv {
-                        ui.add(egui::DragValue::new(lv).range(1.0..=m.pokemon_skill(base).max_lv() as f64));
+            // 下の設定(本家の SettingList)
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(18.0, 10.0);
+                setting_item(ui, "スキルLv", |ui| {
+                    let hint = base.evolve_lv.to_string();
+                    style::opt_number(ui, "edit_skill_lv", &mut self.pokemon.skill_lv, true, 56.0, &hint);
+                });
+                setting_item(ui, "睡眠時間", |ui| {
+                    style::opt_number(ui, "edit_sleep_time", &mut self.pokemon.sleep_time, true, 56.0, "省略可");
+                });
+                setting_item(ui, "属性", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.pokemon.shiny, "色違い");
+                        ui.checkbox(&mut self.pokemon.favorite, "お気に入り");
+                    });
+                });
+                setting_item(ui, "チームシミュ", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut self.pokemon.fix, None, "候補対象");
+                        ui.radio_value(&mut self.pokemon.fix, Some(1.0), "固定");
+                        ui.radio_value(&mut self.pokemon.fix, Some(-1.0), "除外");
+                    });
+                });
+                setting_item(ui, "ボックス内No", |ui| {
+                    let mut v = self.insert_to.map(|x| x as f64);
+                    if style::opt_number(ui, "edit_insert_to", &mut v, true, 56.0, "No") {
+                        self.insert_to = v.filter(|x| *x >= 1.0).map(|x| x as usize);
                     }
                 });
-                ui.end_row();
-
-                ui.label("食材");
-                ui.horizontal(|ui| {
-                    self.pokemon.food_list.resize(3, base.food_name_list[0].clone());
-                    for slot in 0..3 {
-                        // 1枠目はA、2枠目はAかB、3枠目はA～C(4種以上のポケモンは全て)
-                        let options: Vec<String> = base
-                            .food_name_list
-                            .iter()
-                            .enumerate()
-                            .filter(|(i, _)| base.food_name_list.len() > 3 || *i <= slot)
-                            .map(|(_, n)| n.clone())
-                            .collect();
-                        combo(ui, ("food", slot), &mut self.pokemon.food_list[slot], options, 120.0);
+                setting_item(ui, "メモ", |ui| {
+                    let mut memo = self.pokemon.memo.clone().unwrap_or_default();
+                    if ui.add(egui::TextEdit::singleline(&mut memo).hint_text("メモ").desired_width(200.0)).changed() {
+                        self.pokemon.memo = (!memo.is_empty()).then_some(memo);
                     }
                 });
-                ui.end_row();
-
-                ui.label("サブスキル");
-                ui.vertical(|ui| {
-                    self.pokemon.sub_skill_list.resize(5, String::new());
-                    for (slot, lv) in [10, 25, 50, 70, 80].iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Lv{lv}"));
-                            let options = m.sub_skills.iter().map(|s| s.name.clone());
-                            combo(ui, ("sub", slot), &mut self.pokemon.sub_skill_list[slot], options, 200.0);
-                        });
-                    }
-                });
-                ui.end_row();
-
-                ui.label("せいかく");
-                let natures = m.natures.iter().map(|n| n.name.clone());
-                combo(ui, "nature", &mut self.pokemon.nature, natures, 160.0);
-                ui.end_row();
-
-                ui.label("睡眠時間");
-                ui.horizontal(|ui| {
-                    let mut v = self.pokemon.sleep_time.unwrap_or(0.0);
-                    if ui.add(egui::DragValue::new(&mut v).range(0.0..=99999.0).suffix(" 時間")).changed() {
-                        self.pokemon.sleep_time = (v > 0.0).then_some(v);
-                    }
-                });
-                ui.end_row();
-
-                ui.label("固定");
-                let mut fixed = self.pokemon.fix == Some(1.0);
-                if ui.checkbox(&mut fixed, "チーム編成で必ず入れる").changed() {
-                    self.pokemon.fix = fixed.then_some(1.0);
-                }
-                ui.end_row();
-
-                ui.label("挿入先No");
-                ui.horizontal(|ui| {
-                    let mut v = self.insert_to.unwrap_or(0);
-                    if ui.add(egui::DragValue::new(&mut v).range(0..=100000).speed(0.2)).changed() {
-                        self.insert_to = (v > 0).then_some(v);
-                    }
-                    ui.label(egui::RichText::new("0 は指定なし").size(11.0).color(style::muted()));
-                });
-                ui.end_row();
-
-                ui.label("メモ");
-                let mut memo = self.pokemon.memo.clone().unwrap_or_default();
-                if ui.text_edit_singleline(&mut memo).changed() {
-                    self.pokemon.memo = (!memo.is_empty()).then_some(memo);
-                }
-                ui.end_row();
             });
 
             self.extra_sections(ui, ctx);
@@ -268,6 +241,133 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                     *result = EditResult::Cancel;
                 }
             });
+        }
+    }
+
+    /// 名前の行(ポケモンを選択ボタン)
+    fn name_row(&mut self, ui: &mut egui::Ui) {
+        let m = master();
+        design_row(ui, "名前", |ui| {
+            ui.horizontal(|ui| {
+                let label = if m.pokemon(&self.pokemon.name).is_some() { self.pokemon.name.clone() } else { "ポケモンを選択".to_string() };
+                if style::setting_button(ui, &style::plain(label), false).clicked() {
+                    self.select_open = true;
+                }
+                if let Some(base) = m.pokemon(&self.pokemon.name) {
+                    ui.label(
+                        egui::RichText::new(format!("{}とくい / {} / {}", base.specialty.name(), m.pokemon_skill(base).name, base.type_name))
+                            .size(12.0)
+                            .color(style::muted()),
+                    );
+                }
+            });
+        });
+    }
+
+    /// サブスキルの選択(本家 sub-skill-select.vue)。選んだ枠の次の空き枠へ進む
+    fn sub_skill_select(&mut self, ui: &mut egui::Ui) {
+        let m = master();
+        self.pokemon.sub_skill_list.resize(5, String::new());
+        self.sub_active = self.sub_active.min(4);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+            for i in 0..5 {
+                let name = self.pokemon.sub_skill_list[i].clone();
+                let active = self.sub_active == i;
+                let sub = m.sub_skill(&name);
+                let r = egui::Frame::new()
+                    .fill(if active { style::mint_soft() } else { style::surface() })
+                    .stroke(egui::Stroke::new(if active { 2.0 } else { 1.0 }, if active { style::mint() } else { style::line_color() }))
+                    .corner_radius(6)
+                    .inner_margin(2)
+                    .show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(66.0, 22.0));
+                        match sub {
+                            Some(s) => {
+                                sub_label(ui, Some(s));
+                            }
+                            None => {
+                                ui.vertical_centered(|ui| ui.label(egui::RichText::new("未選択").size(11.0).color(style::muted())));
+                            }
+                        }
+                    })
+                    .response
+                    .interact(egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                if r.clicked() {
+                    self.sub_active = i;
+                }
+            }
+        });
+        ui.add_space(6.0);
+        let mut list: Vec<_> = m.sub_skills.iter().collect();
+        list.sort_by_key(|s| std::cmp::Reverse(s.rarity));
+        let mut chosen: Option<Option<String>> = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+            for s in list {
+                if sub_label(ui, Some(s)).clicked() {
+                    chosen = Some(Some(s.name.clone()));
+                }
+            }
+            if sub_label(ui, None).clicked() {
+                chosen = Some(None);
+            }
+        });
+        if let Some(c) = chosen {
+            self.pokemon.sub_skill_list[self.sub_active] = c.unwrap_or_default();
+            if let Some(next) = self.pokemon.sub_skill_list.iter().position(|x| x.is_empty()) {
+                self.sub_active = next;
+            }
+        }
+    }
+
+    /// ポケモン選択ウィンドウ(本家 pokemon-select-popup.vue)
+    fn select_window(&mut self, ctx: &egui::Context) {
+        if !self.select_open {
+            return;
+        }
+        let m = master();
+        let mut open = true;
+        let mut picked: Option<String> = None;
+        egui::Window::new("ポケモンを選択").id(egui::Id::new("pokemon_select_window")).open(&mut open).collapsible(false).default_size([560.0, 560.0]).show(ctx, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.select_query).hint_text("名前で絞り込み").desired_width(240.0));
+            ui.add_space(4.0);
+            let query = self.select_query.trim().to_string();
+            let mut list: Vec<_> = m.pokemon.iter().filter(|p| query.is_empty() || p.name.contains(&query)).collect();
+            list.sort_by(|a, b| a.name.cmp(&b.name));
+            let widths = [60.0, 90.0, 110.0, 200.0];
+            ui.horizontal(|ui| {
+                for (w, t) in widths.iter().zip(["図鑑No", "タイプ", "きのみ", "ポケモン名"]) {
+                    ui.add_sized([*w, 20.0], egui::Label::new(egui::RichText::new(t).strong().color(style::th_color())));
+                }
+            });
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, 24.0, list.len(), |ui, range| {
+                for i in range {
+                    let p = list[i];
+                    let selected = p.name == self.pokemon.name;
+                    let (rect, r) = ui.allocate_exact_size(egui::vec2(widths.iter().sum::<f32>() + 20.0, 24.0), egui::Sense::click());
+                    if selected || r.hovered() {
+                        ui.painter().rect_filled(rect, 3.0, if selected { style::mint_soft() } else { style::primary_soft() });
+                    }
+                    let mut x = rect.left() + 4.0;
+                    let berry = m.berries.get(p.berry).map(|b| b.name.as_str()).unwrap_or("");
+                    for (w, t) in widths.iter().zip([p.no.to_string(), p.type_name.clone(), berry.to_string(), p.name.clone()]) {
+                        ui.painter().text(egui::pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, t, egui::FontId::proportional(13.0), style::ink());
+                        x += w;
+                    }
+                    if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        picked = Some(p.name.clone());
+                    }
+                }
+            });
+        });
+        if let Some(name) = picked {
+            self.set_pokemon(&name);
+            self.assist_text = assist::to_text(&self.pokemon);
+            self.select_open = false;
+        } else if !open {
+            self.select_open = false;
         }
     }
 
@@ -638,6 +738,121 @@ s:5 (スキルレベル)";
     }
 }
 
+
+/// 本家 DesignTable の1行。左に濃い見出し、右に内容
+fn design_row(ui: &mut egui::Ui, th: &str, add: impl FnOnce(&mut egui::Ui)) {
+    const TH_W: f32 = 96.0;
+    let start = ui.cursor().min;
+    let r = ui.horizontal_top(|ui| {
+        ui.add_space(TH_W + 10.0);
+        ui.vertical(|ui| {
+            ui.add_space(5.0);
+            add(ui);
+            ui.add_space(5.0);
+        });
+    });
+    let rect = r.response.rect;
+    let th_rect = egui::Rect::from_min_size(start, egui::vec2(TH_W, rect.height().max(36.0)));
+    let p = ui.painter();
+    p.rect_filled(th_rect, 0.0, style::primary_strong());
+    p.rect_stroke(th_rect, 0.0, egui::Stroke::new(1.0, egui::Color32::WHITE), egui::StrokeKind::Inside);
+    // 太字の代わりに少しずらして重ね描き
+    p.text(th_rect.center(), egui::Align2::CENTER_CENTER, th, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+    p.text(th_rect.center() + egui::vec2(0.5, 0.0), egui::Align2::CENTER_CENTER, th, egui::FontId::proportional(14.0), egui::Color32::WHITE);
+    p.hline(th_rect.right()..=rect.right().max(th_rect.right() + 1.0), th_rect.bottom(), egui::Stroke::new(1.0, style::line_color()));
+}
+
+/// 設定の項目(本家 SettingList): 左に緑の線、上に見出し
+fn setting_item(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    let r = ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(label).strong().color(style::th_color()));
+            add(ui);
+        });
+    });
+    let rect = r.response.rect;
+    ui.painter().rect_filled(egui::Rect::from_min_size(rect.min, egui::vec2(4.0, rect.height())), 2.0, style::mint());
+}
+
+/// 食材の選択肢1つ(36px の枠。選ばれていれば緑の太枠)
+fn food_choice(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
+    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let fill = if selected || r.hovered() { style::mint_soft() } else { egui::Color32::WHITE };
+    let stroke = if selected { egui::Stroke::new(2.0, style::mint()) } else { egui::Stroke::new(1.0, style::line_color()) };
+    ui.painter().rect(rect, 6.0, fill, stroke, egui::StrokeKind::Inside);
+    let inner = egui::Rect::from_center_size(rect.center(), egui::vec2(29.0, 29.0));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+        food_icon::food_icon(ui, name, 29.0);
+    });
+    r.on_hover_text(name)
+}
+
+/// サブスキルのラベル(本家 sub-skill-label.vue の short)。クリックできる
+fn sub_label(ui: &mut egui::Ui, sub: Option<&pokesle_core::data::SubSkill>) -> egui::Response {
+    let hex = |rgb: u32| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
+    let (bg, border, color) = match sub.map_or(1, |s| s.rarity) {
+        2 => (hex(0xeaf5ff), hex(0x9dc9ef), hex(0x2c5277)),
+        3 => (hex(0xfff4d9), hex(0xe5bd70), hex(0x76511f)),
+        _ => (hex(0xf6f7fc), hex(0xbfc8de), hex(0x3b4663)),
+    };
+    let text = sub.map_or("-", |s| s.short.as_str());
+    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(12.0), color);
+    let width = 62.0_f32.max(galley.size().x + 8.0);
+    let (rect, r) = ui.allocate_exact_size(egui::vec2(width, galley.size().y + 6.0), egui::Sense::click());
+    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let p = ui.painter();
+    p.rect(rect, 5.0, bg, egui::Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    let pos = rect.center() - galley.size() / 2.0;
+    p.galley(pos + egui::vec2(0.5, 0.0), galley.clone(), color);
+    p.galley(pos, galley, color);
+    match sub {
+        Some(s) => r.on_hover_text(&s.name),
+        None => r,
+    }
+}
+
+/// せいかくの選択(本家 nature-select.vue)。縦軸が上がる能力、横軸が下がる能力
+fn nature_select(ui: &mut egui::Ui, value: &mut String) {
+    const COLUMNS: [&str; 5] = ["おてスピ", "げんき", "食材確率", "スキル確率", "EXP"];
+    const ROWS: [(&str, [&str; 5]); 5] = [
+        ("おてスピ", ["がんばりや", "さみしがり", "いじっぱり", "やんちゃ", "ゆうかん"]),
+        ("げんき", ["ずぶとい", "すなお", "わんぱく", "のうてんき", "のんき"]),
+        ("食材確率", ["ひかえめ", "おっとり", "てれや", "うっかりや", "れいせい"]),
+        ("スキル確率", ["おだやか", "おとなしい", "しんちょう", "きまぐれ", "なまいき"]),
+        ("EXP", ["おくびょう", "せっかち", "ようき", "むじゃき", "まじめ"]),
+    ];
+    let (head_w, cell_w, head_h, cell_h, gap) = (84.0, 96.0, 34.0, 28.0, 3.0);
+    let total = egui::vec2(head_w + 5.0 * (cell_w + gap), head_h + 5.0 * (cell_h + gap));
+    let (rect, _) = ui.allocate_exact_size(total, egui::Sense::hover());
+    let font = egui::FontId::proportional(12.0);
+    let down = style::execute();
+    let up = style::danger_color();
+    let corner = egui::Rect::from_min_size(rect.min, egui::vec2(head_w, head_h));
+    ui.painter().line_segment([corner.left_bottom(), corner.right_top()], egui::Stroke::new(1.0, style::line_color()));
+    ui.painter().text(corner.left_bottom() + egui::vec2(3.0, -2.0), egui::Align2::LEFT_BOTTOM, "▲▲", egui::FontId::proportional(9.0), up);
+    ui.painter().text(corner.right_top() + egui::vec2(-3.0, 2.0), egui::Align2::RIGHT_TOP, "▼▼", egui::FontId::proportional(9.0), down);
+    for (c, name) in COLUMNS.iter().enumerate() {
+        let x = rect.left() + head_w + c as f32 * (cell_w + gap) + cell_w / 2.0;
+        ui.painter().text(egui::pos2(x, rect.top() + head_h / 2.0), egui::Align2::CENTER_CENTER, name, font.clone(), down);
+    }
+    for (r, (row_name, natures)) in ROWS.iter().enumerate() {
+        let y = rect.top() + head_h + r as f32 * (cell_h + gap);
+        ui.painter().text(egui::pos2(rect.left() + head_w / 2.0, y + cell_h / 2.0), egui::Align2::CENTER_CENTER, row_name, font.clone(), up);
+        for (c, name) in natures.iter().enumerate() {
+            let cell = egui::Rect::from_min_size(egui::pos2(rect.left() + head_w + c as f32 * (cell_w + gap), y), egui::vec2(cell_w, cell_h));
+            let resp = ui.interact(cell, ui.id().with(("nature", r, c)), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let selected = value == name;
+            let fill = if selected { style::mint() } else if resp.hovered() { style::primary() } else { style::primary_strong() };
+            ui.painter().rect(cell, 6.0, fill, egui::Stroke::new(1.0, egui::Color32::from_white_alpha(64)), egui::StrokeKind::Inside);
+            ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, name, font.clone(), egui::Color32::WHITE);
+            if resp.clicked() {
+                *value = name.to_string();
+            }
+        }
+    }
+}
 
 /// 厳選度の折れ線グラフ(縦軸は 0〜(最大を20刻みに切り上げた値)%)。系列は 本個体・同種族1位・同種族同食材1位
 fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 3], color: egui::Color32) {

@@ -33,6 +33,12 @@ pub fn primary_strong() -> Color32 {
 pub fn primary_soft() -> Color32 {
     pick(0xeff1f6, 0x2d3447)
 }
+pub fn mint() -> Color32 {
+    hex(0x59a98f)
+}
+pub fn mint_soft() -> Color32 {
+    pick(0xedf7f3, 0x24382f)
+}
 pub fn execute() -> Color32 {
     pick(0x3d73c9, 0x3d73c9)
 }
