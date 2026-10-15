@@ -1,4 +1,4 @@
-//! ウィンドウのアイコン(本家の icon.png。メインウィンドウと別ウィンドウの小窓で共用する)
+//! ウィンドウのアイコン(自作の icon.png。tools/app-icon/make.py で作る。メインウィンドウと別ウィンドウの小窓で共用する)
 
 use std::sync::{Arc, OnceLock};
 

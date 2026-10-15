@@ -1490,6 +1490,8 @@ impl BoxView {
                 // 列が画面に収まらないときは横にスクロールする
                 let r = egui::ScrollArea::horizontal()
                     .id_salt("box_table_right_scroll")
+                    // 行が少なくても横スクロールバーを領域の下端に置く
+                    .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.vertical(|ui| {
                             ui.spacing_mut().item_spacing.x = spacing_x;

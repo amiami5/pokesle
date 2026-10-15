@@ -130,5 +130,5 @@ git commit -m "本家 <コミット> に追従"
 [MIT License](LICENSE)。本家 (c) 2024 reimer0204 の著作権表示を含みます。
 
 - 依存ライブラリのライセンスは [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)(`cargo about generate about.hbs > THIRD_PARTY_LICENSES.md` で生成)を参照してください。
-- 本アプリはゲームの画像を同梱しません。食材アイコンは [Noto Emoji](https://github.com/googlefonts/noto-emoji)(OFL-1.1、Copyright 2013 Google LLC)と自作の絵です。詳しくは [crates/pokesle-app/assets/food/README.md](crates/pokesle-app/assets/food/README.md) を参照してください。
+- 本アプリはゲームの画像を同梱しません。アプリのアイコンは自作です(`tools/app-icon/make.py`)。食材アイコンは [Noto Emoji](https://github.com/googlefonts/noto-emoji)(OFL-1.1、Copyright 2013 Google LLC)と自作の絵です。詳しくは [crates/pokesle-app/assets/food/README.md](crates/pokesle-app/assets/food/README.md) を参照してください。
 - 「ポケモン」「ポケモンスリープ」等の名称に関する権利は各権利者に帰属します。
