@@ -101,3 +101,22 @@ pub fn food_list(ui: &mut egui::Ui, pokemon: &BoxPokemon) {
         response.on_hover_text(hover);
     }
 }
+
+/// きのみ1つの絵(タイプ色の実に葉をつけた自作の簡易アイコン。ゲームの画像は使わない)
+pub fn berry_icon(ui: &mut egui::Ui, berry: &pokesle_core::data::Berry, size: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let hex = berry.type_color.strip_prefix('#').and_then(|h| u32::from_str_radix(h, 16).ok()).unwrap_or(0x888888);
+    let base = egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    let edge = egui::Color32::from_rgb(base.r() / 2, base.g() / 2, base.b() / 2);
+    let p = ui.painter();
+    let center = rect.center() + egui::vec2(0.0, size * 0.06);
+    let r = size * 0.38;
+    p.circle(center, r, base, egui::Stroke::new(1.2, edge));
+    p.circle_filled(center + egui::vec2(-r * 0.35, -r * 0.35), r * 0.22, egui::Color32::from_white_alpha(150));
+    // 葉
+    let top = center + egui::vec2(0.0, -r);
+    let leaf = egui::Color32::from_rgb(0x4c, 0xaf, 0x50);
+    let pts = vec![top, top + egui::vec2(size * 0.26, -size * 0.04), top + egui::vec2(size * 0.08, -size * 0.2)];
+    p.add(egui::Shape::convex_polygon(pts, leaf, egui::Stroke::new(1.0, egui::Color32::from_rgb(0x2e, 0x7d, 0x32))));
+    response.on_hover_text(&berry.name)
+}

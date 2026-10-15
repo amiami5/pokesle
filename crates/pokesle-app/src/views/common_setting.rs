@@ -11,7 +11,7 @@ use pokesle_core::sim_pokemon::BoxPokemon;
 
 use super::pokemon_filter;
 use super::style::{self, form_button, js_num, number, percent_number, small, th, ButtonKind, Label};
-use super::fmt_fixed;
+use super::{fmt_fixed, food_icon};
 
 /// 本家 Berry.typeList の並び
 const TYPE_LIST: [&str; 18] = [
@@ -135,7 +135,17 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                             let disabled = field.and_then(|f| f.berry_option_list.as_ref()).is_some_and(|o| !o.get(i).is_some_and(|l| l.contains(&berry.name)))
                                 || fixed == Some(false);
                             let checked = fixed.unwrap_or(s.berry_list[i] == berry.name);
-                            if ui.add_enabled(!disabled, egui::RadioButton::new(checked, &berry.name)).clicked() && !checked {
+                            let clicked = ui
+                                .horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.add_enabled_ui(!disabled, |ui| {
+                                        food_icon::berry_icon(ui, berry, 20.0);
+                                        ui.add(egui::RadioButton::new(checked, &berry.name)).clicked()
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            if clicked && !checked {
                                 s.berry_list[i] = berry.name.clone();
                                 changed = true;
                             }
@@ -385,7 +395,10 @@ fn berry_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
     style::setting(ui, "berry", "きのみ設定", &label, false, |ui| {
         egui::Grid::new("berry_rate").num_columns(6).spacing([12.0, 8.0]).show(ui, |ui| {
             for (i, berry) in berry_list_by_color().into_iter().enumerate() {
-                ui.label(&berry.name);
+                ui.horizontal(|ui| {
+                    food_icon::berry_icon(ui, berry, 20.0);
+                    ui.label(&berry.name);
+                });
                 ui.horizontal(|ui| {
                     let v = c.simulation.berry_energy_rate.entry(berry.name.clone()).or_insert(1.0);
                     changed |= percent_number(ui, v, 60.0);
