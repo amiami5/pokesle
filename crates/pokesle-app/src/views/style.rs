@@ -215,12 +215,16 @@ pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOn
         return;
     }
     let saved: Option<[f32; 4]> = ctx.data_mut(|d| d.get_persisted(popup_geometry_id(id)));
-    let size = saved.map_or(egui::vec2(520.0, 480.0), |g| egui::vec2(g[2], g[3]));
+    // ビルダーに渡す初期位置・サイズは開いたときの値に固定する。毎フレーム最新の保存値を渡すと、
+    // 実際のウィンドウの寸法(DPI の丸め)との差で毎フレーム位置・サイズ変更を送り合い、小窓が痙攣する
+    let init_id = popup_geometry_id(id).with("init");
+    let init: Option<[f32; 4]> = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(init_id, || saved));
+    let size = init.map_or(egui::vec2(520.0, 480.0), |g| egui::vec2(g[2], g[3]));
     let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size([300.0, 160.0]);
     if let Some(icon) = crate::icon::window_icon() {
         builder = builder.with_icon(icon);
     }
-    if let Some(g) = saved {
+    if let Some(g) = init {
         builder = builder.with_position(egui::pos2(g[0], g[1]));
     } else if let Some(parent) = ctx.input(|i| i.viewport().outer_rect) {
         builder = builder.with_position(parent.center() - size / 2.0);
@@ -255,13 +259,17 @@ pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOn
             && i.width() > 0.0
         {
             let g = [o.min.x, o.min.y, i.width(), i.height()];
-            if saved != Some(g) {
+            let moved = saved.is_none_or(|s| s.iter().zip(&g).any(|(a, b)| (a - b).abs() > 0.5));
+            if moved {
                 ctx.data_mut(|d| d.insert_persisted(popup_geometry_id(id), g));
             }
         }
     });
     if close {
-        ctx.data_mut(|d| d.remove::<bool>(popup_id(id)));
+        ctx.data_mut(|d| {
+            d.remove::<bool>(popup_id(id));
+            d.remove::<Option<[f32; 4]>>(init_id);
+        });
     }
 }
 
