@@ -910,6 +910,7 @@ impl BoxView {
                 EditResult::Save(index, pokemon) => {
                     // 本家 PokemonBox.post: 挿入先No があればその位置へ(編集中のものは元の位置から外して入れる)
                     let insert_to = edit.insert_to;
+                    let again = edit.continue_next;
                     let candy = edit.candy_change();
                     let list = &mut shared.box_file.list;
                     let mut new_index = index.filter(|i| *i < list.len()).unwrap_or(list.len());
@@ -933,7 +934,8 @@ impl BoxView {
                     }
                     shared.save_box();
                     self.results.clear();
-                    self.edit = None;
+                    // 入力アシストの Enter は、保存して続けて新規登録する
+                    self.edit = again.then(|| PokemonEdit::new(None, None).with_env(edit_env(shared)));
                 }
             }
         }

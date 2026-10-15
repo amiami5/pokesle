@@ -1,6 +1,7 @@
 //! ボックスのポケモンの追加・編集ウィンドウ
 
 use eframe::egui;
+use pokesle_core::assist;
 use pokesle_core::box_io;
 use pokesle_core::data::master;
 use pokesle_core::sim_pokemon::BoxPokemon;
@@ -40,6 +41,11 @@ pub struct PokemonEdit {
     show_secondary: bool,
     /// 所持アメの編集値(種ポケのアメ名, 個数)。保存後に設定へ反映してもらう
     candy_bag: Option<(String, f64)>,
+    /// 入力アシストのテキスト(本家 assistText)
+    assist_text: String,
+    assist_focused: bool,
+    /// Enter で保存した(続けて新規登録する)
+    pub continue_next: bool,
 }
 
 pub enum EditResult {
@@ -51,6 +57,7 @@ pub enum EditResult {
 impl PokemonEdit {
     pub fn new(index: Option<usize>, pokemon: Option<BoxPokemon>) -> PokemonEdit {
         let m = master();
+        let is_initial = pokemon.is_some();
         let pokemon = pokemon.unwrap_or_else(|| {
             let base = &m.pokemon[0];
             BoxPokemon {
@@ -62,9 +69,13 @@ impl PokemonEdit {
                 ..Default::default()
             }
         });
+        let assist_text = if index.is_some() || is_initial { assist::to_text(&pokemon) } else { String::new() };
         PokemonEdit {
             index,
             search: pokemon.name.clone(),
+            assist_text,
+            assist_focused: false,
+            continue_next: false,
             pokemon,
             insert_to: None,
             error: String::new(),
@@ -100,6 +111,9 @@ impl PokemonEdit {
         let title = if self.index.is_some() { "ポケモンを編集" } else { "ポケモンを追加" };
         // 追加と編集でタイトルが違っても同じ位置を使う
         egui::Window::new(title).id(egui::Id::new("pokemon_edit")).open(&mut open).collapsible(false).resizable(true).default_width(520.0).show(ctx, |ui| {
+            if let Some(r) = self.assist_area(ui) {
+                result = r;
+            }
             egui::Grid::new("edit_grid").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 // ポケモン名(日本語入力での検索)
                 ui.label("ポケモン");
@@ -234,6 +248,97 @@ impl PokemonEdit {
             return EditResult::Cancel;
         }
         result
+    }
+
+    /// 入力アシスト欄(本家 pokemon-edit-popup.vue)。Enter で保存して続けて登録、ESC で全てクリア、Alt+C で色違い
+    fn assist_area(&mut self, ui: &mut egui::Ui) -> Option<EditResult> {
+        const HINT: &str = "入力例)
+fushigidane
+10
+aab
+otebo
+kinos
+sukim
+shokus
+shojil
+nonki
+
+せいかくを入力してEnterを押すまでに、以下を入力するとその他の設定も可能です
+shiny / irochi(色違い)
+favorite / okiniiri(お気に入り)
+s:5 (スキルレベル)";
+        style::alert(
+            ui,
+            "入力アシスト欄に、名前・Lv・食材・サブスキル・せいかくを1行ずつ入力することでも入力できます。
+ローマ字でも反応します。必須項目がそろった状態でEnterを押すと、保存して続けて登録します。
+Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
+        );
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("入力アシスト").strong().color(style::th_color()));
+        let id = egui::Id::new("pokemon_assist_input");
+        if !self.assist_focused {
+            ui.memory_mut(|m| m.request_focus(id));
+            self.assist_focused = true;
+        }
+        let focused = ui.memory(|m| m.has_focus(id));
+        let mut result = None;
+        let mut text_changed = false;
+        if focused {
+            let (enter, esc, alt_c) = ui.input_mut(|i| {
+                let plain = !i.modifiers.shift && !i.modifiers.alt;
+                (
+                    plain && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
+                    i.consume_key(egui::Modifiers::ALT, egui::Key::C),
+                )
+            });
+            if alt_c {
+                self.pokemon.shiny = !self.pokemon.shiny;
+                self.assist_text = assist::to_text(&self.pokemon);
+            }
+            if esc {
+                if self.assist_text.is_empty() {
+                    return Some(EditResult::Cancel);
+                }
+                self.reset();
+            }
+            if enter {
+                match box_io::check(&self.pokemon) {
+                    Ok(()) => {
+                        self.continue_next = self.index.is_none();
+                        result = Some(EditResult::Save(self.index, self.pokemon.clone()));
+                    }
+                    Err(e) => self.error = e,
+                }
+            }
+        }
+        let response = ui.add(egui::TextEdit::multiline(&mut self.assist_text).id(id).desired_rows(5).desired_width(f32::INFINITY).hint_text(HINT));
+        text_changed |= response.changed();
+        if text_changed {
+            assist::infer(&self.assist_text, &mut self.pokemon);
+            self.search = self.pokemon.name.clone();
+            self.error.clear();
+        }
+        ui.add_space(8.0);
+        result
+    }
+
+    /// 本家 reset: 入力を全てクリアする
+    fn reset(&mut self) {
+        let m = master();
+        let base = &m.pokemon[0];
+        self.pokemon = BoxPokemon {
+            name: base.name.clone(),
+            lv: 10.0,
+            food_list: vec![base.food_name_list[0].clone(); 3],
+            sub_skill_list: m.sub_skills.iter().take(5).map(|s| s.name.clone()).collect(),
+            nature: "まじめ".into(),
+            ..Default::default()
+        };
+        self.search = self.pokemon.name.clone();
+        self.assist_text.clear();
+        self.insert_to = None;
+        self.error.clear();
     }
 
     /// 厳選情報とアメ情報(本家 pokemon-edit-popup.vue の ToggleArea)

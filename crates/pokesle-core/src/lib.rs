@@ -2,6 +2,7 @@
 //!
 //! reimer0204/pokesle-simulator (MIT) の計算処理を Rust へ移植したもの。
 
+pub mod assist;
 pub mod box_io;
 pub mod box_sim;
 pub mod box_summary;
