@@ -48,9 +48,12 @@ pub struct PokemonEdit {
     pub continue_next: bool,
     /// サブスキルの選択中の枠
     sub_active: usize,
-    select_open: bool,
+    popup_opened: bool,
     select_query: String,
 }
+
+const POPUP_ID: &str = "pokemon_edit";
+const SELECT_POPUP_ID: &str = "pokemon_select";
 
 pub enum EditResult {
     None,
@@ -81,7 +84,7 @@ impl PokemonEdit {
             assist_focused: false,
             continue_next: false,
             sub_active: 0,
-            select_open: false,
+            popup_opened: false,
             select_query: String::new(),
             pokemon,
             insert_to: None,
@@ -113,10 +116,13 @@ impl PokemonEdit {
 
     pub fn ui(&mut self, ctx: &egui::Context) -> EditResult {
         let mut result = EditResult::None;
-        let mut open = true;
         let title = if self.index.is_some() { "ポケモンを編集" } else { "ポケモンを追加" };
-        // 追加と編集でタイトルが違っても同じ位置を使う
-        egui::Window::new(title).id(egui::Id::new("pokemon_edit")).open(&mut open).collapsible(false).resizable(true).default_width(960.0).show(ctx, |ui| {
+        // 他の設定ポップアップと同じ別ウィンドウ。位置とサイズは覚える(追加と編集で同じ枠を使う)
+        if !self.popup_opened {
+            style::open_popup(ctx, POPUP_ID);
+            self.popup_opened = true;
+        }
+        style::popup_sized(ctx, POPUP_ID, title, egui::vec2(1020.0, 760.0), |ui| {
             style::alert(
                 ui,
                 "入力アシスト欄に、名前・Lv・食材・サブスキル・せいかくを1行ずつ入力することでも入力できます。
@@ -137,8 +143,13 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
             });
         });
         self.select_window(ctx);
-        if !open {
+        // ×で閉じられた(別ウィンドウのフラグが消えた)
+        if !style::is_popup_open(ctx, POPUP_ID) {
             return EditResult::Cancel;
+        }
+        if !matches!(result, EditResult::None) {
+            style::close_popup(ctx, POPUP_ID);
+            style::close_popup(ctx, SELECT_POPUP_ID);
         }
         result
     }
@@ -251,7 +262,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
             ui.horizontal(|ui| {
                 let label = if m.pokemon(&self.pokemon.name).is_some() { self.pokemon.name.clone() } else { "ポケモンを選択".to_string() };
                 if style::setting_button(ui, &style::plain(label), false).clicked() {
-                    self.select_open = true;
+                    style::open_popup(ui.ctx(), SELECT_POPUP_ID);
                 }
                 if let Some(base) = m.pokemon(&self.pokemon.name) {
                     ui.label(
@@ -324,13 +335,12 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
 
     /// ポケモン選択ウィンドウ(本家 pokemon-select-popup.vue)
     fn select_window(&mut self, ctx: &egui::Context) {
-        if !self.select_open {
+        if !style::is_popup_open(ctx, SELECT_POPUP_ID) {
             return;
         }
         let m = master();
-        let mut open = true;
         let mut picked: Option<String> = None;
-        egui::Window::new("ポケモンを選択").id(egui::Id::new("pokemon_select_window")).open(&mut open).collapsible(false).default_size([560.0, 560.0]).show(ctx, |ui| {
+        style::popup_sized(ctx, SELECT_POPUP_ID, "ポケモンを選択", egui::vec2(560.0, 600.0), |ui| {
             ui.add(egui::TextEdit::singleline(&mut self.select_query).hint_text("名前で絞り込み").desired_width(240.0));
             ui.add_space(4.0);
             let query = self.select_query.trim().to_string();
@@ -342,7 +352,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                     ui.add_sized([*w, 20.0], egui::Label::new(egui::RichText::new(t).strong().color(style::th_color())));
                 }
             });
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, 24.0, list.len(), |ui, range| {
+            egui::ScrollArea::vertical().id_salt("pokemon_select_list").max_height(460.0).auto_shrink([false, false]).show_rows(ui, 24.0, list.len(), |ui, range| {
                 for i in range {
                     let p = list[i];
                     let selected = p.name == self.pokemon.name;
@@ -365,9 +375,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
         if let Some(name) = picked {
             self.set_pokemon(&name);
             self.assist_text = assist::to_text(&self.pokemon);
-            self.select_open = false;
-        } else if !open {
-            self.select_open = false;
+            style::close_popup(ctx, SELECT_POPUP_ID);
         }
     }
 

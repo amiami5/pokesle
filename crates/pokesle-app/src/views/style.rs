@@ -205,6 +205,14 @@ pub fn open_popup(ctx: &egui::Context, id: &str) {
     ctx.data_mut(|d| d.insert_temp(popup_id(id), true));
 }
 
+/// 設定ポップアップを閉じる(保存済みの位置・サイズは残る)
+pub fn close_popup(ctx: &egui::Context, id: &str) {
+    ctx.data_mut(|d| {
+        d.remove::<bool>(popup_id(id));
+        d.remove::<Option<[f32; 4]>>(popup_geometry_id(id).with("init"));
+    });
+}
+
 pub fn is_popup_open(ctx: &egui::Context, id: &str) -> bool {
     ctx.data(|d| d.get_temp::<bool>(popup_id(id))).unwrap_or(false)
 }
@@ -217,6 +225,11 @@ fn popup_geometry_id(id: &str) -> egui::Id {
 /// 本家 setting-button のポップアップ。
 /// メインウィンドウとは別の OS ウィンドウとして開き、移動・サイズ変更ができる(位置とサイズは保存される)。
 pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    popup_sized(ctx, id, title, egui::vec2(520.0, 480.0), add_contents);
+}
+
+/// `popup` の、初めて開くときの大きさを指定する版
+pub fn popup_sized(ctx: &egui::Context, id: &str, title: &str, default_size: egui::Vec2, add_contents: impl FnOnce(&mut egui::Ui)) {
     if !is_popup_open(ctx, id) {
         return;
     }
@@ -225,7 +238,7 @@ pub fn popup(ctx: &egui::Context, id: &str, title: &str, add_contents: impl FnOn
     // 実際のウィンドウの寸法(DPI の丸め)との差で毎フレーム位置・サイズ変更を送り合い、小窓が痙攣する
     let init_id = popup_geometry_id(id).with("init");
     let init: Option<[f32; 4]> = ctx.data_mut(|d| *d.get_temp_mut_or_insert_with(init_id, || saved));
-    let size = init.map_or(egui::vec2(520.0, 480.0), |g| egui::vec2(g[2], g[3]));
+    let size = init.map_or(default_size, |g| egui::vec2(g[2], g[3]));
     let mut builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size).with_min_inner_size([300.0, 160.0]);
     if let Some(icon) = crate::icon::window_icon() {
         builder = builder.with_icon(icon);
