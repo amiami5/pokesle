@@ -1406,6 +1406,8 @@ impl BoxView {
         let hover = self.hover_row;
         let mut new_hover = None;
         let offset = self.scroll_offset;
+        // 右の表は下に横スクロールバーの分だけ低くなる。左の表も同じ高さにしないと、一番下までスクロールしたとき左右で行がずれる
+        let body_height = (ui.available_height() - ui.spacing().scroll.allocated_width()).max(0.0);
         // 1つの表を描き、縦のスクロール位置を返す。last は右側(残りの幅を埋め、縦のスクロールバーを出す)
         let mut draw = |ui: &mut egui::Ui, salt: &str, cols: &[Col], last: bool| -> f32 {
             let mut table = TableBuilder::new(ui)
@@ -1415,13 +1417,15 @@ impl BoxView {
                 .sense(egui::Sense::click())
                 .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .vertical_scroll_offset(offset)
+                .max_scroll_height(body_height)
                 .scroll_bar_visibility(if last { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::AlwaysHidden });
             for &c in cols {
                 // 本家と同じく先頭は選択・編集・削除・固定/除外の列
-                table = table.column(if c == Col::Op { Column::exact(op_width).resizable(false) } else { c.width(widths.get(&c.key()).copied(), setting) });
+                // 中身が行より高くても行を広げない(広げると左右の表で行がずれる)
+                table = table.column((if c == Col::Op { Column::exact(op_width).resizable(false) } else { c.width(widths.get(&c.key()).copied(), setting) }).clip(true));
             }
             if last {
-                table = table.column(Column::remainder());
+                table = table.column(Column::remainder().clip(true));
             }
             let out = table
                 .header(if tall_header { 40.0 } else { 22.0 }, |mut header| {
