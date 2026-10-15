@@ -7,7 +7,7 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
+use crate::views::{tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_table_view::EvaluateTableView, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -34,7 +34,7 @@ type NavItem = (Tab, &'static str, bool);
 const NAV: [(&str, &[NavItem]); 4] = [
     ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
-    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", false), (Tab::TmpEvaluate, "簡易診断", true)]),
+    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", true), (Tab::TmpEvaluate, "簡易診断", true)]),
     ("その他", &[(Tab::Data, "データ", true), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", true), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
 ];
 
@@ -102,6 +102,7 @@ pub struct App {
     team_view: TeamView,
     food_stock_view: FoodStockView,
     evaluate_view: EvaluateView,
+    evaluate_table_view: EvaluateTableView,
     ui_setting_view: UiSettingView,
 }
 
@@ -130,6 +131,7 @@ impl App {
             Ok("tmp") => Tab::TmpEvaluate,
             Ok("history") => Tab::History,
             Ok("setting") => Tab::Setting,
+            Ok("evaluate") => Tab::EvaluateTable,
             Ok("ui") => Tab::UiSetting,
             _ => Tab::Box,
         };
@@ -159,6 +161,7 @@ impl App {
             team_view: TeamView::default(),
             food_stock_view: FoodStockView::default(),
             evaluate_view: EvaluateView::default(),
+            evaluate_table_view: EvaluateTableView::default(),
             ui_setting_view: UiSettingView::default(),
         }
     }
@@ -280,6 +283,7 @@ impl eframe::App for App {
             }
             Tab::FoodStock => self.food_stock_view.ui(ui, &mut self.shared),
             Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),
+            Tab::EvaluateTable => self.evaluate_table_view.ui(ui, &mut self.shared),
             Tab::Credit => credit_view::ui(ui),
             Tab::UiSetting => self.ui_setting_view.ui(ui, &mut self.shared),
             _ => {

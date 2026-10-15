@@ -332,6 +332,91 @@ pub fn evaluate_pokemon(
     Ok(out)
 }
 
+/// 厳選テーブルの指定厳選度に当たる個体(本家 evaluate-table.vue の showDetail が evaluate-simulator から取り出す subSkillList / nature)
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnergyDetail {
+    pub sub_skill_list: Vec<String>,
+    /// 性格(マスターの添字)。無補正は None
+    pub nature: Option<usize>,
+    /// テーブルに載っているエナジーの値
+    pub score: f64,
+}
+
+/// 1ポケモン・1食材構成について、エナジーの `percentile` 番目(0～100)に当たるサブスキル・性格を求める。
+/// `evaluate_pokemon` のエナジー側と同じ並べ方・同じ位置の取り方で、重みの内訳も覚えておく。
+pub fn evaluate_energy_detail(
+    config: &Config,
+    table: &EvaluateTable,
+    combination_list: &SubSkillCombinationList,
+    pokemon_name: &str,
+    lv: u32,
+    food_key: &str,
+    percentile: usize,
+) -> Result<EnergyDetail, String> {
+    let m = master();
+    let pokemon = m.pokemon(pokemon_name).ok_or_else(|| format!("知らないポケモン: {pokemon_name}"))?;
+    let healer = *table.healer.get(&lv).ok_or("このレベルの厳選テーブルがありません")?;
+    let support = *table.support.get(&lv).ok_or("このレベルの厳選テーブルがありません")?;
+
+    let sub_skill_num = crate::simulator::enabled_sub_skill_len(lv as f64);
+    let combos: Vec<SubSkillCombination> = combination_list
+        .get(sub_skill_num)
+        .filter(|_| sub_skill_num > 0)
+        .cloned()
+        .unwrap_or_else(|| vec![SubSkillCombination { s: vec![], weights: [Some((1.0, vec![])), None, None, None] }]);
+
+    let id_to_pos = |id: u32| m.sub_skills.iter().position(|s| s.id == id);
+    let name_of = |id: u32| m.sub_skill_by_id(id).map(|s| s.name.clone());
+    let mut nature_list: Vec<Option<usize>> = m.natures.iter().enumerate().filter(|(_, n)| n.good.is_some()).map(|(i, _)| Some(i)).collect();
+    nature_list.push(None);
+
+    let food_name_list = food_key
+        .chars()
+        .map(|c| pokemon.food_name_list.get(c.to_digit(10).unwrap_or(99) as usize).cloned())
+        .collect::<Option<Vec<String>>>()
+        .ok_or("食材の組み合わせが正しくありません")?;
+
+    let total_weight = combos.iter().fold(0.0, |a, c| a + c.weights.iter().flatten().fold(0.0, |a, (w, _)| a + w)) * m.natures.len() as f64;
+    let mut simulator = PokemonSimulator::new(config.clone(), Mode::Select);
+    let mut simulated = simulator.from_evaluate(pokemon, lv as f64, &food_name_list)?;
+
+    // (score, weight, サブスキルの組み合わせの添字, 重みの内訳の添字, 性格)
+    let mut energy_list: Vec<(f64, f64, usize, usize, Option<usize>)> = Vec::new();
+    for (ci, c) in combos.iter().enumerate() {
+        let sub_skill_list: Vec<Option<usize>> = c.s.iter().map(|&id| id_to_pos(id)).collect();
+        for &nature in &nature_list {
+            let nature_weight = if nature.is_none() { 5.0 } else { 1.0 };
+            simulator.select_evaluate(&mut simulated, &sub_skill_list, nature, healer, support)?;
+            if simulated.energy_per_day.is_nan() {
+                return Err(format!("計算エラーが発生しました。({})", pokemon.name));
+            }
+            for (code, w) in c.weights.iter().enumerate() {
+                let Some((count, _)) = w else { continue };
+                let score = simulator.select_evaluate_to_score(&simulated, code & 1 != 0, code & 2 != 0, true);
+                energy_list.push((score, count * nature_weight, ci, code, nature));
+            }
+        }
+    }
+
+    energy_list.sort_by(|a, b| js::cmp_num(a.0, b.0));
+    let mut weight_sum = 0.0;
+    let mut next_index = 0.0;
+    let mut len = 0usize;
+    for &(score, weight, ci, code, nature) in &energy_list {
+        let next_weight_sum = weight_sum + weight;
+        while weight_sum <= next_index && next_index < next_weight_sum && len <= 100 {
+            if len == percentile {
+                let ids = combos[ci].weights[code].as_ref().map(|(_, ids)| ids.clone()).unwrap_or_default();
+                return Ok(EnergyDetail { sub_skill_list: ids.into_iter().filter_map(name_of).collect(), nature, score });
+            }
+            len += 1;
+            next_index = js::round((total_weight - 1.0) * len as f64 / 100.0);
+        }
+        weight_sum = next_weight_sum;
+    }
+    Err("指定の厳選度に当たる個体が見つかりません".into())
+}
+
 /// 進捗の通知先(0～1)
 pub trait Progress: Sync {
     fn set(&self, value: f64, message: &str);

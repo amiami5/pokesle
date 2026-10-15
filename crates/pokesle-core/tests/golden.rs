@@ -150,6 +150,43 @@ fn sub_skill_combination_matches_upstream() {
     }
 }
 
+/// 基準確認の詳細: 逆引きした個体の値が、同条件で作ったテーブルの指定厳選度の値に一致する
+#[test]
+fn evaluate_energy_detail_reproduces_table() {
+    use pokesle_core::evaluate_table::{evaluate_energy_detail, EvaluateTable};
+    let golden = load("evaluate.json");
+    let config = Config::from_value(&golden["config"]).unwrap();
+    let combination_list = sub_skill_combination_list(&config.select_evaluate.silver_seed);
+    let m = master();
+    let mut checked = 0;
+    for case in golden["cases"].as_array().unwrap().iter().take(3) {
+        let lv = case["lv"].as_u64().unwrap() as u32;
+        let foods: Vec<String> = serde_json::from_value(case["foodCombinationList"].clone()).unwrap();
+        let names: Vec<String> = serde_json::from_value(case["pokemon"].clone()).unwrap();
+        let pokemon: Vec<_> = names.iter().take(2).map(|n| m.pokemon(n).unwrap()).collect();
+        let sub_skill_num = pokemon_count_sub_skill(lv);
+        let mut table = EvaluateTable::default();
+        table.healer.insert(lv, 10000.0);
+        table.support.insert(lv, 150.0);
+        for base in &pokemon {
+            let name = &base.name;
+            for food in foods.iter().take(2) {
+                // 本家の詳細表示と同じく、1ポケモン・1食材構成だけを新しいシミュレーターで評価した値と比べる
+                let single = evaluate_pokemon(&config, lv, &[*base], &[food.clone()], &combination_list[sub_skill_num], 10000.0, 150.0, || {}).unwrap();
+                let out = &single.result[0].1[0].1;
+                for p in [0usize, 1, 37, 50, 99, 100] {
+                    let d = evaluate_energy_detail(&config, &table, &combination_list, name, lv, food, p).unwrap();
+                    assert!(!d.sub_skill_list.is_empty() || lv < 10);
+                    let expected = out.percentile.energy[p];
+                    assert!(close(d.score, expected), "Lv{lv} {name} {food} p={p}: {} != {expected}", d.score);
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 0);
+}
+
 #[test]
 fn evaluate_matches_upstream() {
     let golden = load("evaluate.json");

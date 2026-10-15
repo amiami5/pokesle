@@ -5,6 +5,7 @@ pub mod common_setting;
 pub mod credit_view;
 pub mod data_page_view;
 pub mod evaluate_detail;
+pub mod evaluate_table_view;
 pub mod evaluate_view;
 pub mod food_icon;
 pub mod food_stock_view;

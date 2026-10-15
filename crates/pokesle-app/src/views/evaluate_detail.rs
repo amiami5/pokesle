@@ -32,6 +32,8 @@ pub struct EvaluateDetail {
     /// 性格(マスターの添字)
     nature: Option<usize>,
     computed: Option<Result<Computed, String>>,
+    /// パーセンタイルのグラフを最初から開く(基準確認からは、その厳選度の個体なので閉じておく)
+    open_percentile: bool,
 }
 
 impl EvaluateDetail {
@@ -45,7 +47,14 @@ impl EvaluateDetail {
             sub_skill_list,
             nature,
             computed: None,
+            open_percentile: true,
         }
+    }
+
+    /// パーセンタイルのグラフを閉じた状態で開く(本家 evaluate-table.vue の `percentile: false`)
+    pub fn closed_percentile(mut self) -> EvaluateDetail {
+        self.open_percentile = false;
+        self
     }
 
     fn compute(&self, config: &Config, table: Option<&EvaluateTable>) -> Result<Computed, String> {
@@ -105,7 +114,7 @@ impl EvaluateDetail {
                     ui.label(format!(") Lv{}", self.lv));
                 });
                 match self.computed.as_ref() {
-                    Some(Ok(c)) => detail(ui, config, base, c),
+                    Some(Ok(c)) => detail(ui, config, base, c, self.open_percentile),
                     Some(Err(e)) => {
                         ui.colored_label(ui.visuals().error_fg_color, e);
                     }
@@ -116,7 +125,7 @@ impl EvaluateDetail {
     }
 }
 
-fn detail(ui: &mut egui::Ui, config: &Config, base: &Pokemon, c: &Computed) {
+fn detail(ui: &mut egui::Ui, config: &Config, base: &Pokemon, c: &Computed, open_percentile: bool) {
     ui.label(egui::RichText::new(format!("厳選スコア：{}", fmt_num(c.score))).size(20.0).strong());
     ui.add_space(10.0);
 
@@ -145,7 +154,7 @@ fn detail(ui: &mut egui::Ui, config: &Config, base: &Pokemon, c: &Computed) {
             for &(key, name, open) in pair {
                 ui.vertical(|ui| {
                     ui.set_width(width);
-                    egui::CollapsingHeader::new(format!("{name}パーセンタイル")).id_salt(("evaluate_detail_graph", key)).default_open(open).show(ui, |ui| {
+                    egui::CollapsingHeader::new(format!("{name}パーセンタイル")).id_salt(("evaluate_detail_graph", key)).default_open(open && open_percentile).show(ui, |ui| {
                         match c.percentile.as_ref() {
                             Some(p) => {
                                 let border = (config.simulation.select_type == 1.0).then(|| p.get(key).get(config.simulation.select_border as usize).copied()).flatten();
@@ -247,14 +256,14 @@ fn percentile_chart(ui: &mut egui::Ui, list: &[f64], score: f64, label: &str, bo
 }
 
 /// 目盛りの範囲と間隔(5〜10本ほど)
-fn nice_range(min: f64, max: f64) -> (f64, f64, f64) {
+pub(super) fn nice_range(min: f64, max: f64) -> (f64, f64, f64) {
     let raw = (max - min) / 8.0;
     let mag = 10f64.powf(raw.log10().floor());
     let step = [1.0, 2.0, 5.0, 10.0].iter().map(|k| k * mag).find(|s| *s >= raw).unwrap_or(10.0 * mag);
     ((min / step).floor() * step, (max / step).ceil() * step, step)
 }
 
-fn fmt_tick(y: f64, step: f64) -> String {
+pub(super) fn fmt_tick(y: f64, step: f64) -> String {
     if step >= 1.0 { fmt_num(y) } else { to_fixed(y, (-step.log10().floor()) as usize) }
 }
 
