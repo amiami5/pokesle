@@ -921,11 +921,11 @@ impl BoxView {
                         Some(i) if i < list.len() => {
                             list.remove(i);
                             let at = new_index.min(list.len());
-                            list.insert(at, pokemon);
+                            list.insert(at, *pokemon);
                         }
                         _ => {
                             let at = new_index.min(list.len());
-                            list.insert(at, pokemon);
+                            list.insert(at, *pokemon);
                         }
                     }
                     if let Some((seed, v)) = candy {
@@ -1296,7 +1296,7 @@ impl BoxView {
                             Some(v) => v,
                             None => {
                                 let names = sim.sub_skill_names();
-                                let has = |n: &str| names.iter().any(|x| *x == Some(n));
+                                let has = |n: &str| names.contains(&Some(n));
                                 let mut lv = base.evolve_lv as f64;
                                 if has("スキルレベルアップM") {
                                     lv += 2.0;
@@ -1323,7 +1323,7 @@ impl BoxView {
                 }
                 Col::Food => food_icon::food_list(ui, p),
                 Col::Sub(slot) => {
-                    let Some(name) = p.sub_skill_list.get(slot) else { return None };
+                    let name = p.sub_skill_list.get(slot)?;
                     sub_skill_label(ui, name, slot, p, result, setting.sub_skill_short);
                 }
                 Col::Nature => nature_label(ui, &p.nature),

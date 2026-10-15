@@ -172,7 +172,7 @@ fn evaluate_energy_detail_reproduces_table() {
             let name = &base.name;
             for food in foods.iter().take(2) {
                 // 本家の詳細表示と同じく、1ポケモン・1食材構成だけを新しいシミュレーターで評価した値と比べる
-                let single = evaluate_pokemon(&config, lv, &[*base], &[food.clone()], &combination_list[sub_skill_num], 10000.0, 150.0, || {}).unwrap();
+                let single = evaluate_pokemon(&config, lv, &[*base], std::slice::from_ref(food), &combination_list[sub_skill_num], 10000.0, 150.0, || {}).unwrap();
                 let out = &single.result[0].1[0].1;
                 for p in [0usize, 1, 37, 50, 99, 100] {
                     let d = evaluate_energy_detail(&config, &table, &combination_list, name, lv, food, p).unwrap();

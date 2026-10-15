@@ -128,7 +128,7 @@ impl TmpEvaluateView {
                 EditResult::None => {}
                 EditResult::Cancel => self.edit = None,
                 EditResult::Save(_, pokemon) => {
-                    shared.box_file.list.push(pokemon);
+                    shared.box_file.list.push(*pokemon);
                     shared.save_box();
                     self.edit = None;
                 }

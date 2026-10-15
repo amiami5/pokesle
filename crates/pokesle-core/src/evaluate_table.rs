@@ -115,7 +115,7 @@ pub fn sub_skill_combination_list(silver_seed: &HashMap<String, bool>) -> SubSki
                                 combos.push(SubSkillCombination { s: ids.clone(), weights: Default::default() });
                                 combos.len() - 1
                             });
-                            let w = combos[pos].weights[code].get_or_insert_with(|| (0.0, ids));
+                            let w = combos[pos].weights[code].get_or_insert((0.0, ids));
                             w.0 += 1.0;
                         }
                     }
@@ -484,7 +484,7 @@ pub fn simulate_evaluate_table(config: &Config, progress: &dyn Progress) -> Resu
     let done = std::sync::atomic::AtomicUsize::new(0);
     let tick = |n: usize| {
         let d = done.fetch_add(n, std::sync::atomic::Ordering::Relaxed) + n;
-        if d % 2000 == 0 {
+        if d.is_multiple_of(2000) {
             progress.set(d as f64 / total_steps as f64, "厳選情報を作成しています…");
         }
     };

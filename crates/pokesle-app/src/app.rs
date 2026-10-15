@@ -275,11 +275,10 @@ impl eframe::App for App {
                     self.shared.config.version.history = serde_json::json!(latest);
                     self.shared.save_config();
                 }
-                if let Some(route) = history_view::ui(ui) {
-                    if route == "/credit" {
+                if let Some(route) = history_view::ui(ui)
+                    && route == "/credit" {
                         self.tab = Tab::Credit;
                     }
-                }
             }
             Tab::FoodStock => self.food_stock_view.ui(ui, &mut self.shared),
             Tab::Setting => self.evaluate_view.ui(ui, &mut self.shared),

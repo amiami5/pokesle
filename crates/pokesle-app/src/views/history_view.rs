@@ -27,7 +27,7 @@ pub fn ui(ui: &mut egui::Ui) -> Option<String> {
 fn item_ui(ui: &mut egui::Ui, item: &Item, depth: usize, route: &mut Option<String>) {
     ui.horizontal_top(|ui| {
         ui.add_space(14.0 * depth as f32 + 6.0);
-        ui.label(if depth % 2 == 0 { "・" } else { "◦" });
+        ui.label(if depth.is_multiple_of(2) { "・" } else { "◦" });
         ui.vertical(|ui| segments(ui, &item.segments, route));
     });
     for child in &item.children {

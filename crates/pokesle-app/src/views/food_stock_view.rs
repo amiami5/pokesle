@@ -125,11 +125,10 @@ impl FoodStockView {
         }
 
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-            if let Some(result) = &self.result {
-                if result_ui(ui, result, shared, &list) {
+            if let Some(result) = &self.result
+                && result_ui(ui, result, shared, &list) {
                     shared.save_config();
                 }
-            }
             ui.add_space(8.0);
             style::small(ui, "設定をもとに、エナジーが高くなりそうな料理の組み合わせを探して表示します。計算方法の性質上、最も良い組み合わせを必ず見つけられるとは限りません。", 700.0);
         });

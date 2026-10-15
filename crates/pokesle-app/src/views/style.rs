@@ -270,7 +270,7 @@ pub fn popup_sized(ctx: &egui::Context, id: &str, title: &str, default_size: egu
             }
             return;
         }
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(surface())).show(ctx, |ui| body(ui));
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(surface())).show(ctx, body);
         // 位置とサイズを覚える
         let (outer, inner) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect));
         if let (Some(o), Some(i)) = (outer, inner)

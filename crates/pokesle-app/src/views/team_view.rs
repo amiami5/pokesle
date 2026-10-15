@@ -272,7 +272,7 @@ impl TeamView {
             EditResult::Cancel => self.edit = None,
             EditResult::Save(index, pokemon) => {
                 if let Some(slot) = index.and_then(|i| shared.box_file.list.get_mut(i)) {
-                    *slot = pokemon;
+                    *slot = *pokemon;
                     shared.save_box();
                 }
                 self.edit = None;

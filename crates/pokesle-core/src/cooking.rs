@@ -145,7 +145,7 @@ pub fn get_chance_week_effect(effect: f64, day: Option<f64>, initial: f64) -> Ch
                 list.extend([0.3; 3]);
                 ChanceWeekEffect { total: 24.6, success_probability_list: list }
             }
-            Some(d) if d == 6.0 => ChanceWeekEffect { total: 3.9, success_probability_list: vec![0.3; 3] },
+            Some(6.0) => ChanceWeekEffect { total: 3.9, success_probability_list: vec![0.3; 3] },
             Some(_) => ChanceWeekEffect { total: 3.3, success_probability_list: vec![0.1; 3] },
         };
     }

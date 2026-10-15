@@ -244,7 +244,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
 
     let mut food_common_rate = match ts.day {
         None => ((2.0 * 0.1 + 0.9) * 6.0 + (3.0 * 0.3 + 0.7)) / 7.0,
-        Some(d) if d == 6.0 => 1.3,
+        Some(6.0) => 1.3,
         Some(_) => 1.1,
     };
     let initial_change = ts.initial_cooking_change.unwrap_or(0.0);
@@ -639,7 +639,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 err = Some(e);
             }
             count += 1;
-            if count % 1000 == 0 {
+            if count.is_multiple_of(1000) {
                 progress(1000);
             }
         });

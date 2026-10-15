@@ -247,7 +247,7 @@ struct SpeedFormula {
 fn help_speed_formula(p: &SimPokemon, sim: &pokesle_core::config::SimulationConfig) -> SpeedFormula {
     let m = master();
     let names = p.sub_skill_names();
-    let has = |n: &str| names.iter().any(|x| *x == Some(n));
+    let has = |n: &str| names.contains(&Some(n));
     let sub_skill = if has("おてつだいスピードS") { 0.07 } else { 0.0 } + if has("おてつだいスピードM") { 0.14 } else { 0.0 };
     let help_bonus = (p.speed_bonus - sub_skill).max(0.0);
     let field = m.field(&sim.field).or_else(|| m.fields.first());

@@ -57,7 +57,7 @@ const SELECT_POPUP_ID: &str = "pokemon_select";
 
 pub enum EditResult {
     None,
-    Save(Option<usize>, BoxPokemon),
+    Save(Option<usize>, Box<BoxPokemon>),
     Cancel,
 }
 
@@ -144,7 +144,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                     ui.horizontal(|ui| {
                         if style::form_button(ui, "保存", style::ButtonKind::Execute).clicked() {
                             match box_io::check(&self.pokemon) {
-                                Ok(()) => result = EditResult::Save(self.index, self.pokemon.clone()),
+                                Ok(()) => result = EditResult::Save(self.index, Box::new(self.pokemon.clone())),
                                 Err(e) => self.error = e,
                             }
                         }
@@ -427,7 +427,7 @@ s:5 (スキルレベル)";
             }
             if enter {
                 self.continue_next = self.index.is_none();
-                result = Some(EditResult::Save(self.index, self.pokemon.clone()));
+                result = Some(EditResult::Save(self.index, Box::new(self.pokemon.clone())));
             }
         }
         let response = ui.add(egui::TextEdit::multiline(&mut self.assist_text).id(id).desired_rows(5).desired_width(f32::INFINITY).hint_text(HINT));
@@ -712,7 +712,7 @@ s:5 (スキルレベル)";
             ("バランス(アメブ分)".to_string(), r.best_boost_candy_num, r.best_boost_candy_shard),
             ("バランス(合計)".to_string(), sum(r.best_normal_candy_num, r.best_boost_candy_num), sum(r.best_normal_candy_shard, r.best_boost_candy_shard)),
         ];
-        let show = |v: Option<f64>| v.map_or(String::new(), |v| super::fmt_num(v));
+        let show = |v: Option<f64>| v.map_or(String::new(), super::fmt_num);
         ui.add_space(4.0);
         egui::Grid::new("edit_candy_table").striped(true).spacing([14.0, 4.0]).show(ui, |ui| {
             style::th(ui, "種類");
