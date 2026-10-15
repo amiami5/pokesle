@@ -238,6 +238,13 @@ fn nav_item(ui: &mut egui::Ui, label: &str, active: bool, disabled: bool, cautio
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // 起動直後は OS のテーマがまだ取れない(None)ため、取れた時点・OS 側で切り替わった時点で配色を合わせ直す
+        if self.shared.ui_setting.theme == storage::ThemeSetting::System {
+            let dark = self.shared.ui_setting.theme.is_dark(ui.ctx());
+            if dark != style::is_dark() {
+                style::apply(ui.ctx(), dark);
+            }
+        }
         egui::Panel::top("header").frame(egui::Frame::new()).show(ui, |ui| self.header(ui));
         if !self.shared.status.is_empty() {
             egui::Panel::bottom("status").show(ui, |ui| {

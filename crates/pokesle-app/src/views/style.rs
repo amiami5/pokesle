@@ -65,9 +65,9 @@ pub fn caution_color() -> Color32 {
 pub fn th_color() -> Color32 {
     pick(0x888888, 0x9ea6b6)
 }
-/// 未解放(無効)の表示の不透明度。暗い背景では沈みすぎないよう高めにする
+/// 未解放(無効)の表示の不透明度。ダークでは明るい部品が背景に埋もれず、解放済みとの差がはっきり出るよう低めにする
 pub fn disabled_alpha() -> f32 {
-    if is_dark() { 0.8 } else { 0.5 }
+    if is_dark() { 0.4 } else { 0.5 }
 }
 
 /// 不足などの警告の文字色
@@ -85,7 +85,7 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
     v.panel_fill = surface_subtle();
     v.window_fill = surface();
     v.extreme_bg_color = field;
-    v.faint_bg_color = pick(0xf2f4f8, 0x262c3a);
+    v.faint_bg_color = pick(0xf2f4f8, 0x2c3344);
     v.window_stroke = egui::Stroke::new(1.0, line_color());
     v.window_corner_radius = egui::CornerRadius::same(10);
     v.selection.bg_fill = pick(0xc9d2e6, 0x3c4a6e);
