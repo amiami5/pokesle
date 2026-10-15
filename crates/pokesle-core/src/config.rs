@@ -11,9 +11,31 @@ use serde_json::{Map, Value};
 
 static DEFAULT_CONFIG_JSON: &str = include_str!("../data/default-config.json");
 
+/// 初期設定の中の workerNum(スレッド数)をすべて置き換える
+fn set_worker_num(value: &mut Value, n: f64) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if k == "workerNum" && v.is_number() {
+                    *v = Value::from(n);
+                } else {
+                    set_worker_num(v, n);
+                }
+            }
+        }
+        Value::Array(list) => list.iter_mut().for_each(|v| set_worker_num(v, n)),
+        _ => {}
+    }
+}
+
 /// 本家の初期設定(JSON)
 pub fn default_config_value() -> Value {
-    serde_json::from_str(DEFAULT_CONFIG_JSON).expect("default-config.json の読み込みに失敗しました")
+    let mut value: Value = serde_json::from_str(DEFAULT_CONFIG_JSON).expect("default-config.json の読み込みに失敗しました");
+    // 本家は固定値(4)だが、このアプリでは実行する PC の論理CPU数を初期値にする
+    if let Ok(n) = std::thread::available_parallelism() {
+        set_worker_num(&mut value, n.get().min(64) as f64);
+    }
+    value
 }
 
 /// 本家の `mergeObject`。`base` に存在するキーだけを `overlay` で上書きする。
