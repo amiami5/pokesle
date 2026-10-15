@@ -977,6 +977,10 @@ fn other_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     changed |= ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut c.worker_num).range(1.0..=64.0)).changed();
+                    if ui.button("自動").on_hover_text("このPCの論理CPU数を入れます").clicked() {
+                        c.worker_num = std::thread::available_parallelism().map_or(4.0, |n| n.get().min(64) as f64);
+                        changed = true;
+                    }
                 });
                 style::danger(ui, "スレッド数を増やすと処理が速くなりますが、メモリやCPUの負荷が増加します");
             });

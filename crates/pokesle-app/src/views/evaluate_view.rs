@@ -481,6 +481,9 @@ pub fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config, tmp: bool) {
             lbl(ui, "スレッド数");
             ui.horizontal(|ui| {
                 ui.add_sized([60.0, 22.0], egui::DragValue::new(&mut c.worker_num).range(1.0..=100.0));
+                if ui.button("自動").on_hover_text("このPCの論理CPU数を入れます").clicked() {
+                    c.worker_num = std::thread::available_parallelism().map_or(4.0, |n| n.get().min(64) as f64);
+                }
                 small(ui, "ワーカースレッドの数を指定します。", 300.0);
             });
             ui.end_row();
