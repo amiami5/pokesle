@@ -2080,7 +2080,7 @@ fn sub_skill_label(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon, r
     let width = size * if short { 5.0 } else { 11.5 };
     // ダークの未解放は背景を沈ませる代わりに、文字は明るい灰色にして読めるようにする
     let text_color = if disabled && style::is_dark() {
-        if fix { egui::Color32::from_rgb(0xff, 0x8a, 0x8a) } else { style::muted() }
+        if fix { egui::Color32::from_rgb(0xff, 0x8a, 0x8a) } else { hex(dim_text(sub.map_or(1, |x| x.rarity))) }
     } else {
         alpha(if fix { egui::Color32::RED } else { hex(color) })
     };
@@ -2095,6 +2095,15 @@ fn sub_skill_label(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon, r
     }
     let hover = if fix { format!("{name} → {}", sub.map_or("", |x| x.name.as_str())) } else { name.to_string() };
     r.on_hover_text(hover);
+}
+
+/// ダークの未解放チップの文字色。レア度の色味を残しつつ、暗い背景で読める明るさにする
+pub(super) fn dim_text(rarity: u32) -> u32 {
+    match rarity {
+        2 => 0xa9d3f7,
+        3 => 0xf0cf8a,
+        _ => 0xd0d6e4,
+    }
 }
 
 /// 整理備考(本家 index.vue の hitCheckList)
