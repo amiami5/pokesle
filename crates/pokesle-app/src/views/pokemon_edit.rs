@@ -137,9 +137,24 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                     if let Some(r) = self.assist_area(ui) {
                         result = r;
                     }
+                    // 保存・キャンセルは入力アシスト欄の下
+                    if !self.error.is_empty() {
+                        ui.colored_label(ui.visuals().error_fg_color, &self.error);
+                    }
+                    ui.horizontal(|ui| {
+                        if style::form_button(ui, "保存", style::ButtonKind::Execute).clicked() {
+                            match box_io::check(&self.pokemon) {
+                                Ok(()) => result = EditResult::Save(self.index, self.pokemon.clone()),
+                                Err(e) => self.error = e,
+                            }
+                        }
+                        if style::form_button(ui, "キャンセル", style::ButtonKind::Normal).clicked() {
+                            result = EditResult::Cancel;
+                        }
+                    });
                 });
                 ui.add_space(10.0);
-                ui.vertical(|ui| self.form(ui, ctx, &mut result));
+                ui.vertical(|ui| self.form(ui, ctx));
             });
         });
         self.select_window(ctx);
@@ -155,7 +170,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
     }
 
     /// 入力フォーム(右側)
-    fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, result: &mut EditResult) {
+    fn form(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let m = master();
         {
             // 名前・Lv・食材・サブスキル・せいかく(本家の DesignTable)
@@ -237,21 +252,6 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
 
             self.extra_sections(ui, ctx);
 
-            if !self.error.is_empty() {
-                ui.colored_label(ui.visuals().error_fg_color, &self.error);
-            }
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("保存").clicked() {
-                    match box_io::check(&self.pokemon) {
-                        Ok(()) => *result = EditResult::Save(self.index, self.pokemon.clone()),
-                        Err(e) => self.error = e,
-                    }
-                }
-                if ui.button("キャンセル").clicked() {
-                    *result = EditResult::Cancel;
-                }
-            });
         }
     }
 
