@@ -1135,7 +1135,8 @@ impl BoxView {
                     ui.add(egui::Label::new(egui::RichText::new(mark.clone()).strong()).selectable(false));
                 });
             } else {
-                ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+                // 2行の見出しは、切り詰める設定だと1行目の後ろが「…」になる
+                ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false).extend());
             }
             // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
             let rect = ui.max_rect();
