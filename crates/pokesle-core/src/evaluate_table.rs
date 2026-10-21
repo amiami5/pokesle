@@ -459,7 +459,7 @@ pub fn simulate_evaluate_table(config: &Config, progress: &dyn Progress) -> Resu
     let m = master();
     let se = &config.select_evaluate;
     let lv_list = se.enabled_levels();
-    let thread_num = config.worker_num.max(1.0) as usize;
+    let thread_num = config.thread_num();
 
     progress.set(0.0, "サブスキルの組み合わせを準備しています…");
     let combination_list = sub_skill_combination_list(&se.silver_seed);

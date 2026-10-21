@@ -323,7 +323,7 @@ pub fn calculate(config: &Config, seed_base: u32, on_progress: &(dyn Fn(f64) + S
         })
         .collect();
     let candidates = floor_or(fs.candidate_num, 1.0).clamp(1.0, max_candidate as f64);
-    let worker_num = config.worker_num.max(1.0) as usize;
+    let worker_num = config.thread_num();
 
     let done = std::sync::Mutex::new(vec![0.0_f64; worker_num]);
     let results: Vec<Result<Option<FoodStockResult>, String>> = (0..worker_num)

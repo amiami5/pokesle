@@ -690,6 +690,9 @@ impl ChecklistConfig {
     }
 }
 
+/// スレッド数の上限(画面の入力欄の最大値に合わせる)
+const MAX_THREAD_NUM: f64 = 100.0;
+
 impl Config {
     /// 本家の初期設定
     pub fn default_config() -> Config {
@@ -708,6 +711,11 @@ impl Config {
 
     pub fn from_value(value: &Value) -> Result<Config, String> {
         serde_json::from_value(value.clone()).map_err(|e| e.to_string())
+    }
+
+    /// 計算に使うスレッド数(取り込んだ設定の異常な値でメモリを使い果たさないよう上限をかける)
+    pub fn thread_num(&self) -> usize {
+        self.worker_num.max(1.0).min(MAX_THREAD_NUM) as usize
     }
 
     pub fn to_value(&self) -> Value {

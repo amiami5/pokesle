@@ -52,6 +52,9 @@ pub fn check(pokemon: &BoxPokemon) -> Result<(), String> {
     Ok(())
 }
 
+/// TSV の列番号の上限
+const MAX_TSV_COLUMN: usize = 1000;
+
 /// TSV の列設定(本家 `config.pokemonBox.tsv`、1始まりの列番号)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,8 +82,26 @@ impl TsvColumns {
             .extra
             .get("pokemonBox")
             .and_then(|v| v.get("tsv"))
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .and_then(|v| serde_json::from_value::<TsvColumns>(v.clone()).ok())
+            .map(TsvColumns::clamped)
             .unwrap_or_else(TsvColumns::default_columns)
+    }
+
+    /// 列番号の上限を超えるものは「なし」にする(書き出し時に巨大な配列を確保しないため)
+    fn clamped(mut self) -> TsvColumns {
+        let limit = |c: &mut Option<usize>| {
+            if c.is_some_and(|x| x > MAX_TSV_COLUMN) {
+                *c = None;
+            }
+        };
+        for c in [
+            &mut self.name, &mut self.lv, &mut self.skill_lv, &mut self.food_abc, &mut self.nature, &mut self.shiny,
+            &mut self.fix, &mut self.sleep_time, &mut self.training, &mut self.next_exp, &mut self.memo, &mut self.favorite,
+        ] {
+            limit(c);
+        }
+        self.food_list.iter_mut().chain(&mut self.sub_skill_list).for_each(limit);
+        self
     }
 
     /// 設定(`pokemonBox.tsv`)へ書き戻す

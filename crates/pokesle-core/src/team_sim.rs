@@ -689,7 +689,7 @@ pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, progress: &d
 
 /// ボックス概算(本家 `PokemonBox.simulation` の basic → assist)
 pub fn simulate_box(config: &Config, box_list: &[BoxPokemon], evaluate_table: Option<&EvaluateTable>, with_assist: bool) -> Result<Vec<BoxResult>, String> {
-    let n = config.worker_num.max(1.0) as usize;
+    let n = config.thread_num();
     let chunks: Vec<Vec<BoxResult>> = (0..n)
         .into_par_iter()
         .map(|i| {
@@ -792,7 +792,7 @@ pub fn run_team_simulation(
     }
 
     // 組み合わせを Worker(スレッド)ごとに分割
-    let worker_num = config.worker_num.max(1.0) as usize;
+    let worker_num = config.thread_num();
     let mut params: Vec<(f64, Vec<usize>)> = vec![(0.0, Vec::new()); worker_num];
     if target_num >= pickup {
         for i in 0..=(target_num - pickup) {
