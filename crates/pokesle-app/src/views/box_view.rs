@@ -1317,40 +1317,14 @@ impl BoxView {
                                 ui.label(fmt_js_num(r.pokemon.lv));
                             }
                             _ => {
-                                let mut t = egui::RichText::new(fmt_js_num(shown));
-                                if pending.is_some() {
-                                    // 上げたら青、下げたら赤。暗い背景でも目立つよう、明るめの色にする
-                                    let dark = ui.visuals().dark_mode;
-                                    let color = match (shown > p.lv, dark) {
-                                        (true, true) => egui::Color32::from_rgb(0x5c, 0xb8, 0xff),
-                                        (true, false) => egui::Color32::from_rgb(0x15, 0x65, 0xc0),
-                                        (false, true) => egui::Color32::from_rgb(0xff, 0x6b, 0x6b),
-                                        (false, false) => egui::Color32::from_rgb(0xd3, 0x2f, 0x2f),
-                                    };
-                                    t = t.strong().color(color);
-                                }
-                                ui.label(t);
+                                match pending {
+                                    Some(v) => ui.label(style::lv_pending_text(ui, v, p.lv)),
+                                    None => ui.label(fmt_js_num(p.lv)),
+                                };
                             }
                         }
                         // 直接Lvを上げ下げする三角。保存は「Lvを更新」で行う
-                        let mut event = None;
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        for up in [false, true] {
-                            let (rect, r) = ui.allocate_exact_size(egui::vec2(14.0, 22.0), egui::Sense::click());
-                            let color = if r.hovered() { egui::Color32::from_gray(0x55) } else { egui::Color32::from_gray(0x88) };
-                            let c = rect.center();
-                            let pts = if up {
-                                vec![c + egui::vec2(-3.5, -6.0), c + egui::vec2(4.5, 0.0), c + egui::vec2(-3.5, 6.0)]
-                            } else {
-                                vec![c + egui::vec2(3.5, -6.0), c + egui::vec2(-4.5, 0.0), c + egui::vec2(3.5, 6.0)]
-                            };
-                            ui.painter().add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
-                            if r.on_hover_text(if up { "Lvを上げる" } else { "Lvを下げる" }).clicked() {
-                                let next = (shown + if up { 1.0 } else { -1.0 }).clamp(1.0, 100.0);
-                                event = Some(TableEvent::Lv(i, next));
-                            }
-                        }
-                        event
+                        style::lv_arrows(ui, shown).map(|next| TableEvent::Lv(i, next))
                     })
                     .inner;
                     if let Some(e) = event {

@@ -2,11 +2,13 @@
 //!
 //! egui の Grid には行・列の結合が無いので、列幅を固定した行を積み重ねて本家と同じ形の表を描く。
 
+use std::collections::HashMap;
+
 use eframe::egui;
 use pokesle_core::config::Config;
 use pokesle_core::data::master;
 use pokesle_core::js::to_fixed;
-use pokesle_core::sim_pokemon::SimPokemon;
+use pokesle_core::sim_pokemon::{BoxPokemon, SimPokemon};
 use pokesle_core::team_sim::{TeamMember, TeamResult};
 
 use super::box_view::{icon_button, Icon};
@@ -273,8 +275,24 @@ fn member_pokemon(t: &TeamMember) -> Option<&SimPokemon> {
     }
 }
 
-/// 1チーム分の表。名前横の編集アイコンが押されたら、そのポケモンのボックス位置を返す
-pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_config: &Config, setting: ResultSetting, sub_skill_short: bool) -> Option<usize> {
+/// Lvの上げ下げに使う、今のボックスと、保存前に変えたLv(ボックス位置 → Lv)
+#[derive(Clone, Copy)]
+pub struct LvState<'a> {
+    pub box_list: &'a [BoxPokemon],
+    pub pending: &'a HashMap<usize, f64>,
+}
+
+/// 表の中での操作
+#[derive(Default)]
+pub struct TableResult {
+    /// 編集アイコンが押されたポケモンのボックス位置
+    pub edit: Option<usize>,
+    /// ◀▶で変えたLv(ボックス位置, Lv)
+    pub lv: Option<(usize, f64)>,
+}
+
+/// 1チーム分の表
+pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_config: &Config, setting: ResultSetting, sub_skill_short: bool, lv_state: LvState) -> TableResult {
     let m = master();
     let n = team.pokemon_list.len();
     // 料理
@@ -365,19 +383,44 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
     cells.push(empty(1));
     group(ui, "名前", cells);
 
+    let lv_event: std::cell::Cell<Option<(usize, f64)>> = std::cell::Cell::new(None);
     let mut cells: Vec<Cell> = members
         .iter()
-        .map(|t| {
-            let text = match t {
-                TeamMember::Pokemon { pokemon, .. } => match pokemon.box_pokemon.as_ref().map(|b| b.lv).filter(|lv| *lv != pokemon.lv) {
-                    Some(before) => format!("{before}→{}", pokemon.lv),
-                    None => pokemon.lv.to_string(),
-                },
-                TeamMember::NightCapPikachu(p) => p.lv.to_string(),
-            };
-            td(1, move |ui| {
-                ui.label(text);
-            })
+        .map(|t| match t {
+            TeamMember::Pokemon { pokemon, .. } => {
+                let p = pokemon.as_ref();
+                let index = p.box_index();
+                // 概算のあとに更新したLvがあれば、そちらを出す
+                let current = index.and_then(|i| lv_state.box_list.get(i)).map(|b| b.lv);
+                let pending = index.and_then(|i| lv_state.pending.get(&i).copied());
+                let simulated = p.box_pokemon.as_ref().map(|b| b.lv);
+                let text = match simulated.filter(|lv| *lv != p.lv) {
+                    Some(before) => format!("{before}→{}", p.lv),
+                    None => p.lv.to_string(),
+                };
+                let lv_event = &lv_event;
+                td(1, move |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        match (pending, current) {
+                            (Some(v), Some(cur)) => ui.label(style::lv_pending_text(ui, v, cur)),
+                            (None, Some(cur)) if Some(cur) != simulated => ui.label(style::js_num(cur)),
+                            _ => ui.label(text),
+                        };
+                        if let (Some(i), Some(cur)) = (index, current)
+                            && let Some(next) = style::lv_arrows(ui, pending.unwrap_or(cur))
+                        {
+                            lv_event.set(Some((i, next)));
+                        }
+                    });
+                })
+            }
+            TeamMember::NightCapPikachu(p) => {
+                let text = p.lv.to_string();
+                td(1, move |ui| {
+                    ui.label(text);
+                })
+            }
         })
         .collect();
     cells.push(empty(1));
@@ -558,5 +601,5 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
         }
     }
     table.close(ui);
-    edit.get()
+    TableResult { edit: edit.get(), lv: lv_event.get() }
 }

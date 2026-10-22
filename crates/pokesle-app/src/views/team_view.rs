@@ -1,5 +1,7 @@
 //! チーム編成画面
 
+use std::collections::HashMap;
+
 use eframe::egui;
 use pokesle_core::data::master;
 use pokesle_core::team_sim::{run_team_simulation, TeamSimulationRequest, TeamSimulationResult};
@@ -7,7 +9,7 @@ use pokesle_core::team_sim::{run_team_simulation, TeamSimulationRequest, TeamSim
 use pokesle_core::config::Config;
 
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::team_result::{self, ResultSetting};
+use super::team_result::{self, LvState, ResultSetting};
 use super::{common_setting, fmt_num, pokemon_filter, style};
 use crate::app::Shared;
 use crate::job::Job;
@@ -29,6 +31,10 @@ pub struct TeamView {
     error: String,
     /// 結果の名前横の編集アイコンから開いた編集
     edit: Option<PokemonEdit>,
+    /// ◀▶で変えたが、まだ更新していないLv(ボックス位置 → Lv)
+    lv_pending: HashMap<usize, f64>,
+    /// 前回この画面を描いた egui のパス番号(他の画面から戻ったかの判定)
+    last_pass: u64,
 }
 
 impl Default for TeamView {
@@ -44,12 +50,20 @@ impl Default for TeamView {
             job_config: None,
             error: String::new(),
             edit: None,
+            lv_pending: HashMap::new(),
+            last_pass: 0,
         }
     }
 }
 
 impl TeamView {
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
+        // 他の画面を挟んで戻ってきたら、更新していないLvは捨てる
+        let pass = ui.ctx().cumulative_pass_nr();
+        if pass > self.last_pass + 1 {
+            self.lv_pending.clear();
+        }
+        self.last_pass = pass;
         if let Some(job) = &mut self.job
             && let Some(r) = job.poll()
         {
@@ -198,23 +212,38 @@ impl TeamView {
     /// 実行ボタン・進捗・結果
     fn run_and_results(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         let can_run = self.job.is_none() && !shared.box_file.list.is_empty();
-        ui.add_enabled_ui(can_run, |ui| {
-            if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
-                let config = shared.config.clone();
-                self.job_config = Some(config.clone());
-                let list = shared.box_file.list.clone();
-                let table = shared.usable_evaluate_table().cloned();
-                let request = TeamSimulationRequest {
-                    target_day: (self.target_day >= 0).then_some(self.target_day as f64),
-                    target_hour: self.target_hour,
-                    initial_cooking_change: self.initial_cooking_change,
-                    initial_cooking_power_up: self.initial_cooking_power_up,
-                    before_energy: self.before_energy,
-                };
-                self.job = Some(Job::spawn(ui.ctx(), move |p| {
-                    p.set(0.0, "チームを探索しています…");
-                    run_team_simulation(&config, &list, table.as_ref(), &request, &|v| p.set(v, ""))
-                }));
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(can_run, |ui| {
+                if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
+                    let config = shared.config.clone();
+                    self.job_config = Some(config.clone());
+                    let list = shared.box_file.list.clone();
+                    let table = shared.usable_evaluate_table().cloned();
+                    let request = TeamSimulationRequest {
+                        target_day: (self.target_day >= 0).then_some(self.target_day as f64),
+                        target_hour: self.target_hour,
+                        initial_cooking_change: self.initial_cooking_change,
+                        initial_cooking_power_up: self.initial_cooking_power_up,
+                        before_energy: self.before_energy,
+                    };
+                    self.job = Some(Job::spawn(ui.ctx(), move |p| {
+                        p.set(0.0, "チームを探索しています…");
+                        run_team_simulation(&config, &list, table.as_ref(), &request, &|v| p.set(v, ""))
+                    }));
+                }
+            });
+            self.lv_pending.retain(|&i, lv| shared.box_file.list.get(i).is_some_and(|p| p.lv != *lv));
+            let n = self.lv_pending.len();
+            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, &format!("Lvを更新({n}匹)"), style::ButtonKind::Execute)).inner;
+            if r.clicked() {
+                for (i, lv) in self.lv_pending.drain() {
+                    shared.box_file.list[i].lv = lv;
+                }
+                shared.save_box();
+            }
+            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, "Lvの変更を破棄", style::ButtonKind::Normal)).inner;
+            if r.clicked() {
+                self.lv_pending.clear();
             }
         });
         if shared.box_file.list.is_empty() {
@@ -241,21 +270,30 @@ impl TeamView {
         let setting = ResultSetting::load(&shared.config);
         let short = shared.config.extra.get("pokemonList").and_then(|v| v.get("subSkillShort")).and_then(|v| v.as_bool()).unwrap_or(true);
         let mut edit = None;
+        let mut lv_change = None;
+        let lv_state = LvState { box_list: &shared.box_file.list, pending: &self.lv_pending };
         ui.vertical(|ui| {
             for (rank, team) in result.team_list.iter().enumerate() {
                 let title = format!("{}: {} (最終エナジー:{})", rank + 1, fmt_num(team.score), fmt_num(team.energy));
                 let header = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0);
                 let r = header.show(ui, |ui| {
                     egui::ScrollArea::horizontal().id_salt(("team_result_scroll", rank)).show(ui, |ui| {
-                        if let Some(i) = team_result::team_table(ui, team, &shared.config, result_config, setting, short) {
-                            edit = Some(i);
-                        }
+                        let r = team_result::team_table(ui, team, &shared.config, result_config, setting, short, lv_state);
+                        edit = edit.or(r.edit);
+                        lv_change = lv_change.or(r.lv);
                     });
                 });
                 r.header_response.on_hover_text("スコアは「エナジー✕(100% + 追加ゆめのかけら ÷ エナジーによるゆめのかけら ✕ ゆめのかけら評価倍率)」です。");
                 ui.add_space(10.0);
             }
         });
+        if let Some((i, lv)) = lv_change {
+            if shared.box_file.list.get(i).is_some_and(|p| p.lv == lv) {
+                self.lv_pending.remove(&i);
+            } else {
+                self.lv_pending.insert(i, lv);
+            }
+        }
         // 結果は計算し直さない(本家も同じ)
         if let Some(i) = edit
             && let Some(p) = shared.box_file.list.get(i)

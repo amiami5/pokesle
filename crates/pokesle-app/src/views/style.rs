@@ -412,3 +412,36 @@ pub fn opt_number(ui: &mut egui::Ui, id: &str, value: &mut Option<f64>, zero_is_
 pub fn help(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new("?").strong().color(primary())).on_hover_text(text);
 }
+
+/// 保存前のLvの文字(元のLvより上げたら青、下げたら赤の太字)。暗い背景でも目立つよう明るめの色にする
+pub fn lv_pending_text(ui: &egui::Ui, pending: f64, original: f64) -> egui::RichText {
+    let color = match (pending > original, ui.visuals().dark_mode) {
+        (true, true) => Color32::from_rgb(0x5c, 0xb8, 0xff),
+        (true, false) => Color32::from_rgb(0x15, 0x65, 0xc0),
+        (false, true) => Color32::from_rgb(0xff, 0x6b, 0x6b),
+        (false, false) => Color32::from_rgb(0xd3, 0x2f, 0x2f),
+    };
+    egui::RichText::new(js_num(pending)).strong().color(color)
+}
+
+/// Lvを1ずつ上げ下げする◀▶。押されたら新しいLv(1〜100)を返す。保存は呼び出し側の「Lvを更新」で行う
+pub fn lv_arrows(ui: &mut egui::Ui, shown: f64) -> Option<f64> {
+    let mut next = None;
+    let old_spacing = std::mem::replace(&mut ui.spacing_mut().item_spacing.x, 0.0);
+    for up in [false, true] {
+        let (rect, r) = ui.allocate_exact_size(egui::vec2(14.0, 22.0), egui::Sense::click());
+        let color = if r.hovered() { Color32::from_gray(0x55) } else { Color32::from_gray(0x88) };
+        let c = rect.center();
+        let pts = if up {
+            vec![c + egui::vec2(-3.5, -6.0), c + egui::vec2(4.5, 0.0), c + egui::vec2(-3.5, 6.0)]
+        } else {
+            vec![c + egui::vec2(3.5, -6.0), c + egui::vec2(-4.5, 0.0), c + egui::vec2(3.5, 6.0)]
+        };
+        ui.painter().add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+        if r.on_hover_text(if up { "Lvを上げる" } else { "Lvを下げる" }).clicked() {
+            next = Some((shown + if up { 1.0 } else { -1.0 }).clamp(1.0, 100.0));
+        }
+    }
+    ui.spacing_mut().item_spacing.x = old_spacing;
+    next
+}
