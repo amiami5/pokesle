@@ -521,7 +521,7 @@ impl Col {
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
             Col::Memo => (120.0, 40.0),
-            Col::Lv => (40.0, 24.0),
+            Col::Lv => (62.0, 44.0),
             Col::SkillLv => (40.0, 24.0),
             Col::Food => (84.0, 40.0),
             Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
@@ -574,6 +574,8 @@ enum TableEvent {
     Show(Option<String>),
     SelectAll(bool),
     Toggle(usize),
+    /// ▲▼で変えたLv(ボックス位置, Lv)。「Lvを更新」まで保存しない
+    Lv(usize, f64),
     Action(RowAction),
     Cell(CellEdit),
     /// 厳選詳細を開く(ボックス位置, 進化先, レベル)
@@ -746,6 +748,12 @@ pub struct BoxView {
     summary_sort: Vec<(String, i8)>,
     /// 厳選値のクリックで開いた厳選詳細
     detail: Option<EvaluateDetail>,
+    /// ▲▼で変えたが、まだ更新していないLv(ボックス位置 → Lv)
+    lv_pending: HashMap<usize, f64>,
+    /// 更新したポケモンの更新前のLv(ボックス位置 → Lv)。他の画面から戻るまで、並べ替えにはこちらを使う
+    sort_lv: HashMap<usize, f64>,
+    /// 前回この画面を描いた egui のパス番号(他の画面から戻ったかの判定)
+    last_pass: u64,
 }
 
 /// 一覧の操作列でのクリック
@@ -774,6 +782,13 @@ impl BoxView {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
+        // 他の画面を挟んで戻ってきたら、Lv更新で保留していた並べ替えを反映する。未更新のLvは捨てる
+        let pass = ui.ctx().cumulative_pass_nr();
+        if pass > self.last_pass + 1 {
+            self.sort_lv.clear();
+            self.lv_pending.clear();
+        }
+        self.last_pass = pass;
         self.poll_jobs(shared);
 
         // 1段目: 共通設定と表示設定(本家 index.vue)
@@ -813,6 +828,17 @@ impl BoxView {
                 let mut list: Vec<usize> = self.selected.iter().copied().collect();
                 list.sort_unstable();
                 self.confirm_delete = Some(("選択したポケモンを削除します。よろしいですか？".into(), list));
+            }
+            self.lv_pending.retain(|&i, lv| shared.box_file.list.get(i).is_some_and(|p| p.lv != *lv));
+            let n = self.lv_pending.len();
+            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, &format!("Lvを更新({n}匹)"), style::ButtonKind::Execute)).inner;
+            if r.clicked() {
+                for (i, lv) in self.lv_pending.drain() {
+                    let p = &mut shared.box_file.list[i];
+                    self.sort_lv.entry(i).or_insert(p.lv);
+                    p.lv = lv;
+                }
+                shared.save_box();
             }
             if self.mode.cleaning() {
                 let mut s = ListSetting::load(shared);
@@ -934,6 +960,8 @@ impl BoxView {
                     }
                     shared.save_box();
                     self.results.clear();
+                    self.lv_pending.clear();
+                    self.sort_lv.clear();
                     // 入力アシストの Enter は、保存して続けて新規登録する
                     self.edit = again.then(|| PokemonEdit::new(None, None).with_env(edit_env(shared)));
                 }
@@ -1098,6 +1126,7 @@ impl BoxView {
             None => String::new(),
         };
         let selected = &self.selected;
+        let lv_pending = &self.lv_pending;
         let results = &self.results;
         let cleaning = self.mode.cleaning();
         // 本家はボックス整理でお気に入りの星が増える
@@ -1273,18 +1302,49 @@ impl BoxView {
                     ui.label(egui::RichText::new(p.memo.clone().unwrap_or_default()).size(11.0));
                 }
                 Col::Lv => {
-                    // 本家 LvLabel: 仮定計算で上がったときは「元のLv→Lv」
-                    match result {
-                        Some(r) if r.pokemon.lv != p.lv => {
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 1.0;
+                    let pending = lv_pending.get(&i).copied();
+                    let shown = pending.unwrap_or(p.lv);
+                    let event = ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        match result {
+                            // 本家 LvLabel: 仮定計算で上がったときは「元のLv→Lv」
+                            Some(r) if pending.is_none() && r.pokemon.lv != p.lv => {
                                 ui.label(egui::RichText::new(format!("{}→", fmt_js_num(p.lv))).size(10.0));
                                 ui.label(fmt_js_num(r.pokemon.lv));
-                            });
+                            }
+                            _ => {
+                                let mut t = egui::RichText::new(fmt_js_num(shown));
+                                if pending.is_some() {
+                                    t = t.strong().color(style::primary());
+                                }
+                                ui.label(t);
+                            }
                         }
-                        _ => {
-                            ui.label(fmt_js_num(p.lv));
-                        }
+                        // 直接Lvを上げ下げする三角。保存は「Lvを更新」で行う
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for up in [true, false] {
+                                let (rect, r) = ui.allocate_exact_size(egui::vec2(12.0, 11.0), egui::Sense::click());
+                                let color = if r.hovered() { egui::Color32::from_gray(0x55) } else { egui::Color32::from_gray(0x88) };
+                                let c = rect.center();
+                                let pts = if up {
+                                    vec![c + egui::vec2(-4.0, 2.5), c + egui::vec2(0.0, -3.0), c + egui::vec2(4.0, 2.5)]
+                                } else {
+                                    vec![c + egui::vec2(-4.0, -2.5), c + egui::vec2(0.0, 3.0), c + egui::vec2(4.0, -2.5)]
+                                };
+                                ui.painter().add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
+                                if r.on_hover_text(if up { "Lvを上げる" } else { "Lvを下げる" }).clicked() {
+                                    let next = (shown + if up { 1.0 } else { -1.0 }).clamp(1.0, 100.0);
+                                    return Some(TableEvent::Lv(i, next));
+                                }
+                            }
+                            None
+                        })
+                        .inner
+                    })
+                    .inner;
+                    if let Some(e) = event {
+                        return Some(e);
                     }
                 }
                 Col::SkillLv => {
@@ -1523,6 +1583,7 @@ impl BoxView {
         let mut hidden_changed = false;
         let mut action: Option<RowAction> = None;
         let mut toggle_select: Option<usize> = None;
+        let mut lv_change: Option<(usize, f64)> = None;
         let mut select_all: Option<bool> = None;
         let mut edits: Vec<CellEdit> = Vec::new();
         let mut open_detail = None;
@@ -1552,6 +1613,7 @@ impl BoxView {
                 }
                 TableEvent::SelectAll(v) => select_all = Some(v),
                 TableEvent::Toggle(i) => toggle_select = Some(i),
+                TableEvent::Lv(i, lv) => lv_change = Some((i, lv)),
                 TableEvent::Action(a) => action = Some(a),
                 TableEvent::Cell(c) => edits.push(c),
                 TableEvent::Detail(i, after, lv) => open_detail = Some((i, after, lv)),
@@ -1612,6 +1674,13 @@ impl BoxView {
             }
         }
 
+        if let Some((i, lv)) = lv_change {
+            if shared.box_file.list[i].lv == lv {
+                self.lv_pending.remove(&i);
+            } else {
+                self.lv_pending.insert(i, lv);
+            }
+        }
         if let Some(i) = toggle_select
             && !self.selected.remove(&i)
         {
@@ -1646,6 +1715,8 @@ impl BoxView {
                     shared.box_file.list.insert(j as usize, item);
                     shared.save_box();
                     self.results.clear();
+                    self.lv_pending.clear();
+                    self.sort_lv.clear();
                 }
             }
             Some(RowAction::Favorite(i)) => {
@@ -1833,6 +1904,8 @@ impl BoxView {
             }
             shared.save_box();
             self.results.clear();
+            self.lv_pending.clear();
+            self.sort_lv.clear();
             self.selected.clear();
         }
         if ok || close || r.should_close() {
@@ -1858,7 +1931,8 @@ impl BoxView {
             "hitCheckList" => num(Some(result.map_or(0, |r| r.hit_check_list.len()) as f64)),
             "name" => text(&p.name),
             "memo" => text(p.memo.as_deref().unwrap_or("")),
-            "lv" => num(Some(p.lv)),
+            // Lv更新の直後は並びを動かさないよう、更新前のLvで並べる
+            "lv" => num(Some(self.sort_lv.get(&i).copied().unwrap_or(p.lv))),
             // 本家と同じく補正後のスキルLv
             "skillLv" => num(result.map(|r| r.pokemon.fixed_skill_lv)),
             "foodNameList" => text(&p.food_list.join(",")),
@@ -1935,6 +2009,8 @@ impl BoxView {
                         self.import_message = format!("{}匹を取り込みました", list.len());
                         shared.box_file.list = list;
                         shared.save_box();
+                        self.lv_pending.clear();
+                        self.sort_lv.clear();
                         self.selected.clear();
                         self.results.clear();
                         self.import_text.clear();
