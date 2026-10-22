@@ -840,6 +840,10 @@ impl BoxView {
                 }
                 shared.save_box();
             }
+            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, "Lvの変更を破棄", style::ButtonKind::Normal)).inner;
+            if r.clicked() {
+                self.lv_pending.clear();
+            }
             if self.mode.cleaning() {
                 let mut s = ListSetting::load(shared);
                 if ui.checkbox(&mut s.cleaning.shiny_lock, "色違いも整理備考に表示する").changed() {
