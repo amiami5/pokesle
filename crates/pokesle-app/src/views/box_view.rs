@@ -521,7 +521,7 @@ impl Col {
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
             Col::Memo => (120.0, 40.0),
-            Col::Lv => (92.0, 80.0),
+            Col::Lv => (64.0, 58.0),
             Col::SkillLv => (40.0, 24.0),
             Col::Food => (84.0, 40.0),
             Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
@@ -1326,14 +1326,15 @@ impl BoxView {
                         }
                         // 直接Lvを上げ下げする三角。保存は「Lvを更新」で行う
                         let mut event = None;
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         for up in [false, true] {
-                            let (rect, r) = ui.allocate_exact_size(egui::vec2(18.0, 22.0), egui::Sense::click());
+                            let (rect, r) = ui.allocate_exact_size(egui::vec2(14.0, 22.0), egui::Sense::click());
                             let color = if r.hovered() { egui::Color32::from_gray(0x55) } else { egui::Color32::from_gray(0x88) };
                             let c = rect.center();
                             let pts = if up {
-                                vec![c + egui::vec2(-4.0, -6.0), c + egui::vec2(5.0, 0.0), c + egui::vec2(-4.0, 6.0)]
+                                vec![c + egui::vec2(-3.5, -6.0), c + egui::vec2(4.5, 0.0), c + egui::vec2(-3.5, 6.0)]
                             } else {
-                                vec![c + egui::vec2(4.0, -6.0), c + egui::vec2(-5.0, 0.0), c + egui::vec2(4.0, 6.0)]
+                                vec![c + egui::vec2(3.5, -6.0), c + egui::vec2(-4.5, 0.0), c + egui::vec2(3.5, 6.0)]
                             };
                             ui.painter().add(egui::Shape::convex_polygon(pts, color, egui::Stroke::NONE));
                             if r.on_hover_text(if up { "Lvを上げる" } else { "Lvを下げる" }).clicked() {
