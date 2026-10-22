@@ -1319,7 +1319,15 @@ impl BoxView {
                             _ => {
                                 let mut t = egui::RichText::new(fmt_js_num(shown));
                                 if pending.is_some() {
-                                    t = t.strong().color(style::primary());
+                                    // 上げたら青、下げたら赤。暗い背景でも目立つよう、明るめの色にする
+                                    let dark = ui.visuals().dark_mode;
+                                    let color = match (shown > p.lv, dark) {
+                                        (true, true) => egui::Color32::from_rgb(0x5c, 0xb8, 0xff),
+                                        (true, false) => egui::Color32::from_rgb(0x15, 0x65, 0xc0),
+                                        (false, true) => egui::Color32::from_rgb(0xff, 0x6b, 0x6b),
+                                        (false, false) => egui::Color32::from_rgb(0xd3, 0x2f, 0x2f),
+                                    };
+                                    t = t.strong().color(color);
                                 }
                                 ui.label(t);
                             }
