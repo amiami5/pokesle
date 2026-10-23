@@ -146,6 +146,14 @@ impl UiSettingView {
             .changed();
         ui.add_space(6.0);
 
+        ui.horizontal(|ui| {
+            ui.label("adb.exe の場所");
+            changed |= ui
+                .add(egui::TextEdit::singleline(&mut setting.adb_path).desired_width(360.0).hint_text("空なら自動で探します"))
+                .changed();
+        });
+        ui.add_space(6.0);
+
         match setting.engine {
             OcrEngineChoice::Windows => {
                 let ocr = WindowsOcr::japanese();

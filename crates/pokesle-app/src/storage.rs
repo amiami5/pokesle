@@ -117,6 +117,8 @@ pub struct OcrSetting {
     pub engine: OcrEngineChoice,
     /// Google Cloud Vision の API キー(この PC の設定フォルダに平文で保存する)
     pub google_api_key: String,
+    /// adb.exe の場所(空なら自動で探す)
+    pub adb_path: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
