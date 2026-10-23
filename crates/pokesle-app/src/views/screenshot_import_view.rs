@@ -225,6 +225,11 @@ impl ScreenshotImportView {
         self.table(ui, shared);
         ui.add_space(8.0);
         self.add_button(ui, shared);
+        ui.add_space(4.0);
+        if ui.button("取り込み結果をすべて削除").clicked() {
+            self.row_list.clear();
+            self.edit = None;
+        }
     }
 
     /// 終わった処理の結果を取り込む
