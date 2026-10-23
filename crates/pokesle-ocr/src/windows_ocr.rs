@@ -34,10 +34,21 @@ impl WindowsOcr {
 
     fn missing_language_message(&self) -> String {
         format!(
-            "Windows の OCR 言語パック({})が入っていません。管理者権限の PowerShell で \
-             Add-WindowsCapability -Online -Name \"Language.OCR~~~{}~0.0.1.0\" を実行してください。",
-            self.language_tag, self.language_tag
+            "Windows の OCR 言語パック({})が入っていません。管理者権限の PowerShell で {} を実行してください。",
+            self.language_tag,
+            self.install_command()
         )
+    }
+
+    /// 言語パックが無いときに、利用者へ案内する PowerShell のコマンド。
+    pub fn install_command(&self) -> String {
+        format!("Add-WindowsCapability -Online -Name \"Language.OCR~~~{}~0.0.1.0\"", self.language_tag)
+    }
+
+    /// この PC で認識が使えるか(OCR 言語パックが入っているか)を調べる。
+    pub fn check(&self) -> Result<(), String> {
+        let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+        self.create_engine().map(|_| ())
     }
 
     fn decode(png: &[u8]) -> Result<SoftwareBitmap, String> {
