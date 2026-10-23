@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pokesle-core", "crates/pokesle-app"]
+members = ["crates/pokesle-core", "crates/pokesle-ocr", "crates/pokesle-app"]
 
 [workspace.package]
 version = "0.1.0"
