@@ -6,6 +6,7 @@
 use image::RgbImage;
 
 use crate::engine::{OcrEngine, OcrLine, merge_same_row};
+use crate::food::recognize_food_list;
 use crate::status::{StatusLine, StatusResult, find_candy_name, parse_data_with_candy};
 
 /// 画像を、本家の基準に合わせた幅にそろえる。細い文字を認識しやすい大きさに揃えつつ、
@@ -92,7 +93,9 @@ pub fn read_screens(screen_list: &[Screen]) -> StatusResult {
 
     let raw_text = line_list.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
     let candy = find_candy_name(&line_list);
-    parse_data_with_candy(&raw_text, &line_list, &[], &line_list, &line_list, candy)
+    // 食材欄は1つの画面にしか映らないので、最初に見つかった画面の結果を使う
+    let food_list = screen_list.iter().map(|screen| recognize_food_list(&screen.image)).find(|list| !list.is_empty());
+    parse_data_with_candy(&raw_text, &line_list, food_list.as_deref().unwrap_or(&[]), &line_list, &line_list, candy)
 }
 
 /// 画像(PNG)を上から順に認識して、ポケモンの情報にする。
