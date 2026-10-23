@@ -76,6 +76,56 @@ impl Row {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Duplicate {
+    /// 同じ個体の可能性がある(種族・せいかくが同じで、サブスキルが一方がもう一方に含まれる)
+    Possible,
+    /// Lv・食材・サブスキルまで全く同じ
+    Exact,
+}
+
+fn compare(a: &BoxPokemon, b: &BoxPokemon) -> Option<Duplicate> {
+    if a.name != b.name || a.nature != b.nature {
+        return None;
+    }
+    let sorted = |p: &BoxPokemon| {
+        let mut list = p.sub_skill_list.clone();
+        list.sort();
+        list
+    };
+    let (sa, sb) = (sorted(a), sorted(b));
+    if sa == sb && a.lv == b.lv && a.food_list == b.food_list {
+        return Some(Duplicate::Exact);
+    }
+    let subset = |x: &[String], y: &[String]| x.iter().all(|s| y.contains(s));
+    (subset(&sa, &sb) || subset(&sb, &sa)).then_some(Duplicate::Possible)
+}
+
+/// 行ごとの重複の警告。ボックス内と、一覧の他の行を調べる
+fn duplicate_warning(index: usize, pokemon_list: &[Option<BoxPokemon>], box_list: &[BoxPokemon]) -> Option<(Duplicate, String)> {
+    let target = pokemon_list[index].as_ref()?;
+    let mut found: Option<(Duplicate, String)> = None;
+    let mut note = |kind: Duplicate, place: String| {
+        if found.as_ref().is_none_or(|(k, _)| kind > *k) {
+            found = Some((kind, place));
+        }
+    };
+    for (i, other) in box_list.iter().enumerate() {
+        if let Some(kind) = compare(target, other) {
+            note(kind, format!("ボックスの {} 番目", i + 1));
+        }
+    }
+    for (i, other) in pokemon_list.iter().enumerate() {
+        if i == index {
+            continue;
+        }
+        if let Some(kind) = other.as_ref().and_then(|o| compare(target, o)) {
+            note(kind, "この一覧の別の行".into());
+        }
+    }
+    found
+}
+
 #[derive(Default)]
 pub struct ScreenshotImportView {
     /// 読み取り待ちの画面(PNG)。1匹ぶん
@@ -316,8 +366,10 @@ impl ScreenshotImportView {
             }
             ui.end_row();
 
+            let pokemon_list: Vec<Option<BoxPokemon>> = self.row_list.iter().map(|r| r.pokemon().ok()).collect();
             for (index, row) in self.row_list.iter_mut().enumerate() {
                 let error = row.error();
+                let duplicate = duplicate_warning(index, &pokemon_list, &shared.box_file.list);
                 ui.add_enabled(error.is_none(), egui::Checkbox::without_text(&mut row.selected));
 
                 // 編集画面で直していれば、その内容を表示する
@@ -360,6 +412,13 @@ impl ScreenshotImportView {
                     }
                     if let Some(error) = &error {
                         ui.label(egui::RichText::new(error).small().color(ui.visuals().error_fg_color));
+                    }
+                    if let Some((kind, place)) = &duplicate {
+                        let text = match kind {
+                            Duplicate::Exact => format!("⚠ {place}と全く同じです"),
+                            Duplicate::Possible => format!("⚠ {place}と同じ個体かもしれません"),
+                        };
+                        ui.label(egui::RichText::new(text).small().color(ui.visuals().warn_fg_color));
                     }
                 });
 
