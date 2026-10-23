@@ -13,7 +13,9 @@ use pokesle_ocr::windows_ocr::WindowsOcr;
 use crate::app::Shared;
 use crate::job::Job;
 use crate::storage::{self, OcrEngineChoice, OcrSetting};
+use crate::views::pokemon_edit::{EditEnv, EditResult, PokemonEdit};
 use crate::views::{food_icon, style};
+use pokesle_core::sim_pokemon::BoxPokemon;
 
 struct Row {
     selected: bool,
@@ -21,11 +23,52 @@ struct Row {
     result: StatusResult,
     /// 種族を読み取れなかったときに、候補から選んだもの
     chosen_name: Option<String>,
+    /// 編集画面で直した内容。あれば読み取り結果より優先する
+    edited: Option<BoxPokemon>,
 }
 
 impl Row {
+    /// ボックスに追加する内容。読み取り結果が足りず、直してもいなければエラー
+    fn pokemon(&self) -> Result<BoxPokemon, String> {
+        match &self.edited {
+            Some(pokemon) => Ok(pokemon.clone()),
+            None => to_box_pokemon(&self.result, self.chosen_name.as_deref(), self.shiny),
+        }
+    }
+
     fn error(&self) -> Option<String> {
-        to_box_pokemon(&self.result, self.chosen_name.as_deref(), self.shiny).err()
+        self.pokemon().err()
+    }
+
+    /// 編集画面の初期値。読み取れなかった項目は、仮の値(後で直してもらう)で埋める
+    fn draft(&self) -> BoxPokemon {
+        if let Ok(pokemon) = self.pokemon() {
+            return pokemon;
+        }
+        let m = pokesle_core::data::master();
+        let name = self.chosen_name.clone().or(self.result.pokemon_name.clone());
+        let base = name.as_deref().and_then(|n| m.pokemon(n)).unwrap_or(&m.pokemon[0]);
+        let mut food_list: Vec<String> = self.result.food_list.iter().flatten().cloned().collect();
+        food_list.resize(3, base.food_name_list[0].clone());
+        let mut sub_skill_list = self.result.sub_skill_list.clone();
+        for sub_skill in &m.sub_skills {
+            if sub_skill_list.len() >= 5 {
+                break;
+            }
+            if !sub_skill_list.contains(&sub_skill.name) {
+                sub_skill_list.push(sub_skill.name.clone());
+            }
+        }
+        BoxPokemon {
+            name: base.name.clone(),
+            lv: f64::from(self.result.lv.unwrap_or(10)),
+            skill_lv: Some(f64::from(self.result.main_skill_lv.unwrap_or(1))),
+            food_list,
+            sub_skill_list,
+            nature: self.result.nature.clone().unwrap_or_else(|| "まじめ".into()),
+            shiny: self.shiny,
+            ..Default::default()
+        }
     }
 }
 
@@ -37,6 +80,8 @@ pub struct ScreenshotImportView {
     capture_job: Option<Job<Vec<u8>>>,
     read_job: Option<Job<StatusResult>>,
     message: String,
+    /// 編集中の行(行の位置, 編集画面)
+    edit: Option<(usize, PokemonEdit)>,
 }
 
 impl ScreenshotImportView {
@@ -89,11 +134,12 @@ impl ScreenshotImportView {
             ui.label(egui::RichText::new(&self.message).color(ui.visuals().error_fg_color));
         }
 
+        self.edit_popup(ui.ctx());
         if self.row_list.is_empty() {
             return;
         }
         ui.add_space(10.0);
-        self.table(ui);
+        self.table(ui, shared);
         ui.add_space(8.0);
         self.add_button(ui, shared);
     }
@@ -125,7 +171,7 @@ impl ScreenshotImportView {
             }
             match result {
                 Ok(result) => {
-                    let mut row = Row { selected: true, shiny: false, result, chosen_name: None };
+                    let mut row = Row { selected: true, shiny: false, result, chosen_name: None, edited: None };
                     row.selected = row.error().is_none();
                     self.row_list.push(row);
                     self.pending.clear();
@@ -173,10 +219,39 @@ impl ScreenshotImportView {
         }));
     }
 
-    fn table(&mut self, ui: &mut egui::Ui) {
+    /// 編集画面を出し、保存されたら行に反映する
+    fn edit_popup(&mut self, ctx: &egui::Context) {
+        let Some((index, edit)) = &mut self.edit else { return };
+        let index = *index;
+        match edit.ui(ctx) {
+            EditResult::None => {}
+            EditResult::Cancel => self.edit = None,
+            EditResult::Save(_, pokemon) => {
+                if let Some(row) = self.row_list.get_mut(index) {
+                    row.shiny = pokemon.shiny;
+                    row.edited = Some(*pokemon);
+                    row.selected = true;
+                }
+                self.edit = None;
+            }
+        }
+    }
+
+    fn start_edit(&mut self, index: usize, shared: &Shared) {
+        let Some(row) = self.row_list.get(index) else { return };
+        let env = EditEnv {
+            config: shared.config.clone(),
+            box_list: shared.box_file.list.clone(),
+            table: shared.usable_evaluate_table().cloned(),
+        };
+        self.edit = Some((index, PokemonEdit::new(None, Some(row.draft())).with_env(env)));
+    }
+
+    fn table(&mut self, ui: &mut egui::Ui, shared: &Shared) {
         let mut remove: Option<usize> = None;
-        egui::Grid::new("screenshot_import_table").striped(true).num_columns(8).spacing([14.0, 8.0]).show(ui, |ui| {
-            for header in ["", "ポケモン", "Lv", "食材構成", "スキル\nLv", "サブスキル", "せいかく", ""] {
+        let mut edit: Option<usize> = None;
+        egui::Grid::new("screenshot_import_table").striped(true).num_columns(9).spacing([14.0, 8.0]).show(ui, |ui| {
+            for header in ["", "ポケモン", "Lv", "食材構成", "スキル\nLv", "サブスキル", "せいかく", "", ""] {
                 style::th(ui, header);
             }
             ui.end_row();
@@ -185,8 +260,13 @@ impl ScreenshotImportView {
                 let error = row.error();
                 ui.add_enabled(error.is_none(), egui::Checkbox::without_text(&mut row.selected));
 
+                // 編集画面で直していれば、その内容を表示する
+                let edited = row.edited.clone();
                 ui.vertical(|ui| {
-                    let name = row.chosen_name.as_deref().or(row.result.pokemon_name.as_deref());
+                    let name = match &edited {
+                        Some(pokemon) => Some(pokemon.name.as_str()),
+                        None => row.chosen_name.as_deref().or(row.result.pokemon_name.as_deref()),
+                    };
                     match name {
                         Some(name) => {
                             ui.strong(name);
@@ -196,7 +276,7 @@ impl ScreenshotImportView {
                         }
                     }
                     // 種族を1つに決められなかったときは、候補から選んでもらう
-                    if row.result.pokemon_name.is_none() && !row.result.pokemon_candidate_list.is_empty() {
+                    if edited.is_none() && row.result.pokemon_name.is_none() && !row.result.pokemon_candidate_list.is_empty() {
                         let mut selected = row.chosen_name.clone().unwrap_or_default();
                         let candidate_list = row.result.pokemon_candidate_list.clone();
                         egui::ComboBox::from_id_salt(("import_candidate", index))
@@ -210,17 +290,29 @@ impl ScreenshotImportView {
                             row.chosen_name = Some(selected);
                         }
                     }
-                    ui.checkbox(&mut row.shiny, "色違い");
+                    if ui.checkbox(&mut row.shiny, "色違い").changed()
+                        && let Some(pokemon) = &mut row.edited
+                    {
+                        pokemon.shiny = row.shiny;
+                    }
+                    if edited.is_some() {
+                        ui.label(egui::RichText::new("編集済み").small().color(style::muted()));
+                    }
                     if let Some(error) = &error {
                         ui.label(egui::RichText::new(error).small().color(ui.visuals().error_fg_color));
                     }
                 });
 
-                ui.label(row.result.lv.map_or("―".to_string(), |lv| lv.to_string()));
+                let lv = edited.as_ref().map(|p| p.lv).or(row.result.lv.map(f64::from));
+                ui.label(lv.map_or("―".to_string(), style::js_num));
 
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
-                    for food in &row.result.food_list {
+                    let food_list: Vec<Option<String>> = match &edited {
+                        Some(pokemon) => pokemon.food_list.iter().cloned().map(Some).collect(),
+                        None => row.result.food_list.clone(),
+                    };
+                    for food in &food_list {
                         match food {
                             Some(food) => {
                                 food_icon::food_icon(ui, food, 24.0);
@@ -232,27 +324,39 @@ impl ScreenshotImportView {
                     }
                 });
 
-                ui.label(row.result.main_skill_lv.map_or("―".to_string(), |lv| lv.to_string()));
+                let skill_lv = match &edited {
+                    Some(pokemon) => pokemon.skill_lv,
+                    None => row.result.main_skill_lv.map(f64::from),
+                };
+                ui.label(skill_lv.map_or("―".to_string(), style::js_num));
 
                 ui.vertical(|ui| {
-                    for sub_skill in &row.result.sub_skill_list {
+                    let sub_skill_list = edited.as_ref().map_or(&row.result.sub_skill_list, |p| &p.sub_skill_list);
+                    for sub_skill in sub_skill_list {
                         ui.label(egui::RichText::new(sub_skill).small());
                     }
                 });
 
-                match &row.result.nature {
+                let nature = edited.as_ref().map(|p| p.nature.clone()).or(row.result.nature.clone());
+                match &nature {
                     Some(nature) => crate::views::nature_label(ui, nature),
                     None => {
                         ui.label("―");
                     }
                 }
 
+                if ui.small_button("編集").clicked() {
+                    edit = Some(index);
+                }
                 if ui.small_button("削除").clicked() {
                     remove = Some(index);
                 }
                 ui.end_row();
             }
         });
+        if let Some(index) = edit {
+            self.start_edit(index, shared);
+        }
         if let Some(index) = remove {
             self.row_list.remove(index);
         }
@@ -267,7 +371,7 @@ impl ScreenshotImportView {
                     if !row.selected {
                         return true;
                     }
-                    match to_box_pokemon(&row.result, row.chosen_name.as_deref(), row.shiny) {
+                    match row.pokemon() {
                         Ok(pokemon) => {
                             shared.box_file.list.push(pokemon);
                             added += 1;
