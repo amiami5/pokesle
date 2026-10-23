@@ -11,8 +11,9 @@ fn main() {
     }
     let png_list: Vec<Vec<u8>> =
         path_list.iter().map(|path| std::fs::read(path).expect("画像を読み込めませんでした")).collect();
-    match pokesle_ocr::reader::read_pngs(&WindowsOcr::japanese(), &png_list) {
-        Ok(result) => {
+    match pokesle_ocr::reader::read_pngs(&WindowsOcr::japanese(), &png_list, &[]) {
+        Ok(read) => {
+            let result = read.status;
             let text = |value: &Option<String>| value.clone().unwrap_or_else(|| "(読めず)".into());
             let number = |value: Option<u32>| value.map_or("(読めず)".into(), |v| v.to_string());
             println!("種族      : {}", text(&result.pokemon_name));

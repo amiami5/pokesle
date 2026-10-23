@@ -3,11 +3,11 @@
 //! 詳細画面は縦に長く、1画面に収まらない。画面ごとの画像を縦に並べた1枚のページとして扱う
 //! (2枚目の座標は、1枚目の高さだけ下にずらす)ので、本家の1枚ものの解釈をそのまま使える。
 
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 
 use crate::engine::{OcrEngine, OcrLine, merge_same_row};
-use crate::food::recognize_food_list;
-use crate::status::{FoodRecognition, find_candy_line};
+use crate::food::{FoodSample, food_icon_list, food_slot_locked, match_sample, recognize_food_list};
+use crate::status::{FoodRecognition, allowed_food_list, find_candy_line};
 use crate::status::{StatusLine, StatusResult, find_candy_name, parse_data_with_candy};
 
 /// 画像を、本家の基準に合わせた幅にそろえる。細い文字を認識しやすい大きさに揃えつつ、
@@ -22,6 +22,15 @@ pub struct Screen {
     pub line_list: Vec<OcrLine>,
     /// この画面に食材欄があれば、その3枠の認識結果
     pub food_list: Vec<FoodRecognition>,
+    /// 食材欄の各枠のアイコン(見本との比較と、見本の保存に使う)
+    pub food_icon_list: Vec<RgbaImage>,
+}
+
+/// 読み取りの結果。
+pub struct ReadResult {
+    pub status: StatusResult,
+    /// 食材欄の各枠のアイコン。利用者が確定した食材の見本として保存できる
+    pub food_icon_list: Vec<RgbaImage>,
 }
 
 /// 明るさが基準より暗い画素だけを黒、それ以外を白にした画像。
@@ -65,7 +74,8 @@ pub fn recognize_screen(engine: &dyn OcrEngine, png: &[u8]) -> Result<Screen, St
         line_list.extend(recognize_header(engine, &image, &line_list)?);
     }
     let food_list = recognize_food_list(&image);
-    Ok(Screen { image, line_list, food_list })
+    let food_icon_list = if food_list.is_empty() { Vec::new() } else { food_icon_list(&image) };
+    Ok(Screen { image, line_list, food_list, food_icon_list })
 }
 
 /// 名前の行(「Lv. 22 キテルグマ」)を、切り出して拡大した画像で認識し直す。
@@ -134,7 +144,8 @@ fn sub_skill_rarity(image: &RgbImage, line: &OcrLine) -> u32 {
 }
 
 /// 認識済みの画面(上から順)を1枚のページとして解釈する。
-pub fn read_screens(screen_list: &[Screen]) -> StatusResult {
+/// `sample_list` は利用者が確定した食材の見本で、あれば色の分布より優先して食材を決める。
+pub fn read_screens(screen_list: &[Screen], sample_list: &[FoodSample]) -> ReadResult {
     let mut line_list: Vec<StatusLine> = Vec::new();
     let mut offset = 0.0;
     for screen in screen_list {
@@ -155,12 +166,97 @@ pub fn read_screens(screen_list: &[Screen]) -> StatusResult {
     let raw_text = line_list.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
     let candy = find_candy_name(&line_list);
     // 食材欄は1つの画面にしか映らないので、最初に見つかった画面の結果を使う
-    let food_list = screen_list.iter().map(|screen| &screen.food_list).find(|list| !list.is_empty());
-    parse_data_with_candy(&raw_text, &line_list, food_list.map_or(&[], |l| l.as_slice()), &line_list, &line_list, candy)
+    let food_screen = screen_list.iter().find(|screen| !screen.food_list.is_empty());
+    let food_list = food_screen.map_or(&[][..], |screen| screen.food_list.as_slice());
+    let mut status = parse_data_with_candy(&raw_text, &line_list, food_list, &line_list, &line_list, candy);
+    let food_icon_list = food_screen.map(|screen| screen.food_icon_list.clone()).unwrap_or_default();
+    apply_food_samples(&mut status, &food_icon_list, sample_list);
+    ReadResult { status, food_icon_list }
+}
+
+/// 見本と形まで比べて、持てる食材の中から十分に近いものがあれば、その食材に決める。
+/// 色の分布だけでは、未解放の枠の薄いアイコンを見分けられないため。
+fn apply_food_samples(status: &mut StatusResult, icon_list: &[RgbaImage], sample_list: &[FoodSample]) {
+    let (Some(pokemon_name), Some(lv)) = (status.pokemon_name.clone(), status.lv) else { return };
+    for (slot, icon) in icon_list.iter().enumerate().take(3) {
+        let allowed = allowed_food_list(&pokemon_name, slot);
+        if allowed.len() < 2 {
+            continue;
+        }
+        if let Some(name) = match_sample(icon, food_slot_locked(lv, slot), &allowed, sample_list) {
+            if status.food_list.len() <= slot {
+                status.food_list.resize(slot + 1, None);
+            }
+            status.food_list[slot] = Some(name);
+        }
+    }
 }
 
 /// 画像(PNG)を上から順に認識して、ポケモンの情報にする。
-pub fn read_pngs(engine: &dyn OcrEngine, png_list: &[Vec<u8>]) -> Result<StatusResult, String> {
+pub fn read_pngs(engine: &dyn OcrEngine, png_list: &[Vec<u8>], sample_list: &[FoodSample]) -> Result<ReadResult, String> {
     let screen_list = png_list.iter().map(|png| recognize_screen(engine, png)).collect::<Result<Vec<_>, _>>()?;
-    Ok(read_screens(&screen_list))
+    Ok(read_screens(&screen_list, sample_list))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 円の色の上に、指定の色の四角を描いた 48x48 のアイコン
+    fn icon(color: [u8; 3]) -> RgbaImage {
+        RgbaImage::from_fn(48, 48, |x, y| {
+            if (12..36).contains(&x) && (12..36).contains(&y) {
+                image::Rgba([color[0], color[1], color[2], 255])
+            } else {
+                image::Rgba([255, 247, 220, 255])
+            }
+        })
+    }
+
+    fn sample(name: &str, faded: bool, color: [u8; 3]) -> FoodSample {
+        FoodSample { name: name.to_string(), faded, icon: icon(color) }
+    }
+
+    fn gardevoir(lv: u32) -> StatusResult {
+        StatusResult {
+            pokemon_name: Some("サーナイト".into()),
+            lv: Some(lv),
+            food_list: vec![Some("とくせんリンゴ".into()), Some("とくせんリンゴ".into()), Some("とくせんリンゴ".into())],
+            ..Default::default()
+        }
+    }
+
+    const RED: [u8; 3] = [210, 40, 40];
+    const BLUE: [u8; 3] = [40, 60, 210];
+
+    #[test]
+    fn sample_decides_the_food_among_allowed() {
+        // サーナイトの2枠目は、とくせんリンゴかワカクサコーン
+        let sample_list = [sample("とくせんリンゴ", false, RED), sample("ワカクサコーン", false, BLUE)];
+        let mut status = gardevoir(67);
+        apply_food_samples(&mut status, &[icon(RED), icon(BLUE), icon(BLUE)], &sample_list);
+        assert_eq!(status.food_list[1].as_deref(), Some("ワカクサコーン"));
+        assert_eq!(status.food_list[2].as_deref(), Some("ワカクサコーン"));
+    }
+
+    #[test]
+    fn samples_of_other_display_state_are_not_used() {
+        // Lv25 の2枠目は未解放(薄い表示)なので、通常表示の見本とは比べない
+        let sample_list = [sample("ワカクサコーン", false, BLUE)];
+        let mut status = gardevoir(25);
+        apply_food_samples(&mut status, &[icon(RED), icon(BLUE), icon(BLUE)], &sample_list);
+        assert_eq!(status.food_list[1].as_deref(), Some("とくせんリンゴ"));
+
+        let sample_list = [sample("ワカクサコーン", true, BLUE)];
+        apply_food_samples(&mut status, &[icon(RED), icon(BLUE), icon(BLUE)], &sample_list);
+        assert_eq!(status.food_list[1].as_deref(), Some("ワカクサコーン"));
+    }
+
+    #[test]
+    fn dissimilar_sample_is_ignored() {
+        let sample_list = [sample("ワカクサコーン", false, BLUE)];
+        let mut status = gardevoir(67);
+        apply_food_samples(&mut status, &[icon(RED), icon(RED), icon(RED)], &sample_list);
+        assert_eq!(status.food_list[1].as_deref(), Some("とくせんリンゴ"));
+    }
 }

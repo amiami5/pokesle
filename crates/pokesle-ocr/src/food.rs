@@ -323,3 +323,109 @@ pub fn recognize_food_list(image: &RgbImage) -> Vec<FoodRecognition> {
         })
         .collect()
 }
+
+/// 食材欄の各枠のアイコン(SIZE x SIZE に切り出したもの)。並びは `recognize_food_list` と同じ。
+/// 利用者が確定した食材の見本として保存するのに使う。
+pub fn food_icon_list(image: &RgbImage) -> Vec<RgbaImage> {
+    let slot_list = select_food_slot_regions(&find_food_circle_regions(image));
+    let rgba = image::DynamicImage::ImageRgb8(image.clone()).to_rgba8();
+    slot_list
+        .iter()
+        .map(|region| crop_icon(&rgba, region.center_x(), region.center_y(), region.width.max(region.height) * 1.05))
+        .collect()
+}
+
+/// 利用者が確定した食材のアイコン(見本)。この PC にだけ保存する。
+#[derive(Clone)]
+pub struct FoodSample {
+    pub name: String,
+    /// 未解放の枠の、薄く表示されたアイコンか(薄いものと通常のものは見た目が大きく違うので分けて比べる)
+    pub faded: bool,
+    pub icon: RgbaImage,
+}
+
+/// Lv が足りず未解放の枠か(2枠目は Lv30、3枠目は Lv60 で解放)。未解放の枠のアイコンは薄く表示される
+pub fn food_slot_locked(lv: u32, slot: usize) -> bool {
+    match slot {
+        1 => lv < 30,
+        2 => lv < 60,
+        _ => false,
+    }
+}
+
+/// 見本と同じ食材とみなす類似度の下限。同じ食材どうしは 0.85 以上、違う食材どうしは
+/// 薄いアイコンでも 0.8 未満だった(実機のスクリーンショットで確認)
+const SAMPLE_THRESHOLD: f64 = 0.82;
+
+/// 見本のうち、`icon` にいちばん近い食材(候補 `allowed` の中から)。十分に近いものが無ければ None。
+pub fn match_sample(icon: &RgbaImage, faded: bool, allowed: &[String], sample_list: &[FoodSample]) -> Option<String> {
+    let mut best: Option<(&str, f64)> = None;
+    for sample in sample_list.iter().filter(|s| s.faded == faded && allowed.contains(&s.name)) {
+        let score = pixel_similarity(icon, &sample.icon);
+        if best.is_none_or(|(_, b)| score > b) {
+            best = Some((&sample.name, score));
+        }
+    }
+    best.filter(|(_, score)| *score >= SAMPLE_THRESHOLD).map(|(name, _)| name.to_string())
+}
+
+/// 見本と比べるときに試す不透明度。未解放の枠のアイコンは半透明で薄く表示されるため
+const SAMPLE_OPACITY_LIST: [f64; 5] = [1.0, 0.75, 0.5, 0.35, 0.25];
+
+/// アイコンどうしの、形と色の近さ(本家 `getPixelSimilarity` と同じ考え方)。
+///
+/// 見本を白に向けて薄めた場合も比べ、いちばん合う不透明度を使う。検出位置の数pxの揺れに備えて、
+/// 上下左右に少しずらした中で最も合う位置を採る。
+pub fn pixel_similarity(source: &RgbaImage, sample: &RgbaImage) -> f64 {
+    let side = SIZE as i32;
+    let pixels = |image: &RgbaImage| -> Vec<(Pixel, bool)> {
+        image
+            .pixels()
+            .map(|p| {
+                let pixel = Pixel::new(p);
+                let foreground = !pixel.is_background(false);
+                (pixel, foreground)
+            })
+            .collect()
+    };
+    let source = pixels(source);
+    let sample = pixels(sample);
+    let source_foreground = source.iter().filter(|p| p.1).count();
+    let sample_foreground = sample.iter().filter(|p| p.1).count();
+    let denominator = ((source_foreground * sample_foreground).max(1) as f64).sqrt();
+
+    let score_list: Vec<f64> = SAMPLE_OPACITY_LIST
+        .iter()
+        .map(|&opacity| {
+            let mut best = 0.0f64;
+            for offset_y in [-3, 0, 3] {
+                for offset_x in [-3, 0, 3] {
+                    let mut matched = 0.0;
+                    for (index, (pixel, foreground)) in source.iter().enumerate() {
+                        if !foreground {
+                            continue;
+                        }
+                        let (x, y) = (index as i32 % side + offset_x, index as i32 / side + offset_y);
+                        if x < 0 || x >= side || y < 0 || y >= side {
+                            continue;
+                        }
+                        let (other, other_foreground) = &sample[(y * side + x) as usize];
+                        if !other_foreground {
+                            continue;
+                        }
+                        let fade = |v: f64| 1.0 - (1.0 - v) * opacity;
+                        let distance = ((pixel.red - fade(other.red)).abs()
+                            + (pixel.green - fade(other.green)).abs()
+                            + (pixel.blue - fade(other.blue)).abs())
+                            / 3.0;
+                        matched += f64::max(0.0, 1.0 - distance * 2.5);
+                    }
+                    best = best.max(matched / denominator);
+                }
+            }
+            best
+        })
+        .collect();
+    let max = score_list.iter().copied().fold(0.0, f64::max);
+    score_list[0] * 0.25 + max * 0.75
+}

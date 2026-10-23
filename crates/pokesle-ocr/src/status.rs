@@ -322,6 +322,18 @@ fn food_num(pokemon: &Pokemon, food_name: &str, slot_index: usize) -> Option<f64
     pokemon.food_list.iter().rev().find(|f| f.name == food_name)?.num_list.get(slot_index).copied().flatten()
 }
 
+/// そのポケモンが `slot_index` 番目の枠で持てる食材(マスターの並び順)
+pub fn allowed_food_list(pokemon_name: &str, slot_index: usize) -> Vec<String> {
+    let Some(pokemon) = master().pokemon(pokemon_name) else { return Vec::new() };
+    let mut list: Vec<String> = Vec::new();
+    for food in &pokemon.food_list {
+        if is_allowed_food(pokemon, &food.name, slot_index) && !list.contains(&food.name) {
+            list.push(food.name.clone());
+        }
+    }
+    list
+}
+
 fn is_allowed_food(pokemon: &Pokemon, food_name: &str, slot_index: usize) -> bool {
     food_num(pokemon, food_name, slot_index).is_some()
 }
