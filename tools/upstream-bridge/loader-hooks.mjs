@@ -1,6 +1,6 @@
 // 本家(upstream/)の Vite 向け TS/JS を Node で直接読み込むためのローダーフック。
 // - 拡張子なし import の補完、`@/` エイリアス
-// - 画像・Worker(?worker)・.vue はスタブ化
+// - 画像・Worker(?worker)・.vue・tesseract.js はスタブ化
 import { existsSync, statSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -19,6 +19,7 @@ function tryFile(p) {
 export async function resolve(specifier, context, nextResolve) {
   if (specifier.startsWith(STUB_PREFIX)) return { url: specifier, shortCircuit: true };
   const [bare, query] = specifier.split('?');
+  if (bare === 'tesseract.js') return { url: STUB_PREFIX + encodeURIComponent(bare), shortCircuit: true };
   if (query === 'worker' || /\.(png|jpe?g|svg|webp|gif|vue)$/.test(bare)) {
     return { url: STUB_PREFIX + encodeURIComponent(bare), shortCircuit: true };
   }
@@ -48,6 +49,12 @@ export async function load(url, context, nextLoad) {
       shortCircuit: true,
       source: `export default ${JSON.stringify(name)};`,
     };
+  }
+  // OCR の解釈ロジックは非公開関数なので、突き合わせ用に読み込み時だけ export を足す(本家のファイルは変更しない)
+  if (url.endsWith('/models/ocr/pokemon-status-image-reader.ts')) {
+    const loaded = await nextLoad(url, context);
+    const exportLine = '\nexport { parseData, getTextSimilarity, normalizeText, parseBag };\n';
+    return { ...loaded, source: String(loaded.source) + exportLine };
   }
   if (url.endsWith('.json')) {
     return nextLoad(url, { ...context, importAttributes: { type: 'json' } });
