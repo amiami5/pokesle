@@ -147,44 +147,11 @@ fn food_sample_dir() -> PathBuf {
 const FOOD_SAMPLE_LIMIT: usize = 10;
 
 pub fn load_food_samples() -> Vec<pokesle_ocr::food::FoodSample> {
-    let Ok(entries) = std::fs::read_dir(food_sample_dir()) else { return Vec::new() };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let stem = path.file_stem()?.to_str()?.to_string();
-            let mut parts = stem.splitn(3, '_');
-            let faded = parts.next()? == "1";
-            let _time = parts.next()?;
-            let name = parts.next()?.to_string();
-            let icon = image::open(&path).ok()?.to_rgba8();
-            Some(pokesle_ocr::food::FoodSample { name, faded, icon })
-        })
-        .collect()
+    pokesle_ocr::food::load_food_samples(&food_sample_dir())
 }
 
-pub fn save_food_sample(name: &str, faded: bool, icon: &image::RgbaImage) -> Result<(), String> {
-    let dir = food_sample_dir();
-    let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
-    let state = if faded { "1" } else { "0" };
-    icon.save(dir.join(format!("{state}_{time}_{name}.png"))).map_err(|e| e.to_string())?;
-
-    // 同じ食材・表示状態の見本が多すぎれば、古いものから消す(時刻はファイル名の順に並ぶ)
-    let prefix = format!("{state}_");
-    let suffix = format!("_{name}.png");
-    let mut same: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(&suffix))
-        })
-        .collect();
-    same.sort();
-    for old in same.iter().take(same.len().saturating_sub(FOOD_SAMPLE_LIMIT)) {
-        let _ = std::fs::remove_file(old);
-    }
-    Ok(())
+pub fn save_food_sample(sample: &pokesle_ocr::food::FoodSample) -> Result<(), String> {
+    pokesle_ocr::food::save_food_sample(&food_sample_dir(), sample, FOOD_SAMPLE_LIMIT)
 }
 
 /// Google Cloud Vision の今月の利用回数

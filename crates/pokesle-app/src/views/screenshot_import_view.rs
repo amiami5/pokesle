@@ -387,8 +387,12 @@ impl ScreenshotImportView {
                         Ok(pokemon) => {
                             // 確定した食材を、次の読み取りの見本にする
                             for (slot, (icon, food)) in row.food_icon_list.iter().zip(&pokemon.food_list).enumerate() {
-                                let faded = pokesle_ocr::food::food_slot_locked(pokemon.lv as u32, slot);
-                                if let Err(e) = storage::save_food_sample(food, faded, icon) {
+                                let sample = pokesle_ocr::food::FoodSample {
+                                    name: food.clone(),
+                                    faded: pokesle_ocr::food::food_slot_locked(pokemon.lv as u32, slot),
+                                    icon: icon.clone(),
+                                };
+                                if let Err(e) = storage::save_food_sample(&sample) {
                                     shared.status = format!("食材の見本を保存できませんでした: {e}");
                                 }
                             }
