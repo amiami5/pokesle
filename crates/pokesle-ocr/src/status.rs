@@ -460,6 +460,13 @@ fn score_pokemon_list(
             });
 
             let mut score = 0.0;
+            // 本家の類似度は「レアコイル」が「コイル」を含むと満点になるので、アメの系統を使う読み取りでは
+            // 名前が種族名と完全に一致する候補を優先する
+            if candy.is_some()
+                && result.name.as_deref().is_some_and(|n| normalize_text(n) == normalize_text(&pokemon.name))
+            {
+                score += 4.0;
+            }
             // ニックネームはマスター名と一致しないため、似ている場合だけ加点して不一致は減点しない。
             if name_similarity >= 0.55 {
                 score += name_similarity * 8.0;
@@ -691,17 +698,37 @@ pub fn parse_data_with_candy(
         .unwrap_or_default();
 
     // 1時間を超えるポケモンでは「時間」を含めて取得し、末尾の「17分53秒」だけを短い個体として扱わない。
-    let help_time_caps = regex(&HELP_TIME, r"(?:([0-9]+)時間)?([0-9]+)分([0-9]+)秒").captures(&normalized_raw_text);
-    let help_time = help_time_caps.map(|caps| {
-        let hour = caps.get(1).map(|h| h.as_str().parse::<u32>().unwrap_or(0));
-        let minute_text = &caps[2];
+    let help_time_pattern = regex(&HELP_TIME, r"(?:([0-9]+)時間)?([0-9]+)分([0-9]+)秒");
+    // アメの系統を使う読み取りでは、行をまたいで数字がつながらないよう(上の行の「Lv. 60」の「60」が
+    // 「1時間…」の前に付くなど)、行ごとに探す。数字の 0 が英字の O と読まれることもあるので直す。
+    let line_help_time = candy.is_some().then(|| {
+        line_list.iter().find_map(|line| {
+            let text = normalize_text(&line.text);
+            if !(text.contains('分') && text.contains('秒')) {
+                return None;
+            }
+            let text = text.replace(['O', 'o'], "0");
+            help_time_pattern.captures(&text).map(|caps| {
+                (1..=3).map(|i| caps.get(i).map(|m| m.as_str().to_string())).collect::<Vec<_>>()
+            })
+        })
+    });
+    let help_time_parts: Option<Vec<Option<String>>> = match line_help_time {
+        Some(found) => found,
+        None => help_time_pattern.captures(&normalized_raw_text).map(|caps| {
+            (1..=3).map(|i| caps.get(i).map(|m| m.as_str().to_string())).collect()
+        }),
+    };
+    let help_time = help_time_parts.map(|caps| {
+        let hour = caps[0].as_ref().map(|h| h.parse::<u32>().unwrap_or(0));
+        let minute_text = caps[1].as_deref().unwrap_or("0");
         // 時間表記がないのに分が60以上なら、左側の装飾やSP末尾を分へ連結した誤認として末尾2桁を使う。
         let minute: u32 = if minute_text.parse::<u32>().unwrap_or(0) >= 60 && hour.is_none() {
             minute_text[minute_text.len().saturating_sub(2)..].parse().unwrap_or(0)
         } else {
             minute_text.parse().unwrap_or(0)
         };
-        let second: u32 = caps[3].parse().unwrap_or(0);
+        let second: u32 = caps[2].as_deref().unwrap_or("0").parse().unwrap_or(0);
         format!("{}{minute}分{second}秒", hour.map_or(String::new(), |h| format!("{h}時間")))
     });
 
