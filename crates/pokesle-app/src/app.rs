@@ -7,12 +7,13 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_table_view::EvaluateTableView, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
+use crate::views::{screenshot_import_view::ScreenshotImportView, tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_table_view::EvaluateTableView, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Box,
+    ScreenshotImport,
     CheckList,
     Summary,
     Team,
@@ -32,7 +33,8 @@ type NavItem = (Tab, &'static str, bool);
 
 /// ヘッダーのグループ(本家 app.vue)。(見出し, リンク)
 const NAV: [(&str, &[NavItem]); 4] = [
-    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
+    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::ScreenshotImport, "スクショ
+から追加", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
     ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", true), (Tab::TmpEvaluate, "簡易診断", true)]),
     ("その他", &[(Tab::Data, "データ", true), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", true), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
@@ -107,6 +109,7 @@ pub struct App {
     evaluate_view: EvaluateView,
     evaluate_table_view: EvaluateTableView,
     ui_setting_view: UiSettingView,
+    screenshot_import_view: ScreenshotImportView,
 }
 
 impl App {
@@ -136,6 +139,7 @@ impl App {
             Ok("setting") => Tab::Setting,
             Ok("evaluate") => Tab::EvaluateTable,
             Ok("ui") => Tab::UiSetting,
+            Ok("import") => Tab::ScreenshotImport,
             _ => Tab::Box,
         };
         #[cfg(not(debug_assertions))]
@@ -168,6 +172,7 @@ impl App {
             evaluate_view: EvaluateView::default(),
             evaluate_table_view: EvaluateTableView::default(),
             ui_setting_view: UiSettingView::default(),
+            screenshot_import_view: ScreenshotImportView::default(),
         }
     }
 
@@ -266,6 +271,9 @@ impl eframe::App for App {
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(style::surface_subtle()).inner_margin(10)).show(ui, |ui| match self.tab {
             Tab::Box => self.box_view.ui(ui, &mut self.shared),
+            Tab::ScreenshotImport => {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.screenshot_import_view.ui(ui, &mut self.shared));
+            }
             Tab::CheckList => self.check_list_view.ui(ui, &mut self.shared),
             Tab::Team => {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| self.team_view.ui(ui, &mut self.shared));
