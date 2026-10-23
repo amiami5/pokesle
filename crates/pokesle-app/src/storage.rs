@@ -150,6 +150,23 @@ pub fn load_food_samples() -> Vec<pokesle_ocr::food::FoodSample> {
     pokesle_ocr::food::load_food_samples(&food_sample_dir())
 }
 
+/// 全食材の通常表示の見本が揃っているか(ファイル名だけで調べる)
+pub fn has_all_food_samples() -> bool {
+    let Ok(entries) = std::fs::read_dir(food_sample_dir()) else { return false };
+    let name_list: std::collections::HashSet<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_string();
+            let stem = name.strip_suffix(".png")?;
+            let mut parts = stem.splitn(3, '_');
+            (parts.next()? == "0").then_some(())?;
+            parts.next()?;
+            Some(parts.next()?.to_string())
+        })
+        .collect();
+    pokesle_core::data::master().foods.iter().all(|food| name_list.contains(&food.name))
+}
+
 pub fn save_food_sample(sample: &pokesle_ocr::food::FoodSample) -> Result<(), String> {
     pokesle_ocr::food::save_food_sample(&food_sample_dir(), sample, FOOD_SAMPLE_LIMIT)
 }

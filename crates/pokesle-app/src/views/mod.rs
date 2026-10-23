@@ -17,6 +17,7 @@ pub mod style;
 pub mod team_result;
 pub mod team_view;
 pub mod tmp_evaluate_view;
+pub mod food_sample_import;
 pub mod screenshot_import_view;
 pub mod ui_setting_view;
 

@@ -23,6 +23,8 @@ pub struct UiSettingView {
     import_box: bool,
     /// Windows 標準 OCR が使えるかの確認結果(初めて表示したときに調べる)
     windows_ocr_check: Option<Result<(), String>>,
+    /// 食材アイコンの見本の取り込み直し
+    sample_import: crate::views::food_sample_import::FoodSampleImport,
 }
 
 /// 起動時に設定を反映する
@@ -205,6 +207,21 @@ impl UiSettingView {
                 );
             }
         }
+
+        ui.add_space(8.0);
+        self.sample_import.poll(shared);
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(!self.sample_import.busy(), |ui| {
+                if ui.button("食材の見本を取り込み直す").clicked() {
+                    self.sample_import.start(ui.ctx(), shared);
+                }
+            });
+            ui.label(
+                egui::RichText::new("ゲームのポケモンボックスで絞り込み(食材)の画面を出して押すと、食材アイコンの見本を取り込み直します。")
+                    .color(style::muted()),
+            );
+        });
+        self.sample_import.show(ui);
 
         if changed && let Err(e) = storage::save_ocr_setting(&shared.ocr_setting) {
             shared.status = format!("文字認識の設定を保存できませんでした: {e}");

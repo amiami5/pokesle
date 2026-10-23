@@ -15,6 +15,7 @@ use crate::app::Shared;
 use crate::job::Job;
 use crate::storage::{self, OcrEngineChoice, OcrSetting};
 use crate::views::pokemon_edit::{EditEnv, EditResult, PokemonEdit};
+use crate::views::food_sample_import::FoodSampleImport;
 use crate::views::{food_icon, style};
 use pokesle_core::sim_pokemon::BoxPokemon;
 
@@ -83,7 +84,11 @@ pub struct ScreenshotImportView {
     capture_job: Option<Job<Vec<u8>>>,
     read_job: Option<Job<ReadResult>>,
     /// 食材一覧の画面から見本を取り込む処理
-    sample_job: Option<Job<Vec<pokesle_ocr::food::FoodSample>>>,
+    sample_import: FoodSampleImport,
+    /// 全食材の見本が揃っているか(揃っていれば取り込みボタンを出さない)。None は未確認
+    samples_complete: Option<bool>,
+    /// 2枚そろったので、自動で読み取りを始める
+    auto_read: bool,
     message: String,
     /// 編集中の行(行の位置, 編集画面)
     edit: Option<(usize, PokemonEdit)>,
@@ -93,6 +98,9 @@ impl ScreenshotImportView {
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         self.poll_jobs(shared);
         self.take_dropped_files(ui.ctx());
+        if std::mem::take(&mut self.auto_read) && self.read_job.is_none() {
+            self.start_read(ui.ctx(), shared);
+        }
 
         ui.heading("スクショから追加");
         ui.add_space(4.0);
@@ -100,7 +108,8 @@ impl ScreenshotImportView {
             ui,
             "β版です。誤読をする可能性があるので、結果を確認しながら使ってください。\n\
              ポケモンの詳細画面を、上から順に撮ります。1枚目は Lv・名前・食材・おてつだい時間が映る画面、\n\
-             2枚目は下にスクロールして、サブスキルとせいかくが映る画面です。PNG ファイルをこの画面にドロップしても追加できます。",
+             2枚目は下にスクロールして、サブスキルとせいかくが映る画面です。2枚そろうと自動で読み取ります。
+             PNG ファイルをこの画面にドロップしても追加できます。",
         );
         ui.add_space(6.0);
         let engine_name = match shared.ocr_setting.engine {
@@ -110,7 +119,7 @@ impl ScreenshotImportView {
         ui.label(egui::RichText::new(format!("文字認識: {engine_name}(設定画面で変更できます)")).color(style::muted()));
         ui.add_space(6.0);
 
-        let busy = self.capture_job.is_some() || self.read_job.is_some() || self.sample_job.is_some();
+        let busy = self.capture_job.is_some() || self.read_job.is_some() || self.sample_import.busy();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!busy, |ui| {
                 if style::form_button(ui, "スマホから撮る", style::ButtonKind::Normal).clicked() {
@@ -128,24 +137,26 @@ impl ScreenshotImportView {
                 });
             });
         });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(!busy, |ui| {
-                if style::form_button(ui, "食材一覧から見本を取り込む", style::ButtonKind::Normal).clicked() {
-                    self.start_sample_import(ui.ctx(), shared);
-                }
+        // 食材の見本が揃うまでは、取り込みボタンを出す(取り込み直しは設定画面から)
+        let samples_complete = *self.samples_complete.get_or_insert_with(storage::has_all_food_samples);
+        if !samples_complete || self.sample_import.busy() {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(!busy, |ui| {
+                    if style::form_button(ui, "食材一覧から見本を取り込む", style::ButtonKind::Normal).clicked() {
+                        self.sample_import.start(ui.ctx(), shared);
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(
+                        "最初に1度、ゲームのポケモンボックスで絞り込み(食材)の画面を出して押してください。食材アイコンの見本を取り込み、食材の判定に使います。",
+                    )
+                    .color(style::muted()),
+                );
             });
-            ui.label(
-                egui::RichText::new(
-                    "ゲームのポケモンボックスで絞り込み(食材)の画面を出して押すと、食材アイコンの見本を取り込み、食材の判定に使います。",
-                )
-                .color(style::muted()),
-            );
-        });
-        if let Some(job) = &self.capture_job {
-            job.show_progress(ui);
         }
-        if let Some(job) = &self.sample_job {
+        self.sample_import.show(ui);
+        if let Some(job) = &self.capture_job {
             job.show_progress(ui);
         }
         if let Some(job) = &self.read_job {
@@ -168,7 +179,9 @@ impl ScreenshotImportView {
 
     /// 終わった処理の結果を取り込む
     fn poll_jobs(&mut self, shared: &mut Shared) {
-        self.poll_sample_job(shared);
+        if self.sample_import.poll(shared) {
+            self.samples_complete = None;
+        }
         if let Some(job) = &mut self.capture_job
             && let Some(result) = job.poll()
         {
@@ -177,6 +190,8 @@ impl ScreenshotImportView {
                 Ok(png) => {
                     self.pending.push(png);
                     self.message.clear();
+                    // 1枚目(Lv・名前・食材)と2枚目(サブスキル・せいかく)がそろったら読み取る
+                    self.auto_read = self.pending.len() >= 2;
                 }
                 Err(e) => self.message = e,
             }
@@ -209,7 +224,11 @@ impl ScreenshotImportView {
                         food_icon_list: read.food_icon_list,
                     };
                     row.selected = row.error().is_none();
-                    self.row_list.push(row);
+                    // 最新の読み取りを一番上に出す。編集中の行は、1つ下にずれた位置を指し直す
+                    self.row_list.insert(0, row);
+                    if let Some((index, _)) = &mut self.edit {
+                        *index += 1;
+                    }
                     self.pending.clear();
                     self.message.clear();
                 }
@@ -218,59 +237,12 @@ impl ScreenshotImportView {
         }
     }
 
-    /// 見本の取り込みが終わっていれば保存する(poll_jobs から呼ぶ)
-    fn poll_sample_job(&mut self, shared: &mut Shared) {
-        let Some(job) = &mut self.sample_job else { return };
-        let Some(result) = job.poll() else { return };
-        self.sample_job = None;
-        if shared.ocr_setting.engine == OcrEngineChoice::Google {
-            let usage = shared.vision_usage.lock().map(|u| u.clone()).unwrap_or_default();
-            if let Err(e) = storage::save_vision_usage(&usage) {
-                shared.status = format!("利用回数を保存できませんでした: {e}");
-            }
-        }
-        match result {
-            Ok(sample_list) if sample_list.is_empty() => {
-                self.message = "食材アイコンを見つけられませんでした。食材の一覧が表示されているか確認してください。".into();
-            }
-            Ok(sample_list) => {
-                let mut saved = 0;
-                for sample in &sample_list {
-                    match storage::save_food_sample(sample) {
-                        Ok(()) => saved += 1,
-                        Err(e) => self.message = format!("食材の見本を保存できませんでした: {e}"),
-                    }
-                }
-                shared.status = format!("{saved} 種の食材の見本を取り込みました");
-            }
-            Err(e) => self.message = e,
-        }
-    }
-
-    fn start_sample_import(&mut self, ctx: &egui::Context, shared: &Shared) {
-        let setting = shared.ocr_setting.clone();
-        let usage = shared.vision_usage.clone();
-        self.message.clear();
-        self.sample_job = Some(Job::spawn(ctx, move |progress| {
-            progress.set(0.0, "スマホの画面を撮っています");
-            let adb = pokesle_ocr::adb::find_adb(Some(&setting.adb_path)).ok_or(
-                "adb.exe が見つかりません。設定画面で場所を指定するか、PATH に追加してください。".to_string(),
-            )?;
-            let png = pokesle_ocr::adb::capture_png(&adb, None)?;
-            progress.set(0.5, "食材の名前を読み取っています");
-            let engine: Box<dyn OcrEngine> = match setting.engine {
-                OcrEngineChoice::Windows => Box::new(WindowsOcr::japanese()),
-                OcrEngineChoice::Google => Box::new(GoogleVision::new(&setting.google_api_key).with_usage(usage)),
-            };
-            let line_list = engine.recognize(&png)?;
-            let image = image::load_from_memory(&png).map_err(|e| format!("画像を読み込めませんでした: {e}"))?.to_rgb8();
-            Ok(pokesle_ocr::food::samples_from_food_list_screen(&image, &line_list))
-        }));
-    }
-
     /// ウインドウにドロップされた PNG を、読み取り待ちに加える
     fn take_dropped_files(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() && self.pending.len() + dropped.len() >= 2 {
+            self.auto_read = true;
+        }
         for file in dropped {
             match file.bytes() {
                 Ok(bytes) if bytes.starts_with(&[0x89, b'P', b'N', b'G']) => self.pending.push(bytes),
