@@ -16,6 +16,13 @@ pub trait OcrEngine {
 
     /// 画像(PNG)の文字を行ごとに認識する。
     fn recognize(&self, png: &[u8]) -> Result<Vec<OcrLine>, String>;
+
+    /// 文字だけを黒く抜き出した画像でも認識して、結果を足すか。
+    /// 色付きの文字(緑の「Lv.」など)を読み落とすエンジンで有効にする。
+    /// 認識の回数に応じて課金されるエンジンは、無効のままにする。
+    fn needs_binarized_pass(&self) -> bool {
+        false
+    }
 }
 
 /// 同じ高さに並んだ近い行(「Lv. 67」と「サーナイト」など)を、1行につなぐ。

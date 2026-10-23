@@ -21,6 +21,26 @@ pub struct Screen {
     pub line_list: Vec<OcrLine>,
 }
 
+/// 明るさが基準より暗い画素だけを黒、それ以外を白にした画像。
+/// ゲーム画面の文字は背景より暗いので、色付きの枠やアイコンを概ね除いて文字だけが残る。
+fn binarize(image: &RgbImage) -> RgbImage {
+    let mut result = image.clone();
+    for pixel in result.pixels_mut() {
+        let [red, green, blue] = pixel.0.map(f64::from);
+        let value = if red * 0.299 + green * 0.587 + blue * 0.114 < 180.0 { 0 } else { 255 };
+        pixel.0 = [value; 3];
+    }
+    result
+}
+
+fn encode_png(image: &RgbImage) -> Result<Vec<u8>, String> {
+    let mut encoded = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut encoded), image::ImageFormat::Png)
+        .map_err(|e| format!("画像を変換できませんでした: {e}"))?;
+    Ok(encoded)
+}
+
 /// 画像(PNG)を読み込み、幅をそろえて、エンジンで文字を認識する。
 pub fn recognize_screen(engine: &dyn OcrEngine, png: &[u8]) -> Result<Screen, String> {
     let image = image::load_from_memory(png).map_err(|e| format!("画像を読み込めませんでした: {e}"))?.to_rgb8();
@@ -29,13 +49,15 @@ pub fn recognize_screen(engine: &dyn OcrEngine, png: &[u8]) -> Result<Screen, St
     } else {
         let height = (u64::from(image.height()) * u64::from(IMAGE_WIDTH) / u64::from(image.width())).max(1) as u32;
         let resized = image::imageops::resize(&image, IMAGE_WIDTH, height, image::imageops::FilterType::Lanczos3);
-        let mut encoded = Vec::new();
-        resized
-            .write_to(&mut std::io::Cursor::new(&mut encoded), image::ImageFormat::Png)
-            .map_err(|e| format!("画像を変換できませんでした: {e}"))?;
+        let encoded = encode_png(&resized)?;
         (resized, encoded)
     };
-    let line_list = merge_same_row(&engine.recognize(&png)?, MERGE_GAP_RATIO);
+    let mut line_list = merge_same_row(&engine.recognize(&png)?, MERGE_GAP_RATIO);
+    if engine.needs_binarized_pass() {
+        // 元の画像で読めなかった色付きの文字を拾うため、文字だけの画像の結果も足す(重なる行はそのまま残す)
+        let binarized = engine.recognize(&encode_png(&binarize(&image))?)?;
+        line_list.extend(merge_same_row(&binarized, MERGE_GAP_RATIO));
+    }
     Ok(Screen { image, line_list })
 }
 

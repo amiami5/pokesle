@@ -79,6 +79,10 @@ impl OcrEngine for WindowsOcr {
         "Windows 標準 OCR"
     }
 
+    fn needs_binarized_pass(&self) -> bool {
+        true
+    }
+
     fn recognize(&self, png: &[u8]) -> Result<Vec<OcrLine>, String> {
         // 呼び出しスレッドで WinRT を使えるようにする(初期化済みならエラーが返るだけなので無視する)。
         let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
