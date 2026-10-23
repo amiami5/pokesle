@@ -174,6 +174,25 @@ pub fn read_screens(screen_list: &[Screen], sample_list: &[FoodSample]) -> ReadR
     ReadResult { status, food_icon_list }
 }
 
+/// 種族だけで食材が1つに決まる枠(1枠目は必ずそう)のアイコンを、確実な見本として返す。
+/// 利用者が直さなくても、読み取るたびに見本が集まる。種族を決められなかったときは空。
+pub fn certain_food_samples(read: &ReadResult) -> Vec<FoodSample> {
+    let (Some(pokemon_name), Some(lv)) = (&read.status.pokemon_name, read.status.lv) else { return Vec::new() };
+    read.food_icon_list
+        .iter()
+        .enumerate()
+        .take(3)
+        .filter_map(|(slot, icon)| {
+            let allowed = allowed_food_list(pokemon_name, slot);
+            (allowed.len() == 1).then(|| FoodSample {
+                name: allowed[0].clone(),
+                faded: food_slot_locked(lv, slot),
+                icon: icon.clone(),
+            })
+        })
+        .collect()
+}
+
 /// 見本と形まで比べて、持てる食材の中から十分に近いものがあれば、その食材に決める。
 /// 色の分布だけでは、未解放の枠の薄いアイコンを見分けられないため。
 fn apply_food_samples(status: &mut StatusResult, icon_list: &[RgbaImage], sample_list: &[FoodSample]) {
@@ -240,16 +259,22 @@ mod tests {
     }
 
     #[test]
-    fn samples_of_other_display_state_are_not_used() {
-        // Lv25 の2枠目は未解放(薄い表示)なので、通常表示の見本とは比べない
-        let sample_list = [sample("ワカクサコーン", false, BLUE)];
+    fn faded_slot_uses_samples_synthesized_from_normal_ones() {
+        // Lv25 の2枠目は未解放で薄く表示される。通常表示の見本から合成した薄い見本と比べて決まる
+        let sample_list = [sample("とくせんリンゴ", false, RED), sample("ワカクサコーン", false, BLUE)];
         let mut status = gardevoir(25);
+        let faded_blue = crate::food::fade_icon(&icon(BLUE));
+        apply_food_samples(&mut status, &[icon(RED), faded_blue.clone(), faded_blue], &sample_list);
+        assert_eq!(status.food_list[1].as_deref(), Some("ワカクサコーン"));
+    }
+
+    #[test]
+    fn faded_samples_are_not_used_for_normal_slots() {
+        // 薄い表示の見本は、通常表示の枠には使わない
+        let sample_list = [sample("ワカクサコーン", true, BLUE)];
+        let mut status = gardevoir(67);
         apply_food_samples(&mut status, &[icon(RED), icon(BLUE), icon(BLUE)], &sample_list);
         assert_eq!(status.food_list[1].as_deref(), Some("とくせんリンゴ"));
-
-        let sample_list = [sample("ワカクサコーン", true, BLUE)];
-        apply_food_samples(&mut status, &[icon(RED), icon(BLUE), icon(BLUE)], &sample_list);
-        assert_eq!(status.food_list[1].as_deref(), Some("ワカクサコーン"));
     }
 
     #[test]

@@ -356,17 +356,81 @@ pub fn food_slot_locked(lv: u32, slot: usize) -> bool {
 /// 見本と同じ食材とみなす類似度の下限。同じ食材どうしは 0.85 以上、違う食材どうしは
 /// 薄いアイコンでも 0.8 未満だった(実機のスクリーンショットで確認)
 const SAMPLE_THRESHOLD: f64 = 0.82;
+/// 通常表示の見本から合成した薄い見本と比べるときの下限。実際の薄いアイコンとの類似度は、
+/// 同じ食材で 0.69〜0.81、違う食材で 0.62 以下だった(実機の3組で確認)
+const FADED_SYNTHESIS_THRESHOLD: f64 = 0.65;
 
-/// 見本のうち、`icon` にいちばん近い食材(候補 `allowed` の中から)。十分に近いものが無ければ None。
-pub fn match_sample(icon: &RgbaImage, faded: bool, allowed: &[String], sample_list: &[FoodSample]) -> Option<String> {
-    let mut best: Option<(&str, f64)> = None;
-    for sample in sample_list.iter().filter(|s| s.faded == faded && allowed.contains(&s.name)) {
-        let score = pixel_similarity(icon, &sample.icon);
-        if best.is_none_or(|(_, b)| score > b) {
-            best = Some((&sample.name, score));
+/// 未解放の枠の薄い表示は、元の色を薄めて背景のクリーム色に重ねたもの(チャンネルごとの濃さと背景色)。
+/// 同じ画面に並んだ「通常表示と薄い表示の同じ食材」3組から求めた
+const FADE_OPACITY: [f64; 3] = [0.41, 0.35, 0.28];
+const FADE_BACKGROUND: [f64; 3] = [243.0, 231.0, 204.0];
+
+/// 通常表示のアイコンから、未解放の枠と同じように薄く表示したアイコンを作る(円の背景はそのまま)。
+pub fn fade_icon(icon: &RgbaImage) -> RgbaImage {
+    let mut faded = icon.clone();
+    for pixel in faded.pixels_mut() {
+        let [red, green, blue, _] = pixel.0;
+        let is_circle = red > 235 && green > 225 && blue > 190 && red.max(green).max(blue) - red.min(green).min(blue) < 50;
+        if is_circle {
+            continue;
+        }
+        for channel in 0..3 {
+            let value = FADE_OPACITY[channel] * f64::from(pixel[channel]) + (1.0 - FADE_OPACITY[channel]) * FADE_BACKGROUND[channel];
+            pixel[channel] = value.round() as u8;
         }
     }
-    best.filter(|(_, score)| *score >= SAMPLE_THRESHOLD).map(|(name, _)| name.to_string())
+    faded
+}
+
+/// 候補の食材の見本が揃っているとき、1位と2位の類似度にこれだけ差があれば1位に決める。
+/// 食材一覧の画面から取り込んだ見本は、詳細画面とアイコンの大きさが少し違うので類似度の値は低めになるが、
+/// 実機の14枠では、正解が常に1位で、2位との差は最小 0.036 だった
+const RANK_MARGIN: f64 = 0.02;
+
+/// 見本のうち、`icon` にいちばん近い食材(候補 `allowed` の中から)。決められなければ None。
+///
+/// 候補の全食材に見本があれば、候補の中での順位で決める。足りなければ、類似度が基準以上のものだけを使う。
+/// 薄い表示の枠は、通常表示の見本から合成した薄い見本とも比べる(薄い表示の見本は集まりにくいため)。
+pub fn match_sample(icon: &RgbaImage, faded: bool, allowed: &[String], sample_list: &[FoodSample]) -> Option<String> {
+    // 候補の食材ごとの、いちばん近い見本との類似度
+    let score_of = |sample: &FoodSample| {
+        if sample.faded == faded {
+            Some(pixel_similarity(icon, &sample.icon))
+        } else if faded {
+            Some(pixel_similarity(icon, &fade_icon(&sample.icon)))
+        } else {
+            None
+        }
+    };
+    let mut ranking: Vec<(&String, Option<f64>)> = allowed
+        .iter()
+        .map(|name| {
+            let best = sample_list.iter().filter(|s| &s.name == name).filter_map(score_of).reduce(f64::max);
+            (name, best)
+        })
+        .collect();
+    if ranking.len() >= 2 && ranking.iter().all(|(_, score)| score.is_some()) {
+        ranking.sort_by(|a, b| b.1.unwrap_or(0.0).total_cmp(&a.1.unwrap_or(0.0)));
+        let (first, second) = (ranking[0].1.unwrap_or(0.0), ranking[1].1.unwrap_or(0.0));
+        return (first - second >= RANK_MARGIN).then(|| ranking[0].0.clone());
+    }
+
+
+    // 基準をどれだけ上回ったか(合成の見本は基準が違うので、上回った幅で比べる)
+    let mut best: Option<(&str, f64)> = None;
+    for sample in sample_list.iter().filter(|s| allowed.contains(&s.name)) {
+        let margin = if sample.faded == faded {
+            pixel_similarity(icon, &sample.icon) - SAMPLE_THRESHOLD
+        } else if faded {
+            pixel_similarity(icon, &fade_icon(&sample.icon)) - FADED_SYNTHESIS_THRESHOLD
+        } else {
+            continue;
+        };
+        if best.is_none_or(|(_, b)| margin > b) {
+            best = Some((&sample.name, margin));
+        }
+    }
+    best.filter(|(_, margin)| *margin >= 0.0).map(|(name, _)| name.to_string())
 }
 
 /// 見本と比べるときに試す不透明度。未解放の枠のアイコンは半透明で薄く表示されるため
@@ -428,4 +492,89 @@ pub fn pixel_similarity(source: &RgbaImage, sample: &RgbaImage) -> f64 {
         .collect();
     let max = score_list.iter().copied().fold(0.0, f64::max);
     score_list[0] * 0.25 + max * 0.75
+}
+
+/// 食材の一覧画面(ゲームのボックスの絞り込みなど、食材アイコンの下に名前が並ぶ画面)から、
+/// 全食材の通常表示の見本を作る。アイコンの円を探し、そのすぐ下にある名前で食材を決める。
+pub fn samples_from_food_list_screen(image: &RgbImage, line_list: &[crate::engine::OcrLine]) -> Vec<FoodSample> {
+    let master = pokesle_core::data::master();
+    let rgba = image::DynamicImage::ImageRgb8(image.clone()).to_rgba8();
+    let mut sample_list: Vec<FoodSample> = Vec::new();
+    for region in find_food_circle_regions(image) {
+        // 円の真下(円の高さの 8 割まで)にある行をつなげて名前にする(長い名前は2行になる)
+        let mut below: Vec<&crate::engine::OcrLine> = line_list
+            .iter()
+            .filter(|line| {
+                let center_x = (line.x0 + line.x1) / 2.0;
+                line.y0 >= region.y + region.height * 0.9
+                    && line.y0 <= region.y + region.height * 1.8
+                    && (center_x - region.center_x()).abs() <= region.width * 0.8
+            })
+            .collect();
+        below.sort_by(|a, b| a.y0.total_cmp(&b.y0));
+        let text: String = below.iter().map(|line| line.text.as_str()).collect();
+        if text.is_empty() {
+            continue;
+        }
+        let best = master
+            .foods
+            .iter()
+            .map(|food| (food.name.as_str(), crate::status::text_similarity(&food.name, &text)))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        let Some((name, score)) = best.filter(|(_, score)| *score >= 0.7) else { continue };
+        let _ = score;
+        if sample_list.iter().any(|s| s.name == name) {
+            continue;
+        }
+        let side = region.width.max(region.height) * 1.05;
+        sample_list.push(FoodSample {
+            name: name.to_string(),
+            faded: false,
+            icon: crop_icon(&rgba, region.center_x(), region.center_y(), side),
+        });
+    }
+    sample_list
+}
+
+/// 見本をフォルダから読み込む。ファイル名は「表示状態(0: 通常, 1: 薄い)_時刻_食材名.png」
+pub fn load_food_samples(dir: &std::path::Path) -> Vec<FoodSample> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let stem = path.file_stem()?.to_str()?.to_string();
+            let mut parts = stem.splitn(3, '_');
+            let faded = parts.next()? == "1";
+            let _time = parts.next()?;
+            let name = parts.next()?.to_string();
+            let icon = image::open(&path).ok()?.to_rgba8();
+            Some(FoodSample { name, faded, icon })
+        })
+        .collect()
+}
+
+/// 見本をフォルダに保存する。同じ食材・表示状態の見本が `limit` を超えたら、古いものから消す。
+pub fn save_food_sample(dir: &std::path::Path, sample: &FoodSample, limit: usize) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let state = if sample.faded { "1" } else { "0" };
+    sample.icon.save(dir.join(format!("{state}_{time}_{}.png", sample.name))).map_err(|e| e.to_string())?;
+
+    // 時刻は桁がそろうので、ファイル名の順が古い順になる
+    let prefix = format!("{state}_");
+    let suffix = format!("_{}.png", sample.name);
+    let mut same: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix) && n.ends_with(&suffix))
+        })
+        .collect();
+    same.sort();
+    for old in same.iter().take(same.len().saturating_sub(limit)) {
+        let _ = std::fs::remove_file(old);
+    }
+    Ok(())
 }
