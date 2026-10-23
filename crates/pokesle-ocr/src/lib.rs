@@ -8,3 +8,4 @@ pub mod status;
 pub mod google_vision;
 pub mod reader;
 pub mod food;
+pub mod import;
