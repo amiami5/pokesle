@@ -7,6 +7,7 @@ use image::RgbImage;
 
 use crate::engine::{OcrEngine, OcrLine, merge_same_row};
 use crate::food::recognize_food_list;
+use crate::status::{FoodRecognition, find_candy_line};
 use crate::status::{StatusLine, StatusResult, find_candy_name, parse_data_with_candy};
 
 /// 画像を、本家の基準に合わせた幅にそろえる。細い文字を認識しやすい大きさに揃えつつ、
@@ -19,6 +20,8 @@ const MERGE_GAP_RATIO: f64 = 2.5;
 pub struct Screen {
     pub image: RgbImage,
     pub line_list: Vec<OcrLine>,
+    /// この画面に食材欄があれば、その3枠の認識結果
+    pub food_list: Vec<FoodRecognition>,
 }
 
 /// 明るさが基準より暗い画素だけを黒、それ以外を白にした画像。
@@ -58,7 +61,43 @@ pub fn recognize_screen(engine: &dyn OcrEngine, png: &[u8]) -> Result<Screen, St
         let binarized = engine.recognize(&encode_png(&binarize(&image))?)?;
         line_list.extend(merge_same_row(&binarized, MERGE_GAP_RATIO));
     }
-    Ok(Screen { image, line_list })
+    if engine.needs_binarized_pass() {
+        line_list.extend(recognize_header(engine, &image, &line_list)?);
+    }
+    let food_list = recognize_food_list(&image);
+    Ok(Screen { image, line_list, food_list })
+}
+
+/// 名前の行(「Lv. 22 キテルグマ」)を、切り出して拡大した画像で認識し直す。
+///
+/// 画像全体では緑の「Lv.」を読み落とすことがあり、食材の未解放ラベル(「Lv. 60」など)を
+/// ポケモンのLvと取り違える原因になる。名前の行は「○○のアメ」の少し上にあるので、そこだけを読む。
+fn recognize_header(engine: &dyn OcrEngine, image: &RgbImage, line_list: &[OcrLine]) -> Result<Vec<OcrLine>, String> {
+    const SCALE: u32 = 2;
+    let status_line_list: Vec<StatusLine> = line_list.iter().map(StatusLine::from).collect();
+    let Some((_, candy_line)) = find_candy_line(&status_line_list) else { return Ok(Vec::new()) };
+
+    // アメの行の 190〜40px 上が名前の行(1080px 幅の画像で)
+    let top = (candy_line.y0 - 190.0).max(0.0) as u32;
+    let bottom = ((candy_line.y0 - 40.0).max(0.0) as u32).min(image.height());
+    let (left, right) = (100.min(image.width() / 2), image.width().saturating_sub(100));
+    if bottom <= top || right <= left {
+        return Ok(Vec::new());
+    }
+    let cropped = image::imageops::crop_imm(image, left, top, right - left, bottom - top).to_image();
+    let scaled = image::imageops::resize(&cropped, cropped.width() * SCALE, cropped.height() * SCALE, image::imageops::FilterType::Lanczos3);
+    let lines = engine.recognize(&encode_png(&binarize(&scaled))?)?;
+    let scale = f64::from(SCALE);
+    Ok(lines
+        .into_iter()
+        .map(|line| OcrLine {
+            text: line.text,
+            x0: line.x0 / scale + f64::from(left),
+            y0: line.y0 / scale + f64::from(top),
+            x1: line.x1 / scale + f64::from(left),
+            y1: line.y1 / scale + f64::from(top),
+        })
+        .collect())
 }
 
 /// 行の周りの色から、サブスキルの枠のレア度(1: 白、2: 青、3: 金)を調べる。
@@ -116,8 +155,8 @@ pub fn read_screens(screen_list: &[Screen]) -> StatusResult {
     let raw_text = line_list.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
     let candy = find_candy_name(&line_list);
     // 食材欄は1つの画面にしか映らないので、最初に見つかった画面の結果を使う
-    let food_list = screen_list.iter().map(|screen| recognize_food_list(&screen.image)).find(|list| !list.is_empty());
-    parse_data_with_candy(&raw_text, &line_list, food_list.as_deref().unwrap_or(&[]), &line_list, &line_list, candy)
+    let food_list = screen_list.iter().map(|screen| &screen.food_list).find(|list| !list.is_empty());
+    parse_data_with_candy(&raw_text, &line_list, food_list.map_or(&[], |l| l.as_slice()), &line_list, &line_list, candy)
 }
 
 /// 画像(PNG)を上から順に認識して、ポケモンの情報にする。

@@ -516,8 +516,14 @@ fn correct_result(result: StatusResult, food_recognition_list: &[FoodRecognition
     let Some(pokemon) = estimate_pokemon(&result, food_recognition_list, candy) else { return result };
 
     let actual_help_time = parse_help_time(result.help_time.as_deref());
-    let corrected_lv =
-        correct_level(pokemon, result.lv, actual_help_time, &result.sub_skill_list, result.nature.as_deref());
+    // おてつだい時間はサブスキル(おてつだいスピード)で変わる。1枚目の画面だけでサブスキルが分からないとき、
+    // 時間からLvを逆算すると、正しく読めたLvを書き換えてしまうので補正しない(アメの系統を使う読み取りのとき)
+    let sub_skill_unknown = candy.is_some() && result.sub_skill_list.len() < 5;
+    let corrected_lv = if sub_skill_unknown {
+        result.lv
+    } else {
+        correct_level(pokemon, result.lv, actual_help_time, &result.sub_skill_list, result.nature.as_deref())
+    };
     let corrected_sub_skill_list = correct_bag_sub_skill_list(pokemon, corrected_lv, result.bag, &result.sub_skill_list);
     let corrected_help_time = nearest_number(
         actual_help_time,
@@ -815,19 +821,24 @@ pub fn parse_data_with_candy(
 /// 行のリストから「○○のアメ」を探し、マスターのアメ名(系統の基本名)を返す。
 /// 読み違いに備えて類似度で選び、似ていなければ None。
 pub fn find_candy_name(line_list: &[StatusLine]) -> Option<&'static str> {
+    find_candy_line(line_list).map(|(name, _)| name)
+}
+
+/// 「○○のアメ」の行を探し、マスターのアメ名とその行を返す。
+pub fn find_candy_line(line_list: &[StatusLine]) -> Option<(&'static str, &StatusLine)> {
     let mut candy_name_list: Vec<&str> = master().pokemon.iter().map(|p| p.candy_name.as_str()).collect();
     candy_name_list.sort_unstable();
     candy_name_list.dedup();
 
-    let mut best: Option<(&str, f64)> = None;
+    let mut best: Option<(&str, &StatusLine, f64)> = None;
     for candy_name in candy_name_list {
         let expected = format!("{candy_name}のアメ");
         let Some(found) = find_best_line(&expected, line_list) else { continue };
-        if best.is_none_or(|(_, score)| found.score > score) {
-            best = Some((candy_name, found.score));
+        if best.is_none_or(|(_, _, score)| found.score > score) {
+            best = Some((candy_name, found.line, found.score));
         }
     }
-    best.filter(|(_, score)| *score >= 0.8).map(|(name, _)| name)
+    best.filter(|(_, _, score)| *score >= 0.8).map(|(name, line, _)| (name, line))
 }
 
 #[cfg(test)]
