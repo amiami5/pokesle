@@ -276,6 +276,11 @@ impl ScreenshotImportView {
                     row.selected = row.error().is_none();
                     // 最新の読み取りを一番上に出す。編集中の行は、1つ下にずれた位置を指し直す
                     self.row_list.insert(0, row);
+                    // 重複の警告が出る行は、チェックを外しておく
+                    let pokemon_list: Vec<Option<BoxPokemon>> = self.row_list.iter().map(|r| r.pokemon().ok()).collect();
+                    if duplicate_warning(0, &pokemon_list, &shared.box_file.list).is_some() {
+                        self.row_list[0].selected = false;
+                    }
                     if let Some((index, _)) = &mut self.edit {
                         *index += 1;
                     }
