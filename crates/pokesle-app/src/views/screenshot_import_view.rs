@@ -7,6 +7,7 @@ use eframe::egui;
 use pokesle_ocr::engine::OcrEngine;
 use pokesle_ocr::google_vision::GoogleVision;
 use pokesle_ocr::import::to_box_pokemon;
+use pokesle_ocr::reader::ReadResult;
 use pokesle_ocr::status::StatusResult;
 use pokesle_ocr::windows_ocr::WindowsOcr;
 
@@ -25,6 +26,8 @@ struct Row {
     chosen_name: Option<String>,
     /// 編集画面で直した内容。あれば読み取り結果より優先する
     edited: Option<BoxPokemon>,
+    /// 食材欄の各枠のアイコン。ボックスに追加したとき、確定した食材の見本として保存する
+    food_icon_list: Vec<image::RgbaImage>,
 }
 
 impl Row {
@@ -78,7 +81,7 @@ pub struct ScreenshotImportView {
     pending: Vec<Vec<u8>>,
     row_list: Vec<Row>,
     capture_job: Option<Job<Vec<u8>>>,
-    read_job: Option<Job<StatusResult>>,
+    read_job: Option<Job<ReadResult>>,
     message: String,
     /// 編集中の行(行の位置, 編集画面)
     edit: Option<(usize, PokemonEdit)>,
@@ -170,8 +173,15 @@ impl ScreenshotImportView {
                 }
             }
             match result {
-                Ok(result) => {
-                    let mut row = Row { selected: true, shiny: false, result, chosen_name: None, edited: None };
+                Ok(read) => {
+                    let mut row = Row {
+                        selected: true,
+                        shiny: false,
+                        result: read.status,
+                        chosen_name: None,
+                        edited: None,
+                        food_icon_list: read.food_icon_list,
+                    };
                     row.selected = row.error().is_none();
                     self.row_list.push(row);
                     self.pending.clear();
@@ -215,7 +225,9 @@ impl ScreenshotImportView {
                 OcrEngineChoice::Windows => Box::new(WindowsOcr::japanese()),
                 OcrEngineChoice::Google => Box::new(GoogleVision::new(&setting.google_api_key).with_usage(usage)),
             };
-            pokesle_ocr::reader::read_pngs(engine.as_ref(), &png_list)
+            // 利用者が確定した食材の見本があれば、食材の判定に使う
+            let sample_list = storage::load_food_samples();
+            pokesle_ocr::reader::read_pngs(engine.as_ref(), &png_list, &sample_list)
         }));
     }
 
@@ -373,6 +385,13 @@ impl ScreenshotImportView {
                     }
                     match row.pokemon() {
                         Ok(pokemon) => {
+                            // 確定した食材を、次の読み取りの見本にする
+                            for (slot, (icon, food)) in row.food_icon_list.iter().zip(&pokemon.food_list).enumerate() {
+                                let faded = pokesle_ocr::food::food_slot_locked(pokemon.lv as u32, slot);
+                                if let Err(e) = storage::save_food_sample(food, faded, icon) {
+                                    shared.status = format!("食材の見本を保存できませんでした: {e}");
+                                }
+                            }
                             shared.box_file.list.push(pokemon);
                             added += 1;
                             false
