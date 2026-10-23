@@ -7,7 +7,9 @@ use pokesle_core::browser_import::{self, BrowserImport};
 use crate::app::Shared;
 use crate::fonts::{self, FontChoice};
 use crate::job::Job;
-use crate::storage::{self, ThemeSetting, UiSetting};
+use crate::storage::{self, OcrEngineChoice, ThemeSetting, UiSetting};
+use pokesle_ocr::google_vision::{self, FREE_UNITS_PER_MONTH};
+use pokesle_ocr::windows_ocr::WindowsOcr;
 
 #[derive(Default)]
 pub struct UiSettingView {
@@ -19,6 +21,8 @@ pub struct UiSettingView {
     import_parsed: Option<Result<BrowserImport, String>>,
     import_config: bool,
     import_box: bool,
+    /// Windows 標準 OCR が使えるかの確認結果(初めて表示したときに調べる)
+    windows_ocr_check: Option<Result<(), String>>,
 }
 
 /// 起動時に設定を反映する
@@ -103,6 +107,9 @@ impl UiSettingView {
 
         ui.add_space(16.0);
         ui.separator();
+        self.ocr_section(ui, shared);
+        ui.add_space(16.0);
+        ui.separator();
         self.import_section(ui, shared);
         let Shared { ui_setting: setting, status, .. } = shared;
 
@@ -119,6 +126,80 @@ impl UiSettingView {
             && let Err(e) = storage::save_ui_setting(setting)
         {
             *status = format!("設定を保存できませんでした: {e}");
+        }
+    }
+
+    /// スクリーンショットの文字認識(エンジンの選択・Google Cloud Vision の API キーと利用回数)
+    fn ocr_section(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
+        use crate::views::style;
+        ui.add_space(6.0);
+        ui.heading("スクリーンショットの文字認識");
+        ui.add_space(4.0);
+
+        let mut changed = false;
+        let setting = &mut shared.ocr_setting;
+        changed |= ui
+            .radio_value(&mut setting.engine, OcrEngineChoice::Windows, "Windows 標準 OCR(設定不要・無料・この PC の中だけで処理)")
+            .changed();
+        changed |= ui
+            .radio_value(&mut setting.engine, OcrEngineChoice::Google, "Google Cloud Vision(精度が高い・API キーが必要・画像を Google に送信)")
+            .changed();
+        ui.add_space(6.0);
+
+        match setting.engine {
+            OcrEngineChoice::Windows => {
+                let ocr = WindowsOcr::japanese();
+                let check = self.windows_ocr_check.get_or_insert_with(|| ocr.check());
+                match check {
+                    Ok(()) => {
+                        ui.label("この PC では日本語の文字認識を使えます。");
+                    }
+                    Err(message) => {
+                        ui.colored_label(ui.visuals().error_fg_color, message.as_str());
+                        if ui.button("言語パックのインストール用コマンドをコピー").clicked() {
+                            ui.ctx().copy_text(ocr.install_command());
+                        }
+                    }
+                }
+                if ui.button("再確認").clicked() {
+                    self.windows_ocr_check = None;
+                }
+            }
+            OcrEngineChoice::Google => {
+                ui.horizontal(|ui| {
+                    ui.label("API キー");
+                    changed |= ui
+                        .add(egui::TextEdit::singleline(&mut setting.google_api_key).password(true).desired_width(360.0))
+                        .changed();
+                });
+                ui.add_space(4.0);
+
+                let month = google_vision::current_month_key();
+                let count = shared.vision_usage.lock().map_or(0, |u| u.count_in(&month));
+                ui.horizontal(|ui| {
+                    ui.label(format!("今月の利用: {count} / {FREE_UNITS_PER_MONTH} ユニット(無料枠、目安)"));
+                    ui.hyperlink_to("料金表(Google Cloud)", google_vision::PRICING_URL);
+                });
+                if count >= FREE_UNITS_PER_MONTH {
+                    ui.colored_label(style::danger_color(), "無料枠を超えています。これ以降の認識は課金される可能性があります。");
+                }
+                ui.label(
+                    egui::RichText::new(
+                        "画像1枚の認識が1ユニットです。利用回数は、このアプリから送った枚数の目安で、同じキーを他で使った分や Google 側の集計の区切りとは一致しないことがあります。",
+                    )
+                    .color(style::muted()),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "スクリーンショット(ゲーム画面)が Google のサーバーに送信されます。API キーはこの PC の設定フォルダに暗号化せずに保存されます。",
+                    )
+                    .color(style::muted()),
+                );
+            }
+        }
+
+        if changed && let Err(e) = storage::save_ocr_setting(&shared.ocr_setting) {
+            shared.status = format!("文字認識の設定を保存できませんでした: {e}");
         }
     }
 

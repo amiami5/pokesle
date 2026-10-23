@@ -44,6 +44,9 @@ pub struct Shared {
     pub box_file: BoxFile,
     pub evaluate_table: Option<EvaluateTable>,
     pub ui_setting: storage::UiSetting,
+    pub ocr_setting: storage::OcrSetting,
+    /// Google Cloud Vision の利用回数(認識するたびに増える。保存は呼び出し側が行う)
+    pub vision_usage: std::sync::Arc<std::sync::Mutex<pokesle_ocr::google_vision::VisionUsage>>,
     pub status: String,
 }
 
@@ -151,6 +154,8 @@ impl App {
                 box_file: storage::load_box(),
                 evaluate_table: storage::load_evaluate_table(),
                 ui_setting,
+                ocr_setting: storage::load_ocr_setting(),
+                vision_usage: std::sync::Arc::new(std::sync::Mutex::new(storage::load_vision_usage())),
                 status: String::new(),
             },
             box_view,

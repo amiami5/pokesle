@@ -110,6 +110,40 @@ pub fn save_data_cooking_num(map: &std::collections::HashMap<String, f64>) -> Re
     write_json("data-cooking-num.json", &nonzero)
 }
 
+/// 文字認識の設定(本家にはない、このアプリ独自の設定)
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct OcrSetting {
+    pub engine: OcrEngineChoice,
+    /// Google Cloud Vision の API キー(この PC の設定フォルダに平文で保存する)
+    pub google_api_key: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum OcrEngineChoice {
+    #[default]
+    Windows,
+    Google,
+}
+
+pub fn load_ocr_setting() -> OcrSetting {
+    read_json("ocr-setting.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+pub fn save_ocr_setting(setting: &OcrSetting) -> Result<(), String> {
+    write_json("ocr-setting.json", setting)
+}
+
+/// Google Cloud Vision の今月の利用回数
+pub fn load_vision_usage() -> pokesle_ocr::google_vision::VisionUsage {
+    read_json("vision-usage.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+#[allow(dead_code)] // 文字認識を実行する画面から使う
+pub fn save_vision_usage(usage: &pokesle_ocr::google_vision::VisionUsage) -> Result<(), String> {
+    write_json("vision-usage.json", usage)
+}
+
 pub fn load_ui_setting() -> UiSetting {
     read_json("ui-setting.json").and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
 }
