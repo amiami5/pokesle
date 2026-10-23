@@ -115,7 +115,7 @@ impl PokemonSimulator {
             let cooking_type = config.simulation.cooking_type();
             cooking::evaluate_lv_list(Some(&config.simulation))
                 .into_iter()
-                .filter(|c| Some(c.cooking().cooking_type) == cooking_type && (c.enable || c.cooking().food_num == 0.0))
+                .filter(|c| (cooking_type.is_none() || Some(c.cooking().cooking_type) == cooking_type) && (c.enable || c.cooking().food_num == 0.0))
                 .collect()
         };
 

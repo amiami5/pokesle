@@ -1,8 +1,8 @@
 {
- "upstreamCommit": "ce748136f1fa4cabb78259c1eb571feb78385c1c",
+ "upstreamCommit": "a0f6350d9cd8c320e946689510a9c6dd5d5b912f",
  "version": {
-  "history": 2026100501,
-  "evaluate": 20261005
+  "history": 2026102201,
+  "evaluate": 20261022
  },
  "berries": [
   {
@@ -10924,7 +10924,7 @@
    "skill": "エナジーチャージS(ランダム)",
    "help": 2200,
    "bag": 28,
-   "foodRate": 0.161,
+   "foodRate": 0.166,
    "skillRate": 0.024,
    "legend": false,
    "kaihou": false,

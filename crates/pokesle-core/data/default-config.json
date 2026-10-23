@@ -615,7 +615,8 @@
   "result": {
    "detail": false,
    "food": false
-  }
+  },
+  "showFoodBagPhoneCapture": false
  },
  "foodDefaultNum": {
   "ふといながねぎ": 0,

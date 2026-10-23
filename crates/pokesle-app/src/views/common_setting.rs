@@ -71,7 +71,7 @@ fn field_label(c: &Config) -> Label {
             _ => {}
         }
     }
-    l.push((format!(" {}", s.cooking_type.clone().unwrap_or_default()), false));
+    l.push((format!(" {}", s.cooking_type.clone().filter(|x| !x.is_empty()).unwrap_or_else(|| "すべて".into())), false));
     if s.cooking_weight != 1.0 {
         l.push((format!("(x{})", js_num(s.cooking_weight)), true));
     }
@@ -175,9 +175,9 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
             });
             ui.end_row();
 
-            th(ui, "種類");
+            th(ui, "料理の種類");
             let current = s.cooking_type.clone().unwrap_or_default();
-            let names = [("カレー", "カレー・シチュー"), ("サラダ", "サラダ"), ("デザート", "デザート・ドリンク")];
+            let names = [("", "すべて"), ("カレー", "カレー・シチュー"), ("サラダ", "サラダ"), ("デザート", "デザート・ドリンク")];
             let text = names.iter().find(|x| x.0 == current).map(|x| x.1).unwrap_or("");
             egui::ComboBox::from_id_salt("cooking_type").selected_text(text).show_ui(ui, |ui| {
                 for (v, l) in names {
