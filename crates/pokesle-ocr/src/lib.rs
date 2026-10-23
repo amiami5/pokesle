@@ -4,3 +4,4 @@ pub mod adb;
 pub mod engine;
 #[cfg(windows)]
 pub mod windows_ocr;
+pub mod status;
