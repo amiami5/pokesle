@@ -123,6 +123,9 @@ const configs = {
     c.teamSimulation.day = 3;
     c.teamSimulation.initialCookingChange = 0.2;
   }),
+  cooking_all: variant((c) => {
+    c.simulation.cookingType = '';
+  }),
   cyan_ex_skill: variant((c) => {
     c.simulation.field = 'シアンの砂浜EX';
     c.simulation.fieldEx = 3;
@@ -297,6 +300,7 @@ const smallRank = (c) => {
 const teamCases = [
   { name: 'week', config: variant(smallRank), req: { targetDay: -1, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 } },
   { name: 'sunday_half', config: variant((c) => { smallRank(c); c.simulation.cookingType = 'サラダ'; }), req: { targetDay: 6, targetHour: 12, initialCookingChange: 20, initialCookingPowerUp: 10, beforeEnergy: 50000 } },
+  { name: 'cooking_all', config: variant((c) => { smallRank(c); c.simulation.cookingType = ''; }), req: { targetDay: -1, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 } },
   { name: 'wed_nightcap_req', config: variant((c) => { smallRank(c); c.teamSimulation.nightCapPikachu = 12; c.teamSimulation.require.typeNum['フェアリー'] = 1; c.simulation.remainFoodMode = 1; c.simulation.remainFoodRate = 0.5; }), req: { targetDay: 2, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 } },
   { name: 'fixed_genkifull', config: variant((c) => { smallRank(c); c.simulation.genkiFull = true; c.foodUnlimited = true; c.simulation.cookingType = 'デザート'; }), req: { targetDay: -1, targetHour: 24, initialCookingChange: 0, initialCookingPowerUp: 0, beforeEnergy: 0 }, fix: [36, 37] },
 ];
