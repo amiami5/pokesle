@@ -152,6 +152,7 @@ fn parse_data_matches_upstream() {
             main_skill_lv: case.result.main_skill_lv,
             sub_skill_list: case.result.sub_skill_list.clone(),
             nature: case.result.nature.clone(),
+            pokemon_candidate_list: Vec::new(),
             raw_text: input.raw_text.clone(),
         };
         if actual != expected {

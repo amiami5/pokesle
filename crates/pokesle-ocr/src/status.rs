@@ -61,6 +61,8 @@ pub struct StatusResult {
     pub main_skill_lv: Option<u32>,
     pub sub_skill_list: Vec<String>,
     pub nature: Option<String>,
+    /// 種族を1つに決められなかったときの、同じくらい有力な候補(アメの系統が分かっているときだけ)
+    pub pokemon_candidate_list: Vec<String>,
     pub raw_text: String,
 }
 
@@ -431,11 +433,18 @@ fn correct_level(
     }
 }
 
-fn estimate_pokemon(result: &StatusResult, food_recognition_list: &[FoodRecognition]) -> Option<&'static Pokemon> {
+/// 候補のポケモンごとの点数(高い順)。各要素は (ポケモン, 点数, 名前の類似度)。
+fn score_pokemon_list(
+    result: &StatusResult,
+    food_recognition_list: &[FoodRecognition],
+    candy: Option<&str>,
+) -> Vec<(&'static Pokemon, f64, f64)> {
     let actual_help_time = parse_help_time(result.help_time.as_deref());
-    let mut score_list: Vec<(&Pokemon, f64, f64)> = master()
+    let mut score_list: Vec<(&'static Pokemon, f64, f64)> = master()
         .pokemon
         .iter()
+        // 「○○のアメ」が読めていれば、その系統のポケモンだけを候補にする(ニックネームを変えていても判別できる)
+        .filter(|pokemon| candy.is_none_or(|candy| pokemon.candy_name == candy))
         .map(|pokemon| {
             let name_similarity = result.name.as_deref().map_or(0.0, |n| text_similarity(&pokemon.name, n));
             let skill_similarity =
@@ -483,9 +492,18 @@ fn estimate_pokemon(result: &StatusResult, food_recognition_list: &[FoodRecognit
         })
         .collect();
     score_list.sort_by(|left, right| right.1.total_cmp(&left.1));
+    score_list
+}
 
+fn estimate_pokemon(
+    result: &StatusResult,
+    food_recognition_list: &[FoodRecognition],
+    candy: Option<&str>,
+) -> Option<&'static Pokemon> {
+    let score_list = score_pokemon_list(result, food_recognition_list, candy);
     let best = score_list.first()?;
-    if best.1 < 8.0 {
+    // 系統が分かっている場合は、名前の手がかりが無くても(ニックネーム)、候補の中の比較だけで決める
+    if candy.is_none() && best.1 < 8.0 {
         return None;
     }
 
@@ -494,8 +512,8 @@ fn estimate_pokemon(result: &StatusResult, food_recognition_list: &[FoodRecognit
     (best.2 >= 0.8 || best.1 - second_score >= 0.75).then_some(best.0)
 }
 
-fn correct_result(result: StatusResult, food_recognition_list: &[FoodRecognition]) -> StatusResult {
-    let Some(pokemon) = estimate_pokemon(&result, food_recognition_list) else { return result };
+fn correct_result(result: StatusResult, food_recognition_list: &[FoodRecognition], candy: Option<&str>) -> StatusResult {
+    let Some(pokemon) = estimate_pokemon(&result, food_recognition_list, candy) else { return result };
 
     let actual_help_time = parse_help_time(result.help_time.as_deref());
     let corrected_lv =
@@ -628,6 +646,19 @@ pub fn parse_data(
     food_recognition_list: &[FoodRecognition],
     primary_line_list: &[StatusLine],
     source_coordinate_line_list: &[StatusLine],
+) -> StatusResult {
+    parse_data_with_candy(raw_text, line_list, food_recognition_list, primary_line_list, source_coordinate_line_list, None)
+}
+
+/// `parse_data` に、画面の「○○のアメ」から読んだ系統(マスターのアメ名。例: 「ラルトス」)を加えたもの。
+/// 本家にはない手がかりで、ニックネームを変えた個体の種族判定に使う。
+pub fn parse_data_with_candy(
+    raw_text: &str,
+    line_list: &[StatusLine],
+    food_recognition_list: &[FoodRecognition],
+    primary_line_list: &[StatusLine],
+    source_coordinate_line_list: &[StatusLine],
+    candy: Option<&str>,
 ) -> StatusResult {
     static LV: OnceLock<Regex> = OnceLock::new();
     static NAME_HEAD: OnceLock<Regex> = OnceLock::new();
@@ -766,7 +797,85 @@ pub fn parse_data(
         main_skill_lv,
         sub_skill_list,
         nature: nature.filter(|(_, score)| *score >= 0.65).map(|(name, _)| name.to_string()),
+        pokemon_candidate_list: Vec::new(),
         raw_text: raw_text.to_string(),
     };
-    correct_result(result, food_recognition_list)
+    let mut result = correct_result(result, food_recognition_list, candy);
+    if result.pokemon_name.is_none() && candy.is_some() {
+        // 決め手が足りないときは、最高点との差が小さい候補を並べて、利用者に選んでもらう
+        let score_list = score_pokemon_list(&result, food_recognition_list, candy);
+        if let Some(best) = score_list.first().map(|s| s.1) {
+            result.pokemon_candidate_list =
+                score_list.iter().filter(|s| best - s.1 < 0.75).map(|s| s.0.name.clone()).collect();
+        }
+    }
+    result
+}
+
+/// 行のリストから「○○のアメ」を探し、マスターのアメ名(系統の基本名)を返す。
+/// 読み違いに備えて類似度で選び、似ていなければ None。
+pub fn find_candy_name(line_list: &[StatusLine]) -> Option<&'static str> {
+    let mut candy_name_list: Vec<&str> = master().pokemon.iter().map(|p| p.candy_name.as_str()).collect();
+    candy_name_list.sort_unstable();
+    candy_name_list.dedup();
+
+    let mut best: Option<(&str, f64)> = None;
+    for candy_name in candy_name_list {
+        let expected = format!("{candy_name}のアメ");
+        let Some(found) = find_best_line(&expected, line_list) else { continue };
+        if best.is_none_or(|(_, score)| found.score > score) {
+            best = Some((candy_name, found.score));
+        }
+    }
+    best.filter(|(_, score)| *score >= 0.8).map(|(name, _)| name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line(text: &str, y0: f64) -> StatusLine {
+        StatusLine { text: text.to_string(), x0: 100.0, y0, x1: 500.0, y1: y0 + 40.0, sub_skill_rarity: None }
+    }
+
+    fn family_result(nickname: &str, candy: Option<&str>) -> StatusResult {
+        let line_list = vec![
+            line(&format!("Lv. 67  {nickname}"), 900.0),
+            line("ラルトスのアメ  1 , 955", 1060.0),
+            line("おてつだい時間", 2030.0),
+            line("29 分 51 秒ごと", 2030.0),
+        ];
+        let raw_text = line_list.iter().map(|l| l.text.as_str()).collect::<Vec<_>>().join("
+");
+        parse_data_with_candy(&raw_text, &line_list, &[], &line_list, &line_list, candy)
+    }
+
+    #[test]
+    fn finds_candy_name_from_line() {
+        let list = vec![line("ラルト人のアメ  1 , 955", 1060.0), line("あと EXP 2 , 844", 1120.0)];
+        assert_eq!(find_candy_name(&list), Some("ラルトス"));
+        assert_eq!(find_candy_name(&[line("レベルアップ", 1263.0)]), None);
+    }
+
+    #[test]
+    fn candy_restricts_nicknamed_pokemon_to_its_family() {
+        let result = family_result("もちこ", Some("ラルトス"));
+        // サーナイトとエルレイドは時間が同じで決まらない。候補はラルトスの系統に絞れる
+        assert_eq!(result.pokemon_name, None);
+        let family: Vec<&str> =
+            master().pokemon.iter().filter(|p| p.candy_name == "ラルトス").map(|p| p.name.as_str()).collect();
+        assert!(result.pokemon_candidate_list.iter().all(|name| family.contains(&name.as_str())));
+        assert_eq!(&result.pokemon_candidate_list[..2], ["サーナイト", "エルレイド"]);
+        // ニックネームは種族名に直さない
+        assert_eq!(result.name.as_deref(), Some("もちこ"));
+    }
+
+    #[test]
+    fn name_resolves_between_same_help_time() {
+        // サーナイトとエルレイドはおてつだい時間が同じなので、名前が決め手になる
+        let result = family_result("サーナイト", Some("ラルトス"));
+        assert_eq!(result.pokemon_name.as_deref(), Some("サーナイト"));
+        assert_eq!(result.lv, Some(67));
+        assert_eq!(result.help_time.as_deref(), Some("29分51秒"));
+    }
 }
