@@ -82,6 +82,8 @@ pub struct ScreenshotImportView {
     row_list: Vec<Row>,
     capture_job: Option<Job<Vec<u8>>>,
     read_job: Option<Job<ReadResult>>,
+    /// 食材一覧の画面から見本を取り込む処理
+    sample_job: Option<Job<Vec<pokesle_ocr::food::FoodSample>>>,
     message: String,
     /// 編集中の行(行の位置, 編集画面)
     edit: Option<(usize, PokemonEdit)>,
@@ -108,7 +110,7 @@ impl ScreenshotImportView {
         ui.label(egui::RichText::new(format!("文字認識: {engine_name}(設定画面で変更できます)")).color(style::muted()));
         ui.add_space(6.0);
 
-        let busy = self.capture_job.is_some() || self.read_job.is_some();
+        let busy = self.capture_job.is_some() || self.read_job.is_some() || self.sample_job.is_some();
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!busy, |ui| {
                 if style::form_button(ui, "スマホから撮る", style::ButtonKind::Normal).clicked() {
@@ -126,7 +128,24 @@ impl ScreenshotImportView {
                 });
             });
         });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(!busy, |ui| {
+                if style::form_button(ui, "食材一覧から見本を取り込む", style::ButtonKind::Normal).clicked() {
+                    self.start_sample_import(ui.ctx(), shared);
+                }
+            });
+            ui.label(
+                egui::RichText::new(
+                    "ゲームのポケモンボックスで絞り込み(食材)の画面を出して押すと、食材アイコンの見本を取り込み、食材の判定に使います。",
+                )
+                .color(style::muted()),
+            );
+        });
         if let Some(job) = &self.capture_job {
+            job.show_progress(ui);
+        }
+        if let Some(job) = &self.sample_job {
             job.show_progress(ui);
         }
         if let Some(job) = &self.read_job {
@@ -149,6 +168,7 @@ impl ScreenshotImportView {
 
     /// 終わった処理の結果を取り込む
     fn poll_jobs(&mut self, shared: &mut Shared) {
+        self.poll_sample_job(shared);
         if let Some(job) = &mut self.capture_job
             && let Some(result) = job.poll()
         {
@@ -174,6 +194,12 @@ impl ScreenshotImportView {
             }
             match result {
                 Ok(read) => {
+                    // 種族だけで食材が決まる枠(1枠目など)のアイコンは、確実な見本として保存する
+                    for sample in pokesle_ocr::reader::certain_food_samples(&read) {
+                        if let Err(e) = storage::save_food_sample(&sample) {
+                            shared.status = format!("食材の見本を保存できませんでした: {e}");
+                        }
+                    }
                     let mut row = Row {
                         selected: true,
                         shiny: false,
@@ -190,6 +216,56 @@ impl ScreenshotImportView {
                 Err(e) => self.message = e,
             }
         }
+    }
+
+    /// 見本の取り込みが終わっていれば保存する(poll_jobs から呼ぶ)
+    fn poll_sample_job(&mut self, shared: &mut Shared) {
+        let Some(job) = &mut self.sample_job else { return };
+        let Some(result) = job.poll() else { return };
+        self.sample_job = None;
+        if shared.ocr_setting.engine == OcrEngineChoice::Google {
+            let usage = shared.vision_usage.lock().map(|u| u.clone()).unwrap_or_default();
+            if let Err(e) = storage::save_vision_usage(&usage) {
+                shared.status = format!("利用回数を保存できませんでした: {e}");
+            }
+        }
+        match result {
+            Ok(sample_list) if sample_list.is_empty() => {
+                self.message = "食材アイコンを見つけられませんでした。食材の一覧が表示されているか確認してください。".into();
+            }
+            Ok(sample_list) => {
+                let mut saved = 0;
+                for sample in &sample_list {
+                    match storage::save_food_sample(sample) {
+                        Ok(()) => saved += 1,
+                        Err(e) => self.message = format!("食材の見本を保存できませんでした: {e}"),
+                    }
+                }
+                shared.status = format!("{saved} 種の食材の見本を取り込みました");
+            }
+            Err(e) => self.message = e,
+        }
+    }
+
+    fn start_sample_import(&mut self, ctx: &egui::Context, shared: &Shared) {
+        let setting = shared.ocr_setting.clone();
+        let usage = shared.vision_usage.clone();
+        self.message.clear();
+        self.sample_job = Some(Job::spawn(ctx, move |progress| {
+            progress.set(0.0, "スマホの画面を撮っています");
+            let adb = pokesle_ocr::adb::find_adb(Some(&setting.adb_path)).ok_or(
+                "adb.exe が見つかりません。設定画面で場所を指定するか、PATH に追加してください。".to_string(),
+            )?;
+            let png = pokesle_ocr::adb::capture_png(&adb, None)?;
+            progress.set(0.5, "食材の名前を読み取っています");
+            let engine: Box<dyn OcrEngine> = match setting.engine {
+                OcrEngineChoice::Windows => Box::new(WindowsOcr::japanese()),
+                OcrEngineChoice::Google => Box::new(GoogleVision::new(&setting.google_api_key).with_usage(usage)),
+            };
+            let line_list = engine.recognize(&png)?;
+            let image = image::load_from_memory(&png).map_err(|e| format!("画像を読み込めませんでした: {e}"))?.to_rgb8();
+            Ok(pokesle_ocr::food::samples_from_food_list_screen(&image, &line_list))
+        }));
     }
 
     /// ウインドウにドロップされた PNG を、読み取り待ちに加える
