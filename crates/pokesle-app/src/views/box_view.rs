@@ -1137,6 +1137,9 @@ impl BoxView {
         let op_width = if cleaning { 106.0 } else { 86.0 };
         let list = &shared.box_file.list;
         let config = &shared.config;
+        // 同じ個体かもしれないポケモンは、行の背景色を変える
+        let duplicate = super::screenshot_import_view::box_duplicate_list(list);
+        let duplicate_color = egui::Color32::from_rgba_unmultiplied(255, 190, 0, 55);
 
         let header_cell = |ui: &mut egui::Ui, col: Col| -> Vec<TableEvent> {
             let mut ev = Vec::new();
@@ -1502,11 +1505,21 @@ impl BoxView {
                         if hover == Some(n) {
                             row.set_hovered(true);
                         }
+                        let is_duplicate = duplicate.get(i).copied().unwrap_or(false);
+                        let paint = |ui: &egui::Ui| {
+                            if is_duplicate {
+                                let spacing = ui.spacing().item_spacing;
+                                ui.painter().rect_filled(ui.max_rect().expand2(spacing / 2.0), 0.0, duplicate_color);
+                            }
+                        };
                         for &col in cols {
-                            row.col(|ui| events.extend(body_cell(ui, col, i, result, require.as_ref())));
+                            row.col(|ui| {
+                                paint(ui);
+                                events.extend(body_cell(ui, col, i, result, require.as_ref()));
+                            });
                         }
                         if last {
-                            row.col(|_| {});
+                            row.col(|ui| paint(ui));
                         }
                         let r = row.response();
                         if r.hovered() {

@@ -101,6 +101,26 @@ fn compare(a: &BoxPokemon, b: &BoxPokemon) -> Option<Duplicate> {
     (subset(&sa, &sb) || subset(&sb, &sa)).then_some(Duplicate::Possible)
 }
 
+/// ボックス内で、他のポケモンと同じ可能性があるもの(ボックス位置ごと)
+pub(super) fn box_duplicate_list(list: &[BoxPokemon]) -> Vec<bool> {
+    let mut group: std::collections::HashMap<(&str, &str), Vec<usize>> = std::collections::HashMap::new();
+    for (i, p) in list.iter().enumerate() {
+        group.entry((p.name.as_str(), p.nature.as_str())).or_default().push(i);
+    }
+    let mut result = vec![false; list.len()];
+    for index_list in group.values().filter(|l| l.len() > 1) {
+        for (n, &a) in index_list.iter().enumerate() {
+            for &b in &index_list[n + 1..] {
+                if compare(&list[a], &list[b]).is_some() {
+                    result[a] = true;
+                    result[b] = true;
+                }
+            }
+        }
+    }
+    result
+}
+
 /// 行ごとの重複の警告。ボックス内と、一覧の他の行を調べる
 fn duplicate_warning(index: usize, pokemon_list: &[Option<BoxPokemon>], box_list: &[BoxPokemon]) -> Option<(Duplicate, String)> {
     let target = pokemon_list[index].as_ref()?;
