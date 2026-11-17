@@ -731,8 +731,10 @@ pub struct BoxView {
     error: String,
     /// 表示中のページ(0 始まり)
     page: usize,
-    /// 選択中のポケモン(ボックス位置)。まとめて削除する(本家 selectedPokemonList)
+    /// 選択中のポケモン(ボックス位置)。まとめて削除予定にする(本家 selectedPokemonList)
     selected: HashSet<usize>,
+    /// 削除予定のポケモン(ボックス位置)。横線を引いておき、画面遷移や終了時に消す
+    delete_pending: HashSet<usize>,
     /// 削除の確認(メッセージ, 消すボックス位置)
     confirm_delete: Option<(String, Vec<usize>)>,
     /// 一覧の縦のスクロール位置(左右の表で揃える)
@@ -783,6 +785,37 @@ impl BoxView {
         self.detail_tab = (mode == "cleaning_detail1") as usize;
     }
 
+    /// 削除予定(横線)のポケモンを実際に削除して保存する
+    pub fn commit_pending_deletes(&mut self, shared: &mut Shared) {
+        if self.delete_pending.is_empty() {
+            return;
+        }
+        let mut list: Vec<usize> = self.delete_pending.drain().collect();
+        self.delete_indices(shared, &mut list);
+    }
+
+    /// 指定したインデックスのポケモンをボックスから削除して保存する
+    fn delete_indices(&mut self, shared: &mut Shared, list: &mut Vec<usize>) {
+        // 後ろから消して位置がずれないようにする
+        list.sort_unstable_by(|a, b| b.cmp(a));
+        list.dedup();
+        let mut removed = false;
+        for &i in list.iter() {
+            if i < shared.box_file.list.len() {
+                shared.box_file.list.remove(i);
+                shift_set_on_remove(&mut self.selected, i);
+                shift_set_on_remove(&mut self.delete_pending, i);
+                removed = true;
+            }
+        }
+        if removed {
+            shared.save_box();
+            self.results.clear();
+            self.lv_pending.clear();
+            self.sort_lv.clear();
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         // 他の画面を挟んで戻ってきたら、Lv更新で保留していた並べ替えを反映する。未更新のLvは捨てる
         let pass = ui.ctx().cumulative_pass_nr();
@@ -825,12 +858,24 @@ impl BoxView {
             style::th(ui, "ボックス整理");
             // お気に入りは選べない(本家 selectedPokemonList)
             self.selected.retain(|&i| shared.box_file.list.get(i).is_some_and(|p| !p.favorite));
+            self.delete_pending.retain(|&i| shared.box_file.list.get(i).is_some_and(|p| !p.favorite));
             let selected_n = self.selected.len();
-            let r = ui.add_enabled_ui(selected_n > 0, |ui| style::form_button(ui, &format!("選択したポケモン({selected_n}匹)を削除"), style::ButtonKind::Important)).inner;
-            if r.clicked() {
-                let mut list: Vec<usize> = self.selected.iter().copied().collect();
-                list.sort_unstable();
-                self.confirm_delete = Some(("選択したポケモンを削除します。よろしいですか？".into(), list));
+            let cancel_n = self.selected.iter().filter(|i| self.delete_pending.contains(i)).count();
+            if cancel_n > 0 {
+                let r = style::form_button(ui, &format!("選択したポケモン({cancel_n}匹)の削除をやめる"), style::ButtonKind::Normal)
+                    .on_hover_text("選択したポケモンの削除予定(横線)を取り消します");
+                if r.clicked() {
+                    self.delete_pending.retain(|i| !self.selected.contains(i));
+                    self.selected.clear();
+                }
+            } else {
+                let r = ui
+                    .add_enabled_ui(selected_n > 0, |ui| style::form_button(ui, &format!("選択したポケモン({selected_n}匹)を削除"), style::ButtonKind::Important))
+                    .inner
+                    .on_hover_text("選択したポケモンに削除予定の印(横線)を付けます。画面を移動するかアプリを閉じると削除されます");
+                if r.clicked() {
+                    self.delete_pending.extend(self.selected.drain());
+                }
             }
             self.lv_pending.retain(|&i, lv| shared.box_file.list.get(i).is_some_and(|p| p.lv != *lv));
             let n = self.lv_pending.len();
@@ -850,6 +895,10 @@ impl BoxView {
             let r = ui.add_enabled_ui(selected_n > 0, |ui| style::form_button(ui, "選択を解除", style::ButtonKind::Normal)).inner.on_hover_text("選択中のポケモンをすべて解除します");
             if r.clicked() {
                 self.selected.clear();
+            }
+            let pending_n = self.delete_pending.len();
+            if pending_n > 0 {
+                ui.label(egui::RichText::new(format!("削除予定キャラ（{pending_n}体）あり")).size(16.0).strong().color(style::shortage()));
             }
             if self.mode.cleaning() {
                 let mut s = ListSetting::load(shared);
@@ -959,10 +1008,14 @@ impl BoxView {
                             list.remove(i);
                             let at = new_index.min(list.len());
                             list.insert(at, *pokemon);
+                            shift_set_on_move(&mut self.selected, i, at);
+                            shift_set_on_move(&mut self.delete_pending, i, at);
                         }
                         _ => {
                             let at = new_index.min(list.len());
                             list.insert(at, *pokemon);
+                            shift_set_on_insert(&mut self.selected, at);
+                            shift_set_on_insert(&mut self.delete_pending, at);
                         }
                     }
                     if let Some((seed, v)) = candy {
@@ -1137,6 +1190,7 @@ impl BoxView {
             None => String::new(),
         };
         let selected = &self.selected;
+        let delete_pending = &self.delete_pending;
         let lv_pending = &self.lv_pending;
         let results = &self.results;
         let cleaning = self.mode.cleaning();
@@ -1519,14 +1573,27 @@ impl BoxView {
                                 ui.painter().rect_filled(ui.max_rect().expand2(spacing / 2.0), 0.0, duplicate_color);
                             }
                         };
+                        let is_delete_pending = delete_pending.contains(&i);
+                        let paint_delete_pending = |ui: &mut egui::Ui| {
+                            if is_delete_pending {
+                                let spacing = ui.spacing().item_spacing;
+                                let rect = ui.max_rect().expand2(spacing / 2.0);
+                                let color = style::shortage().gamma_multiply(0.85);
+                                ui.painter().hline(rect.x_range(), rect.center().y, egui::Stroke::new(1.5, color));
+                            }
+                        };
                         for &col in cols {
                             row.col(|ui| {
                                 paint(ui);
                                 events.extend(body_cell(ui, col, i, result, require.as_ref()));
+                                paint_delete_pending(ui);
                             });
                         }
                         if last {
-                            row.col(|ui| paint(ui));
+                            row.col(|ui| {
+                                paint(ui);
+                                paint_delete_pending(ui);
+                            });
                         }
                         let r = row.response();
                         if r.hovered() {
@@ -1715,8 +1782,11 @@ impl BoxView {
             Some(RowAction::Move(i, delta)) => {
                 let j = i as i64 + delta as i64;
                 if j >= 0 && (j as usize) < shared.box_file.list.len() {
+                    let j = j as usize;
                     let item = shared.box_file.list.remove(i);
-                    shared.box_file.list.insert(j as usize, item);
+                    shared.box_file.list.insert(j, item);
+                    shift_set_on_move(&mut self.selected, i, j);
+                    shift_set_on_move(&mut self.delete_pending, i, j);
                     shared.save_box();
                     self.results.clear();
                     self.lv_pending.clear();
@@ -1897,19 +1967,8 @@ impl BoxView {
             });
         });
         if ok {
-            // 後ろから消して位置がずれないようにする
             let mut list = list.clone();
-            list.sort_unstable_by(|a, b| b.cmp(a));
-            list.dedup();
-            for i in list {
-                if i < shared.box_file.list.len() {
-                    shared.box_file.list.remove(i);
-                }
-            }
-            shared.save_box();
-            self.results.clear();
-            self.lv_pending.clear();
-            self.sort_lv.clear();
+            self.delete_indices(shared, &mut list);
             self.selected.clear();
         }
         if ok || close || r.should_close() {
@@ -2016,6 +2075,7 @@ impl BoxView {
                         self.lv_pending.clear();
                         self.sort_lv.clear();
                         self.selected.clear();
+                        self.delete_pending.clear();
                         self.results.clear();
                         self.import_text.clear();
                     } else if lines > 0 {
@@ -2425,4 +2485,48 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -
         }
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn shift_set_on_remove(set: &mut HashSet<usize>, removed: usize) {
+    *set = set
+        .iter()
+        .filter_map(|&idx| {
+            if idx == removed {
+                None
+            } else if idx > removed {
+                Some(idx - 1)
+            } else {
+                Some(idx)
+            }
+        })
+        .collect();
+}
+
+fn shift_set_on_insert(set: &mut HashSet<usize>, inserted: usize) {
+    *set = set.iter().map(|&idx| if idx >= inserted { idx + 1 } else { idx }).collect();
+}
+
+fn shift_set_on_move(set: &mut HashSet<usize>, from: usize, to: usize) {
+    let had_from = set.contains(&from);
+    shift_set_on_remove(set, from);
+    shift_set_on_insert(set, to);
+    if had_from {
+        set.insert(to);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shift_indices_on_remove_and_move() {
+        let mut set: HashSet<usize> = [0, 2, 4].into_iter().collect();
+        shift_set_on_remove(&mut set, 2);
+        assert_eq!(set, [0, 3].into_iter().collect());
+
+        let mut set: HashSet<usize> = [1, 3].into_iter().collect();
+        shift_set_on_move(&mut set, 1, 2);
+        assert_eq!(set, [2, 3].into_iter().collect());
+    }
 }

@@ -267,6 +267,9 @@ impl eframe::App for App {
             }
         }
         egui::Panel::top("header").frame(egui::Frame::new()).show(ui, |ui| self.header(ui));
+        if self.tab != Tab::Box {
+            self.box_view.commit_pending_deletes(&mut self.shared);
+        }
         if !self.shared.status.is_empty() {
             egui::Panel::bottom("status").show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -310,6 +313,10 @@ impl eframe::App for App {
                 ui.label("未実装です");
             }
         });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.box_view.commit_pending_deletes(&mut self.shared);
     }
 }
 
