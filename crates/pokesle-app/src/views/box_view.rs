@@ -805,7 +805,8 @@ impl BoxView {
         }
         // 2段目: キーワード
         ui.add_space(5.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
             style::th(ui, "表示モード");
             let label = Mode::ALL.iter().find(|(m, _)| *m == self.mode).map_or("", |(_, l)| *l);
             egui::ComboBox::from_id_salt("box_mode").selected_text(label).show_ui(ui, |ui| {
@@ -815,17 +816,17 @@ impl BoxView {
                     }
                 }
             });
-            ui.add_space(10.0);
+            ui.add_space(5.0);
             style::th(ui, "キーワード");
             if ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("名前、食材名、スキル名など").desired_width(200.0)).changed() {
                 self.page = 0;
             }
-            ui.add_space(10.0);
+            ui.add_space(5.0);
             style::th(ui, "ボックス整理");
             // お気に入りは選べない(本家 selectedPokemonList)
             self.selected.retain(|&i| shared.box_file.list.get(i).is_some_and(|p| !p.favorite));
-            let n = self.selected.len();
-            let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, &format!("選択したポケモン({n}匹)を削除"), style::ButtonKind::Important)).inner;
+            let selected_n = self.selected.len();
+            let r = ui.add_enabled_ui(selected_n > 0, |ui| style::form_button(ui, &format!("選択したポケモン({selected_n}匹)を削除"), style::ButtonKind::Important)).inner;
             if r.clicked() {
                 let mut list: Vec<usize> = self.selected.iter().copied().collect();
                 list.sort_unstable();
@@ -845,6 +846,10 @@ impl BoxView {
             let r = ui.add_enabled_ui(n > 0, |ui| style::form_button(ui, "Lvの変更を破棄", style::ButtonKind::Normal)).inner;
             if r.clicked() {
                 self.lv_pending.clear();
+            }
+            let r = ui.add_enabled_ui(selected_n > 0, |ui| style::form_button(ui, "選択を解除", style::ButtonKind::Normal)).inner.on_hover_text("選択中のポケモンをすべて解除します");
+            if r.clicked() {
+                self.selected.clear();
             }
             if self.mode.cleaning() {
                 let mut s = ListSetting::load(shared);
