@@ -47,6 +47,28 @@
  ],
  "entries": [
   {
+   "date": "2026/10/26",
+   "items": [
+    {
+     "segments": [
+      {
+       "text": "機能改善"
+      }
+     ],
+     "children": [
+      {
+       "segments": [
+        {
+         "text": "ムウマ・ムウマージを追加"
+        }
+       ],
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
    "date": "2026/10/22",
    "items": [
     {

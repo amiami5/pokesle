@@ -1,8 +1,8 @@
 {
- "upstreamCommit": "a0f6350d9cd8c320e946689510a9c6dd5d5b912f",
+ "upstreamCommit": "3a832d0d0651427f11c11ff08c930027cd2ea73b",
  "version": {
-  "history": 2026102201,
-  "evaluate": 20261022
+  "history": 2026102601,
+  "evaluate": 20261026
  },
  "berries": [
   {
@@ -3080,6 +3080,42 @@
    "foodList": null
   },
   {
+   "name": "マジカルフレイム(料理アドバンスS)",
+   "effect": [
+    {
+     "main": 7,
+     "sub": 1
+    },
+    {
+     "main": 10,
+     "sub": 2
+    },
+    {
+     "main": 12,
+     "sub": 2
+    },
+    {
+     "main": 17,
+     "sub": 3
+    },
+    {
+     "main": 22,
+     "sub": 3
+    },
+    {
+     "main": 27,
+     "sub": 4
+    },
+    {
+     "main": 31,
+     "sub": 5
+    }
+   ],
+   "category": "cooking",
+   "skillSpecialtyOnly": true,
+   "foodList": null
+  },
+  {
    "name": "へんしん(スキルコピー)",
    "effect": [
     null,
@@ -4158,6 +4194,7 @@
   "ほっぺすりすり(げんきエールS)",
   "料理チャンスS",
   "料理パワーアップS",
+  "マジカルフレイム(料理アドバンスS)",
   "エナジーチャージS",
   "エナジーチャージS(ランダム)",
   "エナジーチャージM",
@@ -17444,6 +17481,112 @@
    "isLast": true
   },
   {
+   "name": "ムウマ",
+   "no": 200,
+   "specialty": "スキル",
+   "berry": "ブリー",
+   "foodList": [
+    {
+     "name": "ほっこりポテト",
+     "numList": [
+      1,
+      2,
+      4
+     ]
+    },
+    {
+     "name": "めざましコーヒー",
+     "numList": [
+      null,
+      2,
+      3
+     ]
+    },
+    {
+     "name": "あんみんトマト",
+     "numList": [
+      null,
+      null,
+      4
+     ]
+    }
+   ],
+   "skill": "料理パワーアップS",
+   "help": 2800,
+   "bag": 13,
+   "foodRate": 0.15,
+   "skillRate": 0.047,
+   "legend": false,
+   "kaihou": false,
+   "exp": 1,
+   "candyName": "ムウマ",
+   "evolve": {
+    "before": null,
+    "lv": null,
+    "candy": null,
+    "itemList": [
+     ""
+    ],
+    "sleep": null
+   },
+   "fieldList": [
+    {
+     "name": "ワカクサ本島",
+     "type": "うとうと"
+    },
+    {
+     "name": "ウノハナ雪原",
+     "type": "うとうと"
+    },
+    {
+     "name": "ゴールド旧発電所",
+     "type": "うとうと"
+    },
+    {
+     "name": "ワカクサ本島EX",
+     "type": "うとうと"
+    }
+   ],
+   "fp": 16,
+   "order": 114,
+   "type": "ゴースト",
+   "foodNameList": [
+    "ほっこりポテト",
+    "めざましコーヒー",
+    "あんみんトマト"
+   ],
+   "foodNumListMap": {
+    "ほっこりポテト": [
+     1,
+     2,
+     4
+    ],
+    "めざましコーヒー": [
+     null,
+     2,
+     3
+    ],
+    "あんみんトマト": [
+     null,
+     null,
+     4
+    ]
+   },
+   "afterList": [
+    "ムウマージ"
+   ],
+   "evolveLv": 1,
+   "remainEvolveLv": 1,
+   "evolveCandyMap": {
+    "ムウマ": 0
+   },
+   "requireSleep": {
+    "ムウマ": false
+   },
+   "seed": "ムウマ",
+   "isLast": false
+  },
+  {
    "name": "ソーナンス",
    "no": 202,
    "specialty": "スキル",
@@ -17503,7 +17646,7 @@
     }
    ],
    "fp": 7,
-   "order": 114,
+   "order": 115,
    "type": "エスパー",
    "foodNameList": [
     "とくせんリンゴ",
@@ -17608,7 +17751,7 @@
     }
    ],
    "fp": 20,
-   "order": 115,
+   "order": 116,
    "type": "はがね",
    "foodNameList": [
     "あんみんトマト",
@@ -17720,7 +17863,7 @@
     }
    ],
    "fp": 16,
-   "order": 116,
+   "order": 117,
    "type": "むし",
    "foodNameList": [
     "ピュアなオイル",
@@ -17830,7 +17973,7 @@
     }
    ],
    "fp": 16,
-   "order": 117,
+   "order": 118,
    "type": "むし",
    "foodNameList": [
     "あまいミツ",
@@ -17932,7 +18075,7 @@
     }
    ],
    "fp": 16,
-   "order": 118,
+   "order": 119,
    "type": "あく",
    "foodNameList": [
     "マメミート",
@@ -18034,7 +18177,7 @@
     }
    ],
    "fp": 16,
-   "order": 119,
+   "order": 120,
    "type": "ひこう",
    "foodNameList": [
     "とくせんエッグ",
@@ -18136,7 +18279,7 @@
     }
    ],
    "fp": 5,
-   "order": 120,
+   "order": 121,
    "type": "あく",
    "foodNameList": [
     "げきからハーブ",
@@ -18234,7 +18377,7 @@
     }
    ],
    "fp": 12,
-   "order": 121,
+   "order": 122,
    "type": "あく",
    "foodNameList": [
     "げきからハーブ",
@@ -18346,7 +18489,7 @@
     }
    ],
    "fp": 20,
-   "order": 122,
+   "order": 123,
    "type": "ノーマル",
    "foodNameList": [
     "とくせんエッグ",
@@ -18452,7 +18595,7 @@
     }
    ],
    "fp": 30,
-   "order": 123,
+   "order": 124,
    "type": "でんき",
    "foodNameList": [
     "マメミート",
@@ -18558,7 +18701,7 @@
     }
    ],
    "fp": 30,
-   "order": 124,
+   "order": 125,
    "type": "ほのお",
    "foodNameList": [
     "ピュアなオイル",
@@ -18668,7 +18811,7 @@
     }
    ],
    "fp": 30,
-   "order": 125,
+   "order": 126,
    "type": "みず",
    "foodNameList": [
     "とくせんリンゴ",
@@ -18774,7 +18917,7 @@
     }
    ],
    "fp": 5,
-   "order": 126,
+   "order": 127,
    "type": "いわ",
    "foodNameList": [
     "あったかジンジャー",
@@ -18872,7 +19015,7 @@
     }
    ],
    "fp": 12,
-   "order": 127,
+   "order": 128,
    "type": "いわ",
    "foodNameList": [
     "あったかジンジャー",
@@ -18972,7 +19115,7 @@
     }
    ],
    "fp": 25,
-   "order": 128,
+   "order": 129,
    "type": "あく",
    "foodNameList": [
     "あったかジンジャー",
@@ -19086,7 +19229,7 @@
     }
    ],
    "fp": 5,
-   "order": 129,
+   "order": 130,
    "type": "くさ",
    "foodNameList": [
     "とくせんエッグ",
@@ -19196,7 +19339,7 @@
     }
    ],
    "fp": 12,
-   "order": 130,
+   "order": 131,
    "type": "くさ",
    "foodNameList": [
     "とくせんエッグ",
@@ -19308,7 +19451,7 @@
     }
    ],
    "fp": 20,
-   "order": 131,
+   "order": 132,
    "type": "くさ",
    "foodNameList": [
     "とくせんエッグ",
@@ -19414,7 +19557,7 @@
     }
    ],
    "fp": 5,
-   "order": 132,
+   "order": 133,
    "type": "ほのお",
    "foodNameList": [
     "あじわいキノコ",
@@ -19516,7 +19659,7 @@
     }
    ],
    "fp": 12,
-   "order": 133,
+   "order": 134,
    "type": "かくとう",
    "foodNameList": [
     "あじわいキノコ",
@@ -19620,7 +19763,7 @@
     }
    ],
    "fp": 20,
-   "order": 134,
+   "order": 135,
    "type": "かくとう",
    "foodNameList": [
     "あじわいキノコ",
@@ -19730,7 +19873,7 @@
     }
    ],
    "fp": 5,
-   "order": 135,
+   "order": 136,
    "type": "みず",
    "foodNameList": [
     "ワカクサコーン",
@@ -19836,7 +19979,7 @@
     }
    ],
    "fp": 12,
-   "order": 136,
+   "order": 137,
    "type": "じめん",
    "foodNameList": [
     "ワカクサコーン",
@@ -19944,7 +20087,7 @@
     }
    ],
    "fp": 20,
-   "order": 137,
+   "order": 138,
    "type": "じめん",
    "foodNameList": [
     "ワカクサコーン",
@@ -20046,7 +20189,7 @@
     }
    ],
    "fp": 5,
-   "order": 138,
+   "order": 139,
    "type": "エスパー",
    "foodNameList": [
     "とくせんリンゴ",
@@ -20145,7 +20288,7 @@
     }
    ],
    "fp": 12,
-   "order": 139,
+   "order": 140,
    "type": "エスパー",
    "foodNameList": [
     "とくせんリンゴ",
@@ -20246,7 +20389,7 @@
     }
    ],
    "fp": 20,
-   "order": 140,
+   "order": 141,
    "type": "エスパー",
    "foodNameList": [
     "とくせんリンゴ",
@@ -20352,7 +20495,7 @@
     }
    ],
    "fp": 5,
-   "order": 141,
+   "order": 142,
    "type": "ノーマル",
    "foodNameList": [
     "あんみんトマト",
@@ -20454,7 +20597,7 @@
     }
    ],
    "fp": 12,
-   "order": 142,
+   "order": 143,
    "type": "ノーマル",
    "foodNameList": [
     "あんみんトマト",
@@ -20558,7 +20701,7 @@
     }
    ],
    "fp": 22,
-   "order": 143,
+   "order": 144,
    "type": "ノーマル",
    "foodNameList": [
     "あんみんトマト",
@@ -20660,7 +20803,7 @@
     }
    ],
    "fp": 16,
-   "order": 144,
+   "order": 145,
    "type": "あく",
    "foodNameList": [
     "ピュアなオイル",
@@ -20766,7 +20909,7 @@
     }
    ],
    "fp": 16,
-   "order": 145,
+   "order": 146,
    "type": "はがね",
    "foodNameList": [
     "ピュアなオイル",
@@ -20864,7 +21007,7 @@
     }
    ],
    "fp": 5,
-   "order": 146,
+   "order": 147,
    "type": "はがね",
    "foodNameList": [
     "マメミート",
@@ -20962,7 +21105,7 @@
     }
    ],
    "fp": 12,
-   "order": 147,
+   "order": 148,
    "type": "はがね",
    "foodNameList": [
     "マメミート",
@@ -21062,7 +21205,7 @@
     }
    ],
    "fp": 20,
-   "order": 148,
+   "order": 149,
    "type": "はがね",
    "foodNameList": [
     "マメミート",
@@ -21172,7 +21315,7 @@
     }
    ],
    "fp": 10,
-   "order": 149,
+   "order": 150,
    "type": "でんき",
    "foodNameList": [
     "めざましコーヒー",
@@ -21278,7 +21421,7 @@
     }
    ],
    "fp": 10,
-   "order": 150,
+   "order": 151,
    "type": "でんき",
    "foodNameList": [
     "あまいミツ",
@@ -21380,7 +21523,7 @@
     }
    ],
    "fp": 5,
-   "order": 151,
+   "order": 152,
    "type": "どく",
    "foodNameList": [
     "ワカクサ大豆",
@@ -21478,7 +21621,7 @@
     }
    ],
    "fp": 12,
-   "order": 152,
+   "order": 153,
    "type": "どく",
    "foodNameList": [
     "ワカクサ大豆",
@@ -21578,7 +21721,7 @@
     }
    ],
    "fp": 5,
-   "order": 153,
+   "order": 154,
    "type": "じめん",
    "foodNameList": [
     "つやつやアボカド",
@@ -21676,7 +21819,7 @@
     }
    ],
    "fp": 12,
-   "order": 154,
+   "order": 155,
    "type": "じめん",
    "foodNameList": [
     "つやつやアボカド",
@@ -21776,7 +21919,7 @@
     }
    ],
    "fp": 20,
-   "order": 155,
+   "order": 156,
    "type": "じめん",
    "foodNameList": [
     "つやつやアボカド",
@@ -21882,7 +22025,7 @@
     }
    ],
    "fp": 5,
-   "order": 156,
+   "order": 157,
    "type": "ひこう",
    "foodNameList": [
     "とくせんエッグ",
@@ -21980,7 +22123,7 @@
     }
    ],
    "fp": 12,
-   "order": 157,
+   "order": 158,
    "type": "ドラゴン",
    "foodNameList": [
     "とくせんエッグ",
@@ -22084,7 +22227,7 @@
     }
    ],
    "fp": 5,
-   "order": 158,
+   "order": 159,
    "type": "ゴースト",
    "foodNameList": [
     "ピュアなオイル",
@@ -22186,7 +22329,7 @@
     }
    ],
    "fp": 16,
-   "order": 159,
+   "order": 160,
    "type": "ゴースト",
    "foodNameList": [
     "ピュアなオイル",
@@ -22290,7 +22433,7 @@
     }
    ],
    "fp": 16,
-   "order": 160,
+   "order": 161,
    "type": "あく",
    "foodNameList": [
     "リラックスカカオ",
@@ -22388,7 +22531,7 @@
     }
    ],
    "fp": 5,
-   "order": 161,
+   "order": 162,
    "type": "エスパー",
    "foodNameList": [
     "とくせんリンゴ",
@@ -22490,7 +22633,7 @@
     }
    ],
    "fp": 5,
-   "order": 162,
+   "order": 163,
    "type": "こおり",
    "foodNameList": [
     "ピュアなオイル",
@@ -22579,7 +22722,7 @@
    },
    "fieldList": [],
    "fp": 5,
-   "order": 163,
+   "order": 164,
    "type": "こおり",
    "foodNameList": [
     "ピュアなオイル",
@@ -22677,7 +22820,7 @@
     }
    ],
    "fp": 12,
-   "order": 164,
+   "order": 165,
    "type": "こおり",
    "foodNameList": [
     "ピュアなオイル",
@@ -22777,7 +22920,7 @@
     }
    ],
    "fp": 20,
-   "order": 165,
+   "order": 166,
    "type": "こおり",
    "foodNameList": [
     "ピュアなオイル",
@@ -22875,7 +23018,7 @@
     }
    ],
    "fp": 5,
-   "order": 166,
+   "order": 167,
    "type": "ドラゴン",
    "foodNameList": [
     "ほっこりポテト",
@@ -22969,7 +23112,7 @@
     }
    ],
    "fp": 12,
-   "order": 167,
+   "order": 168,
    "type": "ドラゴン",
    "foodNameList": [
     "ほっこりポテト",
@@ -23065,7 +23208,7 @@
     }
    ],
    "fp": 25,
-   "order": 168,
+   "order": 169,
    "type": "ドラゴン",
    "foodNameList": [
     "ほっこりポテト",
@@ -23175,7 +23318,7 @@
     }
    ],
    "fp": 30,
-   "order": 169,
+   "order": 170,
    "type": "ドラゴン",
    "foodNameList": [
     "あんみんトマト",
@@ -23281,7 +23424,7 @@
     }
    ],
    "fp": 30,
-   "order": 170,
+   "order": 171,
    "type": "ドラゴン",
    "foodNameList": [
     "あんみんトマト",
@@ -23387,7 +23530,7 @@
     }
    ],
    "fp": 5,
-   "order": 171,
+   "order": 172,
    "type": "くさ",
    "foodNameList": [
     "あじわいキノコ",
@@ -23493,7 +23636,7 @@
     }
    ],
    "fp": 12,
-   "order": 172,
+   "order": 173,
    "type": "くさ",
    "foodNameList": [
     "あじわいキノコ",
@@ -23601,7 +23744,7 @@
     }
    ],
    "fp": 20,
-   "order": 173,
+   "order": 174,
    "type": "じめん",
    "foodNameList": [
     "あじわいキノコ",
@@ -23711,7 +23854,7 @@
     }
    ],
    "fp": 5,
-   "order": 174,
+   "order": 175,
    "type": "ほのお",
    "foodNameList": [
     "げきからハーブ",
@@ -23817,7 +23960,7 @@
     }
    ],
    "fp": 12,
-   "order": 175,
+   "order": 176,
    "type": "かくとう",
    "foodNameList": [
     "げきからハーブ",
@@ -23925,7 +24068,7 @@
     }
    ],
    "fp": 20,
-   "order": 176,
+   "order": 177,
    "type": "かくとう",
    "foodNameList": [
     "げきからハーブ",
@@ -24039,7 +24182,7 @@
     }
    ],
    "fp": 5,
-   "order": 177,
+   "order": 178,
    "type": "みず",
    "foodNameList": [
     "とくせんエッグ",
@@ -24149,7 +24292,7 @@
     }
    ],
    "fp": 12,
-   "order": 178,
+   "order": 179,
    "type": "みず",
    "foodNameList": [
     "とくせんエッグ",
@@ -24261,7 +24404,7 @@
     }
    ],
    "fp": 20,
-   "order": 179,
+   "order": 180,
    "type": "はがね",
    "foodNameList": [
     "とくせんエッグ",
@@ -24359,7 +24502,7 @@
     }
    ],
    "fp": 5,
-   "order": 180,
+   "order": 181,
    "type": "でんき",
    "foodNameList": [
     "あんみんトマト",
@@ -24453,7 +24596,7 @@
     }
    ],
    "fp": 12,
-   "order": 181,
+   "order": 182,
    "type": "でんき",
    "foodNameList": [
     "あんみんトマト",
@@ -24549,7 +24692,7 @@
     }
    ],
    "fp": 20,
-   "order": 182,
+   "order": 183,
    "type": "でんき",
    "foodNameList": [
     "あんみんトマト",
@@ -24655,7 +24798,7 @@
     }
    ],
    "fp": 5,
-   "order": 183,
+   "order": 184,
    "type": "ゴースト",
    "foodNameList": [
     "ワカクサコーン",
@@ -24753,7 +24896,7 @@
     }
    ],
    "fp": 12,
-   "order": 184,
+   "order": 185,
    "type": "ゴースト",
    "foodNameList": [
     "ワカクサコーン",
@@ -24790,6 +24933,114 @@
     "フワンテ": false
    },
    "seed": "フワンテ",
+   "remainEvolveLv": 0,
+   "isLast": true
+  },
+  {
+   "name": "ムウマージ",
+   "no": 429,
+   "specialty": "スキル",
+   "berry": "ブリー",
+   "foodList": [
+    {
+     "name": "ほっこりポテト",
+     "numList": [
+      1,
+      2,
+      4
+     ]
+    },
+    {
+     "name": "めざましコーヒー",
+     "numList": [
+      null,
+      2,
+      3
+     ]
+    },
+    {
+     "name": "あんみんトマト",
+     "numList": [
+      null,
+      null,
+      4
+     ]
+    }
+   ],
+   "skill": "マジカルフレイム(料理アドバンスS)",
+   "help": 2400,
+   "bag": 17,
+   "foodRate": 0.142,
+   "skillRate": 0.036,
+   "legend": false,
+   "kaihou": false,
+   "exp": 1,
+   "candyName": "ムウマ",
+   "evolve": {
+    "before": "ムウマ",
+    "lv": null,
+    "candy": 80,
+    "itemList": [
+     "やみのいし"
+    ],
+    "sleep": null
+   },
+   "fieldList": [
+    {
+     "name": "ワカクサ本島",
+     "type": "うとうと"
+    },
+    {
+     "name": "ウノハナ雪原",
+     "type": "うとうと"
+    },
+    {
+     "name": "ゴールド旧発電所",
+     "type": "うとうと"
+    },
+    {
+     "name": "ワカクサ本島EX",
+     "type": "うとうと"
+    }
+   ],
+   "fp": 20,
+   "order": 186,
+   "type": "ゴースト",
+   "foodNameList": [
+    "ほっこりポテト",
+    "めざましコーヒー",
+    "あんみんトマト"
+   ],
+   "foodNumListMap": {
+    "ほっこりポテト": [
+     1,
+     2,
+     4
+    ],
+    "めざましコーヒー": [
+     null,
+     2,
+     3
+    ],
+    "あんみんトマト": [
+     null,
+     null,
+     4
+    ]
+   },
+   "afterList": [
+    "ムウマージ"
+   ],
+   "evolveLv": 2,
+   "evolveCandyMap": {
+    "ムウマージ": 0,
+    "ムウマ": 80
+   },
+   "requireSleep": {
+    "ムウマージ": false,
+    "ムウマ": false
+   },
+   "seed": "ムウマ",
    "remainEvolveLv": 0,
    "isLast": true
   },
@@ -24861,7 +25112,7 @@
     }
    ],
    "fp": 20,
-   "order": 185,
+   "order": 187,
    "type": "あく",
    "foodNameList": [
     "めざましコーヒー",
@@ -24965,7 +25216,7 @@
     }
    ],
    "fp": 5,
-   "order": 186,
+   "order": 188,
    "type": "いわ",
    "foodNameList": [
     "あんみんトマト",
@@ -25059,7 +25310,7 @@
     }
    ],
    "fp": 5,
-   "order": 187,
+   "order": 189,
    "type": "エスパー",
    "foodNameList": [
     "あんみんトマト",
@@ -25169,7 +25420,7 @@
     }
    ],
    "fp": 5,
-   "order": 188,
+   "order": 190,
    "type": "ノーマル",
    "foodNameList": [
     "とくせんエッグ",
@@ -25275,7 +25526,7 @@
     }
    ],
    "fp": 16,
-   "order": 189,
+   "order": 191,
    "type": "あく",
    "foodNameList": [
     "あじわいキノコ",
@@ -25377,7 +25628,7 @@
     }
    ],
    "fp": 5,
-   "order": 190,
+   "order": 192,
    "type": "かくとう",
    "foodNameList": [
     "ピュアなオイル",
@@ -25471,7 +25722,7 @@
     }
    ],
    "fp": 20,
-   "order": 191,
+   "order": 193,
    "type": "かくとう",
    "foodNameList": [
     "ピュアなオイル",
@@ -25567,7 +25818,7 @@
     }
    ],
    "fp": 5,
-   "order": 192,
+   "order": 194,
    "type": "どく",
    "foodNameList": [
     "ピュアなオイル",
@@ -25655,7 +25906,7 @@
     }
    ],
    "fp": 12,
-   "order": 193,
+   "order": 195,
    "type": "どく",
    "foodNameList": [
     "ピュアなオイル",
@@ -25749,7 +26000,7 @@
     }
    ],
    "fp": 5,
-   "order": 194,
+   "order": 196,
    "type": "こおり",
    "foodNameList": [
     "あんみんトマト",
@@ -25847,7 +26098,7 @@
     }
    ],
    "fp": 12,
-   "order": 195,
+   "order": 197,
    "type": "こおり",
    "foodNameList": [
     "あんみんトマト",
@@ -25951,7 +26202,7 @@
     }
    ],
    "fp": 20,
-   "order": 196,
+   "order": 198,
    "type": "あく",
    "foodNameList": [
     "マメミート",
@@ -26047,7 +26298,7 @@
     }
    ],
    "fp": 22,
-   "order": 197,
+   "order": 199,
    "type": "はがね",
    "foodNameList": [
     "ピュアなオイル",
@@ -26143,7 +26394,7 @@
     }
    ],
    "fp": 22,
-   "order": 198,
+   "order": 200,
    "type": "フェアリー",
    "foodNameList": [
     "とくせんエッグ",
@@ -26249,7 +26500,7 @@
     }
    ],
    "fp": 20,
-   "order": 199,
+   "order": 201,
    "type": "くさ",
    "foodNameList": [
     "モーモーミルク",
@@ -26353,7 +26604,7 @@
     }
    ],
    "fp": 20,
-   "order": 200,
+   "order": 202,
    "type": "こおり",
    "foodNameList": [
     "モーモーミルク",
@@ -26453,7 +26704,7 @@
     }
    ],
    "fp": 20,
-   "order": 201,
+   "order": 203,
    "type": "かくとう",
    "foodNameList": [
     "とくせんリンゴ",
@@ -26563,7 +26814,7 @@
     }
    ],
    "fp": 30,
-   "order": 202,
+   "order": 204,
    "type": "エスパー",
    "foodNameList": [
     "あったかジンジャー",
@@ -26692,7 +26943,7 @@
    },
    "fieldList": [],
    "fp": 30,
-   "order": 203,
+   "order": 205,
    "type": "あく",
    "foodNameList": [
     "とくせんリンゴ",
@@ -26824,7 +27075,7 @@
     }
    ],
    "fp": 5,
-   "order": 204,
+   "order": 206,
    "type": "エスパー",
    "foodNameList": [
     "モーモーミルク",
@@ -26926,7 +27177,7 @@
     }
    ],
    "fp": 20,
-   "order": 205,
+   "order": 207,
    "type": "エスパー",
    "foodNameList": [
     "モーモーミルク",
@@ -27022,7 +27273,7 @@
     }
    ],
    "fp": 5,
-   "order": 206,
+   "order": 208,
    "type": "むし",
    "foodNameList": [
     "つやつやアボカド",
@@ -27116,7 +27367,7 @@
     }
    ],
    "fp": 12,
-   "order": 207,
+   "order": 209,
    "type": "むし",
    "foodNameList": [
     "つやつやアボカド",
@@ -27228,7 +27479,7 @@
     }
    ],
    "fp": 5,
-   "order": 208,
+   "order": 210,
    "type": "どく",
    "foodNameList": [
     "あじわいキノコ",
@@ -27338,7 +27589,7 @@
     }
    ],
    "fp": 12,
-   "order": 209,
+   "order": 211,
    "type": "どく",
    "foodNameList": [
     "あじわいキノコ",
@@ -27450,7 +27701,7 @@
     }
    ],
    "fp": 5,
-   "order": 210,
+   "order": 212,
    "type": "ひこう",
    "foodNameList": [
     "マメミート",
@@ -27556,7 +27807,7 @@
     }
    ],
    "fp": 12,
-   "order": 211,
+   "order": 213,
    "type": "ひこう",
    "foodNameList": [
     "マメミート",
@@ -27664,7 +27915,7 @@
     }
    ],
    "fp": 5,
-   "order": 212,
+   "order": 214,
    "type": "いわ",
    "foodNameList": [
     "マメミート",
@@ -27770,7 +28021,7 @@
     }
    ],
    "fp": 20,
-   "order": 213,
+   "order": 215,
    "type": "いわ",
    "foodNameList": [
     "マメミート",
@@ -27874,7 +28125,7 @@
     }
    ],
    "fp": 20,
-   "order": 214,
+   "order": 216,
    "type": "フェアリー",
    "foodNameList": [
     "モーモーミルク",
@@ -27986,7 +28237,7 @@
     }
    ],
    "fp": 16,
-   "order": 215,
+   "order": 217,
    "type": "ひこう",
    "foodNameList": [
     "げきからハーブ",
@@ -28092,7 +28343,7 @@
     }
    ],
    "fp": 16,
-   "order": 216,
+   "order": 218,
    "type": "でんき",
    "foodNameList": [
     "とくせんリンゴ",
@@ -28194,7 +28445,7 @@
     }
    ],
    "fp": 5,
-   "order": 217,
+   "order": 219,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28296,7 +28547,7 @@
     }
    ],
    "fp": 5,
-   "order": 218,
+   "order": 220,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28398,7 +28649,7 @@
     }
    ],
    "fp": 5,
-   "order": 219,
+   "order": 221,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28500,7 +28751,7 @@
     }
    ],
    "fp": 5,
-   "order": 220,
+   "order": 222,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28602,7 +28853,7 @@
     }
    ],
    "fp": 20,
-   "order": 221,
+   "order": 223,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28706,7 +28957,7 @@
     }
    ],
    "fp": 20,
-   "order": 222,
+   "order": 224,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28810,7 +29061,7 @@
     }
    ],
    "fp": 20,
-   "order": 223,
+   "order": 225,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -28914,7 +29165,7 @@
     }
    ],
    "fp": 20,
-   "order": 224,
+   "order": 226,
    "type": "ゴースト",
    "foodNameList": [
     "ずっしりカボチャ",
@@ -29022,7 +29273,7 @@
     }
    ],
    "fp": 5,
-   "order": 225,
+   "order": 227,
    "type": "ドラゴン",
    "foodNameList": [
     "とくせんリンゴ",
@@ -29128,7 +29379,7 @@
     }
    ],
    "fp": 12,
-   "order": 226,
+   "order": 228,
    "type": "ドラゴン",
    "foodNameList": [
     "とくせんリンゴ",
@@ -29228,7 +29479,7 @@
     }
    ],
    "fp": 5,
-   "order": 227,
+   "order": 229,
    "type": "むし",
    "foodNameList": [
     "めざましコーヒー",
@@ -29326,7 +29577,7 @@
     }
    ],
    "fp": 12,
-   "order": 228,
+   "order": 230,
    "type": "むし",
    "foodNameList": [
     "めざましコーヒー",
@@ -29426,7 +29677,7 @@
     }
    ],
    "fp": 22,
-   "order": 229,
+   "order": 231,
    "type": "むし",
    "foodNameList": [
     "めざましコーヒー",
@@ -29532,7 +29783,7 @@
     }
    ],
    "fp": 5,
-   "order": 230,
+   "order": 232,
    "type": "フェアリー",
    "foodNameList": [
     "あまいミツ",
@@ -29634,7 +29885,7 @@
     }
    ],
    "fp": 12,
-   "order": 231,
+   "order": 233,
    "type": "フェアリー",
    "foodNameList": [
     "あまいミツ",
@@ -29730,7 +29981,7 @@
     }
    ],
    "fp": 5,
-   "order": 232,
+   "order": 234,
    "type": "かくとう",
    "foodNameList": [
     "ワカクサコーン",
@@ -29824,7 +30075,7 @@
     }
    ],
    "fp": 12,
-   "order": 233,
+   "order": 235,
    "type": "かくとう",
    "foodNameList": [
     "ワカクサコーン",
@@ -29932,7 +30183,7 @@
     }
    ],
    "fp": 16,
-   "order": 234,
+   "order": 236,
    "type": "フェアリー",
    "foodNameList": [
     "ワカクサコーン",
@@ -30038,7 +30289,7 @@
     }
    ],
    "fp": 16,
-   "order": 235,
+   "order": 237,
    "type": "はがね",
    "foodNameList": [
     "モーモーミルク",
@@ -30140,7 +30391,7 @@
     }
    ],
    "fp": 16,
-   "order": 236,
+   "order": 238,
    "type": "ゴースト",
    "foodNameList": [
     "とくせんリンゴ",
@@ -30250,7 +30501,7 @@
     }
    ],
    "fp": 16,
-   "order": 237,
+   "order": 239,
    "type": "ドラゴン",
    "foodNameList": [
     "ワカクサ大豆",
@@ -30360,7 +30611,7 @@
     }
    ],
    "fp": 16,
-   "order": 238,
+   "order": 240,
    "type": "ひこう",
    "foodNameList": [
     "ピュアなオイル",
@@ -30466,7 +30717,7 @@
     }
    ],
    "fp": 5,
-   "order": 239,
+   "order": 241,
    "type": "どく",
    "foodNameList": [
     "モーモーミルク",
@@ -30569,7 +30820,7 @@
     }
    ],
    "fp": 20,
-   "order": 240,
+   "order": 242,
    "type": "どく",
    "foodNameList": [
     "モーモーミルク",
@@ -30673,7 +30924,7 @@
     }
    ],
    "fp": 20,
-   "order": 241,
+   "order": 243,
    "type": "どく",
    "foodNameList": [
     "モーモーミルク",
@@ -30777,7 +31028,7 @@
     }
    ],
    "fp": 5,
-   "order": 242,
+   "order": 244,
    "type": "くさ",
    "foodNameList": [
     "ほっこりポテト",
@@ -30879,7 +31130,7 @@
     }
    ],
    "fp": 12,
-   "order": 243,
+   "order": 245,
    "type": "くさ",
    "foodNameList": [
     "ほっこりポテト",
@@ -30983,7 +31234,7 @@
     }
    ],
    "fp": 20,
-   "order": 244,
+   "order": 246,
    "type": "あく",
    "foodNameList": [
     "ほっこりポテト",
@@ -31093,7 +31344,7 @@
     }
    ],
    "fp": 5,
-   "order": 245,
+   "order": 247,
    "type": "ほのお",
    "foodNameList": [
     "とくせんリンゴ",
@@ -31195,7 +31446,7 @@
     }
    ],
    "fp": 12,
-   "order": 246,
+   "order": 248,
    "type": "ほのお",
    "foodNameList": [
     "とくせんリンゴ",
@@ -31299,7 +31550,7 @@
     }
    ],
    "fp": 20,
-   "order": 247,
+   "order": 249,
    "type": "ゴースト",
    "foodNameList": [
     "とくせんリンゴ",
@@ -31405,7 +31656,7 @@
     }
    ],
    "fp": 5,
-   "order": 248,
+   "order": 250,
    "type": "みず",
    "foodNameList": [
     "ワカクサ大豆",
@@ -31503,7 +31754,7 @@
     }
    ],
    "fp": 12,
-   "order": 249,
+   "order": 251,
    "type": "みず",
    "foodNameList": [
     "ワカクサ大豆",
@@ -31603,7 +31854,7 @@
     }
    ],
    "fp": 20,
-   "order": 250,
+   "order": 252,
    "type": "かくとう",
    "foodNameList": [
     "ワカクサ大豆",
@@ -31713,7 +31964,7 @@
     }
    ],
    "fp": 5,
-   "order": 251,
+   "order": 253,
    "type": "でんき",
    "foodNameList": [
     "リラックスカカオ",
@@ -31815,7 +32066,7 @@
     }
    ],
    "fp": 12,
-   "order": 252,
+   "order": 254,
    "type": "でんき",
    "foodNameList": [
     "リラックスカカオ",
@@ -31919,7 +32170,7 @@
     }
    ],
    "fp": 22,
-   "order": 253,
+   "order": 255,
    "type": "でんき",
    "foodNameList": [
     "リラックスカカオ",
@@ -32012,7 +32263,7 @@
    },
    "fieldList": [],
    "fp": 5,
-   "order": 254,
+   "order": 256,
    "type": "フェアリー",
    "foodNameList": [
     "あんみんトマト",
@@ -32101,7 +32352,7 @@
    },
    "fieldList": [],
    "fp": 12,
-   "order": 255,
+   "order": 257,
    "type": "フェアリー",
    "foodNameList": [
     "あんみんトマト",
@@ -32192,7 +32443,7 @@
    },
    "fieldList": [],
    "fp": 20,
-   "order": 256,
+   "order": 258,
    "type": "フェアリー",
    "foodNameList": [
     "あんみんトマト",
@@ -32298,7 +32549,7 @@
     }
    ],
    "fp": 5,
-   "order": 257,
+   "order": 259,
    "type": "こおり",
    "foodNameList": [
     "ほっこりポテト",
@@ -32396,7 +32647,7 @@
     }
    ],
    "fp": 20,
-   "order": 258,
+   "order": 260,
    "type": "こおり",
    "foodNameList": [
     "ほっこりポテト",
@@ -32500,7 +32751,7 @@
     }
    ],
    "fp": 12,
-   "order": 259,
+   "order": 261,
    "type": "どく",
    "foodNameList": [
     "リラックスカカオ",

@@ -263,7 +263,8 @@ impl BoxSimulator {
                 let use_candy = if config.simulation.fix_resource_mode == 0.0 {
                     0.0
                 } else {
-                    base.evolve_candy_map.get(&bx.name).copied().flatten().unwrap_or(f64::NAN)
+                    // 本家では evolve.candy が null の進化先(ドンカラス等)は null のまま渡り、加算時に +null = +0 として扱われる
+                    base.evolve_candy_map.get(&bx.name).copied().flatten().unwrap_or(0.0)
                 };
                 let require_lv = if bx.name != *pokemon_name { base.evolve.lv.filter(|x| *x != 0.0).unwrap_or(0.0) } else { 0.0 };
                 let mut modified = bx.clone();

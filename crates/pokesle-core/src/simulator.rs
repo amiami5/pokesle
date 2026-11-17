@@ -1081,6 +1081,10 @@ impl PokemonSimulator {
                 SkillKind::CookingPowerUpS => cooking_power_up_effect = ev(|e| e.value),
                 SkillKind::Minus => cooking_power_up_effect = ev(|e| e.main),
                 SkillKind::CookingChanceS => cooking_chance = Some(ev(|e| e.value)),
+                SkillKind::MagicalFlame => {
+                    cooking_power_up_effect = ev(|e| e.main);
+                    cooking_chance = Some(ev(|e| e.sub));
+                }
                 SkillKind::Henshin | SkillKind::Monomane => match self.mode {
                     Mode::Select | Mode::About => energy_per_skill = self.select_skill_energy(skill, skill_lv_index),
                     Mode::Team => {
