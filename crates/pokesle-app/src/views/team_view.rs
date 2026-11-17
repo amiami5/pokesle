@@ -212,7 +212,10 @@ impl TeamView {
     /// 実行ボタン・進捗・結果
     fn run_and_results(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         let can_run = self.job.is_none() && !shared.box_file.list.is_empty();
-        ui.horizontal(|ui| {
+        let has_results = self.result.as_ref().is_some_and(|(r, _)| !r.team_list.is_empty());
+        let mut set_open: Option<bool> = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
             ui.add_enabled_ui(can_run, |ui| {
                 if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
                     let config = shared.sim_config();
@@ -245,6 +248,12 @@ impl TeamView {
             if r.clicked() {
                 self.lv_pending.clear();
             }
+            if ui.add_enabled_ui(has_results, |ui| style::form_button(ui, "すべて展開", style::ButtonKind::Normal)).inner.clicked() {
+                set_open = Some(true);
+            }
+            if ui.add_enabled_ui(has_results, |ui| style::form_button(ui, "すべて折りたたむ", style::ButtonKind::Normal)).inner.clicked() {
+                set_open = Some(false);
+            }
         });
         if shared.box_file.list.is_empty() {
             ui.label("ボックスにポケモンを登録してください");
@@ -275,7 +284,7 @@ impl TeamView {
         ui.vertical(|ui| {
             for (rank, team) in result.team_list.iter().enumerate() {
                 let title = format!("{}: {} (最終エナジー:{})", rank + 1, fmt_num(team.score), fmt_num(team.energy));
-                let header = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0);
+                let header = egui::CollapsingHeader::new(egui::RichText::new(title).strong()).id_salt(("team_result", rank)).default_open(rank == 0).open(set_open);
                 let r = header.show(ui, |ui| {
                     egui::ScrollArea::horizontal().id_salt(("team_result_scroll", rank)).show(ui, |ui| {
                         let r = team_result::team_table(ui, team, &shared.config, result_config, setting, short, lv_state);
