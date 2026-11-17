@@ -335,7 +335,9 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
 {
   const fixBox = makeBox(30).map((p) => ({ ...p, lv: 10 + (p.lv % 40), nextExp: p.index % 3 == 0 ? 50 : null }));
   const lvList = [30, 50, 60, 70];
-  const afterNames = [...new Set(fixBox.flatMap((p) => Pokemon.map[p.name].afterList))].filter((n) => !Pokemon.map[n].kaihou);
+  const afterNames = [...new Set(fixBox.flatMap((p) => Pokemon.map[p.name].afterList))]
+    .filter((n) => !Pokemon.map[n].kaihou)
+    .sort((a, b) => (`${a}_` < `${b}_` ? -1 : `${a}_` > `${b}_` ? 1 : 0));
   const table = { scoreForHealerEvaluate: {}, scoreForSupportEvaluate: {} };
   const cfg = clone(defaultConfig);
   const combos = await subSkillCombinationWorker({ config: cfg });
@@ -794,8 +796,9 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
 {
   const cases = [];
   const defs = [
-    { pokemon: { name: 'ピカチュウ', lv: 1, skillLv: 1, foodList: ['とくせんリンゴ', 'とくせんリンゴ', 'あったかジンジャー'], subSkillList: ['きのみの数S', 'おてつだいスピードS', '食材確率アップS', 'スキル確率アップM', '最大所持数アップS'], nature: 'がんばりや' }, tweak: () => {} },
-    { pokemon: { name: 'イーブイ(ホリデー)', lv: 1, skillLv: 1, foodList: ['モーモーミルク', 'モーモーミルク', 'リラックスカカオ'], subSkillList: ['おてつだいボーナス', 'スキルレベルアップM', '', 'おてつだいスピードM', 'スキル確率アップS'], nature: 'いじっぱり' }, tweak: (c) => { c.tmpEvaluate.scoreForHealerEvaluate = 20000; c.tmpEvaluate.scoreForSupportEvaluate = 300; c.tmpEvaluate.sleepTime = 7; c.tmpEvaluate.checkFreq = 4; } },
+    { pokemon: { name: 'ピカチュウ', lv: 1, skillLv: 1, foodList: ['とくせんリンゴ', 'とくせんリンゴ', 'あったかジンジャー'], subSkillList: ['きのみの数S', 'おてつだいスピードS', '食材確率アップS', 'スキル確率アップM', '最大所持数アップS'], nature: 'がんばりや' }, withMint: false, tweak: () => {} },
+    { pokemon: { name: 'イーブイ(ホリデー)', lv: 1, skillLv: 1, foodList: ['モーモーミルク', 'モーモーミルク', 'リラックスカカオ'], subSkillList: ['おてつだいボーナス', 'スキルレベルアップM', '', 'おてつだいスピードM', 'スキル確率アップS'], nature: 'いじっぱり' }, withMint: false, tweak: (c) => { c.tmpEvaluate.scoreForHealerEvaluate = 20000; c.tmpEvaluate.scoreForSupportEvaluate = 300; c.tmpEvaluate.sleepTime = 7; c.tmpEvaluate.checkFreq = 4; } },
+    { pokemon: { name: 'モンメン', lv: 1, skillLv: 1, foodList: ['ひとくちナッツ', 'つやつやアボカド', 'あんみんトマト'], subSkillList: ['おてつだいスピードM', '食材確率アップM', 'きのみの数S', '', ''], nature: 'おっとり' }, withMint: true, tweak: () => {} },
   ];
   for (const d of defs) {
     const config = clone(defaultConfig);
@@ -832,7 +835,8 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
     c.sleepTime = c.tmpEvaluate.sleepTime;
     c.checkFreq = c.tmpEvaluate.checkFreq;
     c.workerNum = c.tmpEvaluate.workerNum;
-    c.pureMint = false;
+    c.pureMint = Boolean(d.withMint);
+    c.pureMintNature = 'がんばりや';
     await boxWorker({ type: 'config', config: clone(c) });
     const [sim] = await boxWorker({ type: 'basic', pokemonList: [clone(d.pokemon)], evaluateTable: table });
     const evolutions = {};
@@ -840,15 +844,24 @@ writeFileSync(path.join(outDir, 'team.json'), JSON.stringify(teamOut));
       if (name == 'best') continue;
       evolutions[name] = Object.fromEntries([30, 50, 60, 70, 80].map((lv) => {
         const e = sim.evaluateResult[lv]?.[name];
-        return [lv, {
+        const entry = {
           rate: Object.fromEntries(['energy', 'berry', 'food', 'skill'].map((k) => [k, num(e?.[k]?.rate)])),
           berryEnergy: num(e?.diagnostic?.berryEnergy),
           skillActivationNum: num(e?.diagnostic?.skillActivationNum),
           foodNumMap: Object.fromEntries(Object.entries(e?.diagnostic?.foodNumMap ?? {}).map(([k, v]) => [k, num(v)])),
-        }];
+        };
+        if (d.withMint) {
+          entry.pureMint = {
+            rate: Object.fromEntries(['energy', 'berry', 'food', 'skill'].map((k) => [k, num(e?.[k]?.pureMint?.rate)])),
+            berryEnergy: num(e?.diagnostic?.pureMint?.berryEnergy),
+            skillActivationNum: num(e?.diagnostic?.pureMint?.skillActivationNum),
+            foodNumMap: Object.fromEntries(Object.entries(e?.diagnostic?.pureMint?.foodNumMap ?? {}).map(([k, v]) => [k, num(v)])),
+          };
+        }
+        return [lv, entry];
       }));
     }
-    cases.push({ config, pokemon: d.pokemon, evolutions });
+    cases.push({ config, pokemon: d.pokemon, withMint: Boolean(d.withMint), evolutions });
   }
   writeFileSync(path.join(outDir, 'tmp-evaluate.json'), JSON.stringify(cases));
   console.log(`tmp-evaluate: ${cases.map((c) => Object.keys(c.evolutions).length).join(',')}`);

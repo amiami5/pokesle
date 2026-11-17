@@ -5,6 +5,7 @@
 use eframe::egui;
 use pokesle_core::data::master;
 use pokesle_core::evaluate_table::EvalLv;
+use pokesle_core::js::to_fixed;
 use pokesle_core::sim_pokemon::BoxPokemon;
 use pokesle_core::team_sim::simulate_tmp_evaluate;
 
@@ -15,6 +16,8 @@ use crate::app::Shared;
 use crate::job::Job;
 
 const LV_LIST: [u32; 5] = [30, 50, 60, 70, 80];
+const COL_W: [f32; 6] = [120.0, 56.0, 56.0, 56.0, 56.0, 56.0];
+const TABLE_W: f32 = 400.0;
 
 /// グラフの系列(キー, 表示名, 色, とくい)
 const SERIES: [(&str, &str, u32, Option<&str>); 4] = [
@@ -30,10 +33,18 @@ enum Tab {
     Setting,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MintChartDisplay {
+    Both,
+    Before,
+    After,
+}
+
 /// 評価結果(進化先ごと)
 struct Evaluated {
     /// 評価した個体(食材の表示に使う)
     pokemon: BoxPokemon,
+    has_mint: bool,
     /// 進化先ごと: 名前, とくい, レベル別の(キー → 割合)と診断値
     evolutions: Vec<Evolution>,
 }
@@ -43,10 +54,13 @@ struct Evolution {
     specialty: String,
     /// LV_LIST 順
     rates: Vec<[Option<f64>; 4]>,
+    mint_rates: Vec<[Option<f64>; 4]>,
     berry_energy: Vec<Option<f64>>,
+    mint_berry_energy: Vec<Option<f64>>,
     skill_activation_num: Vec<Option<f64>>,
-    /// 食材名 → レベル別の個数
-    foods: Vec<(String, Vec<Option<f64>>)>,
+    mint_skill_activation_num: Vec<Option<f64>>,
+    /// 食材名 → (ミント前, ミント後)
+    foods: Vec<(String, Vec<Option<f64>>, Vec<Option<f64>>)>,
 }
 
 pub struct TmpEvaluateView {
@@ -55,6 +69,7 @@ pub struct TmpEvaluateView {
     search: String,
     job: Option<Job<Evaluated>>,
     result: Option<Evaluated>,
+    mint_chart_display: MintChartDisplay,
     error: String,
     edit: Option<PokemonEdit>,
 }
@@ -73,7 +88,16 @@ impl Default for TmpEvaluateView {
             ..Default::default()
         };
         reset_foods(&mut p);
-        TmpEvaluateView { tab: Tab::Pokemon, search: p.name.clone(), pokemon: p, job: None, result: None, error: String::new(), edit: None }
+        TmpEvaluateView {
+            tab: Tab::Pokemon,
+            search: p.name.clone(),
+            pokemon: p,
+            job: None,
+            result: None,
+            mint_chart_display: MintChartDisplay::Both,
+            error: String::new(),
+            edit: None,
+        }
     }
 }
 
@@ -100,7 +124,10 @@ impl TmpEvaluateView {
         {
             self.job = None;
             match r {
-                Ok(r) => self.result = Some(r),
+                Ok(r) => {
+                    self.result = Some(r);
+                    self.mint_chart_display = MintChartDisplay::Both;
+                }
                 Err(e) => self.error = e,
             }
         }
@@ -134,6 +161,14 @@ impl TmpEvaluateView {
                 }
             }
         }
+    }
+
+    fn start_evaluate(&mut self, ctx: &egui::Context, shared: &Shared, with_mint: bool) {
+        self.result = None;
+        self.error.clear();
+        let config = shared.config.clone();
+        let pokemon = self.pokemon.clone();
+        self.job = Some(Job::spawn(ctx, move |p| evaluate(&config, pokemon, with_mint, &p)));
     }
 
     fn pokemon_tab(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
@@ -203,13 +238,14 @@ impl TmpEvaluateView {
 
         let running = self.job.is_some();
         ui.add_enabled_ui(!running, |ui| {
-            if style::form_button(ui, "評価", style::ButtonKind::Execute).clicked() {
-                self.result = None;
-                self.error.clear();
-                let config = shared.config.clone();
-                let pokemon = self.pokemon.clone();
-                self.job = Some(Job::spawn(ui.ctx(), move |p| evaluate(&config, pokemon, &p)));
-            }
+            ui.horizontal(|ui| {
+                if style::form_button(ui, "通常評価", style::ButtonKind::Execute).clicked() {
+                    self.start_evaluate(ui.ctx(), shared, false);
+                }
+                if style::form_button(ui, "ミント評価", style::ButtonKind::Execute).clicked() {
+                    self.start_evaluate(ui.ctx(), shared, true);
+                }
+            });
         });
         if let Some(job) = &self.job {
             job.show_progress(ui);
@@ -239,30 +275,44 @@ impl TmpEvaluateView {
             e["selectDisplayMode"] = serde_json::json!(if graph { "graph" } else { "table" });
             shared.save_config();
         }
+        if graph && result.has_mint {
+            ui.horizontal(|ui| {
+                ui.label("ミント表示：");
+                ui.radio_value(&mut self.mint_chart_display, MintChartDisplay::Both, "両方");
+                ui.radio_value(&mut self.mint_chart_display, MintChartDisplay::Before, "ミント前");
+                ui.radio_value(&mut self.mint_chart_display, MintChartDisplay::After, "ミント後");
+            });
+        }
         ui.add_space(6.0);
 
-        let food_names: Vec<String> = {
-            let mut v: Vec<String> = Vec::new();
-            for f in &result.pokemon.food_list {
-                if !v.contains(f) {
-                    v.push(f.clone());
-                }
-            }
-            v
-        };
+        let has_mint = result.has_mint;
+        let mint_display = self.mint_chart_display;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
             for evo in &result.evolutions {
                 ui.vertical(|ui| {
-                    ui.set_width(380.0);
+                    ui.set_width(TABLE_W);
                     ui.label(egui::RichText::new(&evo.name).size(16.0).strong());
+                    ui.add_space(2.0);
+                    ui.label(egui::RichText::new("厳選度").size(13.0).strong().color(style::muted()));
                     if graph {
-                        chart(ui, evo);
+                        chart(ui, evo, has_mint, mint_display);
                     } else {
-                        rate_table(ui, evo);
+                        rate_table(ui, evo, has_mint);
                     }
-                    ui.add_space(6.0);
-                    diagnostic_table(ui, evo, &food_names);
+                    style::small(
+                        ui,
+                        "厳選度は、全サブスキル・全せいかくの組合せのうち、どの程度優れているかを示す値です。100%が理論値です。",
+                        TABLE_W,
+                    );
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("実際の値").size(13.0).strong().color(style::muted()));
+                    diagnostic_table(ui, evo, has_mint);
+                    style::small(
+                        ui,
+                        "食材の下に表示されている数値は、現環境の必要最大数に対する割合です。300%＝3食分です。",
+                        TABLE_W,
+                    );
                 });
             }
         });
@@ -320,8 +370,8 @@ impl TmpEvaluateView {
 }
 
 /// 本家 `evaluate()`: 簡易診断表を作ってから、入力した個体を評価する
-fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, progress: &crate::job::Progress) -> Result<Evaluated, String> {
-    let r = simulate_tmp_evaluate(config, &pokemon, progress)?;
+fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, with_mint: bool, progress: &crate::job::Progress) -> Result<Evaluated, String> {
+    let r = simulate_tmp_evaluate(config, &pokemon, with_mint, progress)?;
     let er = r.evaluate_result.ok_or("厳選度を評価できませんでした")?;
 
     let m = master();
@@ -336,8 +386,20 @@ fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, progress
                     .iter()
                     .map(|&lv| SERIES.map(|(key, ..)| entry(lv).and_then(|e| e.get(key)).map(|i| i.rate)))
                     .collect(),
+                mint_rates: LV_LIST
+                    .iter()
+                    .map(|&lv| SERIES.map(|(key, ..)| entry(lv).and_then(|e| e.get(key)).and_then(|i| i.pure_mint.as_ref()).map(|i| i.rate)))
+                    .collect(),
                 berry_energy: LV_LIST.iter().map(|&lv| entry(lv).and_then(|e| e.diagnostic.as_ref()).map(|d| d.berry_energy)).collect(),
+                mint_berry_energy: LV_LIST
+                    .iter()
+                    .map(|&lv| entry(lv).and_then(|e| e.diagnostic.as_ref()).and_then(|d| d.pure_mint.as_ref()).map(|d| d.berry_energy))
+                    .collect(),
                 skill_activation_num: LV_LIST.iter().map(|&lv| entry(lv).and_then(|e| e.diagnostic.as_ref()).map(|d| d.skill_activation_num)).collect(),
+                mint_skill_activation_num: LV_LIST
+                    .iter()
+                    .map(|&lv| entry(lv).and_then(|e| e.diagnostic.as_ref()).and_then(|d| d.pure_mint.as_ref()).map(|d| d.skill_activation_num))
+                    .collect(),
                 foods: pokemon
                     .food_list
                     .iter()
@@ -349,26 +411,37 @@ fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, progress
                     })
                     .into_iter()
                     .map(|food| {
-                        let values = LV_LIST
+                        let before = LV_LIST
                             .iter()
                             .map(|&lv| entry(lv).and_then(|e| e.diagnostic.as_ref()).and_then(|d| d.food_num_map.iter().find(|(n, _)| *n == food).map(|(_, v)| *v)))
                             .collect();
-                        (food, values)
+                        let after = LV_LIST
+                            .iter()
+                            .map(|&lv| {
+                                entry(lv)
+                                    .and_then(|e| e.diagnostic.as_ref())
+                                    .and_then(|d| d.pure_mint.as_ref())
+                                    .and_then(|d| d.food_num_map.iter().find(|(n, _)| *n == food).map(|(_, v)| *v))
+                            })
+                            .collect();
+                        (food, before, after)
                     })
                     .collect(),
                 name,
             }
         })
         .collect();
-    Ok(Evaluated { pokemon, evolutions })
+    Ok(Evaluated { pokemon, has_mint: with_mint, evolutions })
 }
 
 /// 折れ線グラフ(縦軸 0〜100%、横軸は Lv30〜80)
-fn chart(ui: &mut egui::Ui, evo: &Evolution) {
-    let size = egui::vec2(360.0, 230.0);
+fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartDisplay) {
+    let show_legend_note = has_mint && display == MintChartDisplay::Both;
+    let size = egui::vec2(TABLE_W, if show_legend_note { 246.0 } else { 230.0 });
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter_at(rect);
-    let plot = egui::Rect::from_min_max(rect.min + egui::vec2(40.0, 8.0), rect.max - egui::vec2(8.0, 40.0));
+    let bottom_pad = if show_legend_note { 56.0 } else { 40.0 };
+    let plot = egui::Rect::from_min_max(rect.min + egui::vec2(40.0, 8.0), rect.max - egui::vec2(8.0, bottom_pad));
     let grid = style::line_color();
     let muted = style::muted();
     let font = egui::FontId::proportional(11.0);
@@ -382,77 +455,278 @@ fn chart(ui: &mut egui::Ui, evo: &Evolution) {
     for (i, lv) in LV_LIST.iter().enumerate() {
         p.text(egui::pos2(x_of(i), plot.bottom() + 4.0), egui::Align2::CENTER_TOP, format!("Lv{lv}"), font.clone(), muted);
     }
+    let show_before = !has_mint || display != MintChartDisplay::After;
+    let show_after = has_mint && display != MintChartDisplay::Before;
     for (si, (_, label, color, specialty)) in SERIES.iter().enumerate() {
         let c = style::pick(*color, *color);
         // 進化先のとくい以外は補助情報として薄く表示する
         let dim = specialty.is_some_and(|s| s != evo.specialty);
         let c = if dim { c.gamma_multiply(0.4) } else { c };
-        let points: Vec<egui::Pos2> = evo
-            .rates
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let v = (r[si].unwrap_or(0.0) * 100.0).clamp(0.0, 100.0) as f32;
-                egui::pos2(x_of(i), plot.bottom() - plot.height() * v / 100.0)
-            })
-            .collect();
-        p.add(egui::Shape::line(points.clone(), egui::Stroke::new(2.0, c)));
-        for pt in points {
-            p.circle_filled(pt, 3.0, c);
+        let to_points = |rates: &[[Option<f64>; 4]]| -> Vec<egui::Pos2> {
+            rates
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let v = (r[si].unwrap_or(0.0) * 100.0).clamp(0.0, 100.0) as f32;
+                    egui::pos2(x_of(i), plot.bottom() - plot.height() * v / 100.0)
+                })
+                .collect()
+        };
+        if show_before {
+            let points = to_points(&evo.rates);
+            p.add(egui::Shape::line(points.clone(), egui::Stroke::new(2.0, c)));
+            for pt in points {
+                p.circle_filled(pt, 3.0, c);
+            }
+        }
+        if show_after {
+            let points = to_points(&evo.mint_rates);
+            p.extend(egui::Shape::dashed_line(&points, egui::Stroke::new(2.0, c), 6.0, 3.0));
+            for pt in points {
+                p.circle_filled(pt, 3.0, c);
+            }
         }
         // 凡例
-        let lx = rect.left() + 12.0 + (si % 2) as f32 * 170.0;
-        let ly = rect.bottom() - 28.0 + (si / 2) as f32 * 14.0;
+        let lx = rect.left() + 12.0 + (si % 2) as f32 * 180.0;
+        let ly = rect.bottom() - (if show_legend_note { 44.0 } else { 28.0 }) + (si / 2) as f32 * 14.0;
         p.rect_filled(egui::Rect::from_min_size(egui::pos2(lx, ly + 2.0), egui::vec2(14.0, 6.0)), 2.0, c);
-        p.text(egui::pos2(lx + 20.0, ly), egui::Align2::LEFT_TOP, *label, font.clone(), muted);
+        let text = if has_mint && display == MintChartDisplay::After { format!("{label}（ミント後）") } else { (*label).to_string() };
+        p.text(egui::pos2(lx + 20.0, ly), egui::Align2::LEFT_TOP, text, font.clone(), muted);
+    }
+    if show_legend_note {
+        p.text(egui::pos2(rect.left() + 12.0, rect.bottom() - 14.0), egui::Align2::LEFT_TOP, "実線: ミント前  /  破線: ミント後", font, muted);
     }
 }
 
-fn header_row(ui: &mut egui::Ui) {
-    ui.label("");
+#[derive(Clone, Copy)]
+enum RowBg {
+    Header,
+    Normal,
+    Striped,
+    Mint,
+}
+
+fn table_row(ui: &mut egui::Ui, bg: RowBg, cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>>) {
+    let left = ui.cursor().min.x;
+    let top = ui.cursor().min.y;
+    let pad = 4.0;
+    let bg_slot = ui.painter().add(egui::Shape::Noop);
+    let mut x = left;
+    let mut bottom = top;
+    for (col, add) in cells.into_iter().enumerate() {
+        let w = COL_W[col];
+        let rect = egui::Rect::from_min_size(egui::pos2(x, top), egui::vec2(w, 0.0));
+        let align = if col == 0 && !matches!(bg, RowBg::Mint) { egui::Align::Min } else { egui::Align::Max };
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect.shrink2(egui::vec2(pad, 0.0)).translate(egui::vec2(0.0, pad)).with_max_y(f32::INFINITY))
+                .layout(egui::Layout::top_down(align)),
+        );
+        child.set_width(w - pad * 2.0);
+        child.spacing_mut().item_spacing.y = 1.0;
+        add(&mut child);
+        bottom = bottom.max(child.min_rect().bottom() + pad);
+        x += w;
+    }
+    let fill = match bg {
+        RowBg::Header => style::primary_soft(),
+        RowBg::Normal => style::surface(),
+        RowBg::Striped => style::surface_subtle(),
+        RowBg::Mint => style::mint_soft(),
+    };
+    let row_rect = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(left + TABLE_W, bottom));
+    let shapes = vec![
+        egui::Shape::rect_filled(row_rect, 0.0, fill),
+        egui::Shape::hline(row_rect.x_range(), bottom, egui::Stroke::new(1.0, style::line_color())),
+    ];
+    ui.painter().set(bg_slot, egui::Shape::Vec(shapes));
+    ui.allocate_rect(row_rect, egui::Sense::hover());
+}
+
+fn header_cells<'a>() -> Vec<Box<dyn FnOnce(&mut egui::Ui) + 'a>> {
+    let mut cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + 'a>> = vec![Box::new(|ui| {
+        ui.label("");
+    })];
     for lv in LV_LIST {
-        style::th(ui, &format!("Lv{lv}"));
+        cells.push(Box::new(move |ui| {
+            style::th(ui, &format!("Lv{lv}"));
+        }));
     }
-    ui.end_row();
+    cells
 }
 
-fn rate_table(ui: &mut egui::Ui, evo: &Evolution) {
-    egui::Grid::new(("tmp_rate", &evo.name)).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-        header_row(ui);
-        for (si, (_, label, ..)) in SERIES.iter().enumerate() {
+fn diff_info(before: Option<f64>, after: Option<f64>, digits: usize, suffix: &str) -> Option<(String, egui::Color32)> {
+    let (Some(b), Some(a)) = (before, after) else { return None };
+    let diff = a - b;
+    let sign = if diff > 0.0 { "+" } else { "" };
+    let text = format!("{sign}{}{suffix}", fmt_fixed(diff, digits));
+    let color = if diff > 0.0 {
+        style::pick(0xbf6575, 0xe87c8f)
+    } else if diff < 0.0 {
+        style::pick(0x3d73c9, 0x6ea0f0)
+    } else {
+        style::muted()
+    };
+    Some((text, color))
+}
+
+fn mint_label_cell<'a>() -> Box<dyn FnOnce(&mut egui::Ui) + 'a> {
+    Box::new(|ui| {
+        ui.label(egui::RichText::new("ミント後").size(10.5).color(style::muted()));
+    })
+}
+
+fn rate_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
+    let old = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
+    table_row(ui, RowBg::Header, header_cells());
+    for (si, (_, label, ..)) in SERIES.iter().enumerate() {
+        let row_bg = if !has_mint && si % 2 == 1 { RowBg::Striped } else { RowBg::Normal };
+        let mut cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![Box::new(move |ui| {
             ui.label(*label);
-            for r in &evo.rates {
-                ui.label(format!("{}%", fmt_fixed(r[si].unwrap_or(0.0) * 100.0, 1)));
-            }
-            ui.end_row();
+        })];
+        for r in &evo.rates {
+            let v = r[si].unwrap_or(0.0) * 100.0;
+            cells.push(Box::new(move |ui| {
+                ui.label(format!("{}%", fmt_fixed(v, 1)));
+            }));
         }
-    });
+        table_row(ui, row_bg, cells);
+
+        if has_mint {
+            let mut mint_cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![mint_label_cell()];
+            for (li, mr) in evo.mint_rates.iter().enumerate() {
+                let before = evo.rates[li][si].map(|x| x * 100.0);
+                let after = mr[si].map(|x| x * 100.0);
+                let diff = diff_info(before, after, 1, "%");
+                mint_cells.push(Box::new(move |ui| {
+                    ui.label(format!("{}%", fmt_fixed(after.unwrap_or(0.0), 1)));
+                    if let Some((text, color)) = diff {
+                        ui.label(egui::RichText::new(text).size(10.5).color(color));
+                    }
+                }));
+            }
+            table_row(ui, RowBg::Mint, mint_cells);
+        }
+    }
+    ui.spacing_mut().item_spacing.y = old;
+}
+
+fn food_requirement_rate(value: Option<f64>, food_name: &str) -> String {
+    let Some(v) = value else { return String::new() };
+    let required_num = master()
+        .cookings
+        .iter()
+        .flat_map(|c| c.food_list.iter())
+        .filter(|f| f.name == food_name)
+        .map(|f| f.num)
+        .fold(0.0_f64, f64::max);
+    if required_num > 0.0 {
+        format!("{}%", to_fixed((v / required_num) * 100.0, 0))
+    } else {
+        String::new()
+    }
 }
 
 /// 診断用のエナジー・食材・スキル発動回数
-fn diagnostic_table(ui: &mut egui::Ui, evo: &Evolution, _food_names: &[String]) {
+fn diagnostic_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
     let show = |v: Option<f64>, digits: usize| v.map_or("－".to_string(), |v| fmt_fixed(v, digits));
-    egui::Grid::new(("tmp_diag", &evo.name)).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-        header_row(ui);
+    let old = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
+    table_row(ui, RowBg::Header, header_cells());
+
+    // きのみエナジー
+    let mut cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![Box::new(|ui| {
         ui.label("きのみエナジー");
-        for v in &evo.berry_energy {
-            ui.label(show(*v, 1));
+    })];
+    for v in &evo.berry_energy {
+        let s = show(*v, 1);
+        cells.push(Box::new(move |ui| {
+            ui.label(s);
+        }));
+    }
+    table_row(ui, RowBg::Normal, cells);
+    if has_mint {
+        let mut mint_cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![mint_label_cell()];
+        for (li, v) in evo.mint_berry_energy.iter().enumerate() {
+            let s = show(*v, 1);
+            let diff = diff_info(evo.berry_energy[li], *v, 1, "");
+            mint_cells.push(Box::new(move |ui| {
+                ui.label(s);
+                if let Some((text, color)) = diff {
+                    ui.label(egui::RichText::new(text).size(10.5).color(color));
+                }
+            }));
         }
-        ui.end_row();
-        for (food, values) in &evo.foods {
+        table_row(ui, RowBg::Mint, mint_cells);
+    }
+
+    // 食材
+    for (fi, (food, values, mint_values)) in evo.foods.iter().enumerate() {
+        let row_bg = if !has_mint && fi % 2 == 0 { RowBg::Striped } else { RowBg::Normal };
+        let mut cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![Box::new(move |ui| {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
                 food_icon::food_icon(ui, food, 20.0);
                 ui.label(food);
             });
-            for v in values {
-                ui.label(show(*v, 1));
+        })];
+        for v in values {
+            let s = show(*v, 1);
+            let req = food_requirement_rate(*v, food);
+            cells.push(Box::new(move |ui| {
+                ui.label(s);
+                if !req.is_empty() {
+                    ui.label(egui::RichText::new(req).size(10.5).color(style::muted()));
+                }
+            }));
+        }
+        table_row(ui, row_bg, cells);
+
+        if has_mint {
+            let mut mint_cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![mint_label_cell()];
+            for (li, v) in mint_values.iter().enumerate() {
+                let s = show(*v, 1);
+                let req = food_requirement_rate(*v, food);
+                let diff = diff_info(values[li], *v, 1, "");
+                mint_cells.push(Box::new(move |ui| {
+                    ui.label(s);
+                    if !req.is_empty() {
+                        ui.label(egui::RichText::new(req).size(10.5).color(style::muted()));
+                    }
+                    if let Some((text, color)) = diff {
+                        ui.label(egui::RichText::new(text).size(10.5).color(color));
+                    }
+                }));
             }
-            ui.end_row();
+            table_row(ui, RowBg::Mint, mint_cells);
         }
+    }
+
+    // スキル発動回数
+    let skill_bg = if !has_mint && evo.foods.len() % 2 == 1 { RowBg::Striped } else { RowBg::Normal };
+    let mut cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![Box::new(|ui| {
         ui.label("スキル発動回数");
-        for v in &evo.skill_activation_num {
-            ui.label(show(*v, 2));
+    })];
+    for v in &evo.skill_activation_num {
+        let s = show(*v, 2);
+        cells.push(Box::new(move |ui| {
+            ui.label(s);
+        }));
+    }
+    table_row(ui, skill_bg, cells);
+    if has_mint {
+        let mut mint_cells: Vec<Box<dyn FnOnce(&mut egui::Ui) + '_>> = vec![mint_label_cell()];
+        for (li, v) in evo.mint_skill_activation_num.iter().enumerate() {
+            let s = show(*v, 2);
+            let diff = diff_info(evo.skill_activation_num[li], *v, 2, "");
+            mint_cells.push(Box::new(move |ui| {
+                ui.label(s);
+                if let Some((text, color)) = diff {
+                    ui.label(egui::RichText::new(text).size(10.5).color(color));
+                }
+            }));
         }
-        ui.end_row();
-    });
+        table_row(ui, RowBg::Mint, mint_cells);
+    }
+
+    ui.spacing_mut().item_spacing.y = old;
 }

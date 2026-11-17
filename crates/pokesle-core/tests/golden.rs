@@ -341,8 +341,19 @@ fn table_from_js(v: &Value) -> pokesle_core::evaluate_table::EvaluateTable {
                     table.support.insert(lv, by_food[""]["energy"].as_f64().unwrap());
                 }
                 _ => {
+                    let vec_of = |k: &str, p: &Value| -> Vec<f64> {
+                        p[k].as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect()).unwrap_or_default()
+                    };
                     for (food, p) in by_food.as_object().unwrap() {
-                        let p: PercentileSet = serde_json::from_value(p.clone()).unwrap();
+                        let p = PercentileSet {
+                            energy: vec_of("energy", p),
+                            berry: vec_of("berry", p),
+                            food: vec_of("food", p),
+                            skill: vec_of("skill", p),
+                            food1: vec_of("food1", p),
+                            food2: vec_of("food2", p),
+                            food3: vec_of("food3", p),
+                        };
                         table.pokemon.entry(name.clone()).or_default().entry(lv).or_default().insert(food.clone(), p);
                     }
                 }
@@ -881,7 +892,8 @@ fn tmp_evaluate_matches_upstream() {
         pokesle_core::config::merge_object(&mut value, &case["config"]);
         let config = Config::from_value(&value).unwrap();
         let pokemon: BoxPokemon = serde_json::from_value(case["pokemon"].clone()).unwrap();
-        let r = simulate_tmp_evaluate(&config, &pokemon, &()).unwrap();
+        let with_mint = case["withMint"].as_bool().unwrap_or(false);
+        let r = simulate_tmp_evaluate(&config, &pokemon, with_mint, &()).unwrap();
         let er = r.evaluate_result.expect("evaluate_result");
         let expected = case["evolutions"].as_object().unwrap();
         assert!(!expected.is_empty(), "case {ci}: 本家の結果が空");
@@ -912,6 +924,28 @@ fn tmp_evaluate_matches_upstream() {
                 for (food, v) in e["foodNumMap"].as_object().unwrap() {
                     let a = d.food_num_map.iter().find(|(n, _)| n == food).map(|(_, v)| *v).unwrap_or(f64::NAN);
                     assert!(close(a, num(v).unwrap()), "case {ci} {name} Lv{lv} food {food}: {a} vs {v}");
+                }
+                if with_mint {
+                    let me = &e["pureMint"];
+                    for key in ["energy", "berry", "food", "skill"] {
+                        let a = entry.get(key).and_then(|i| i.pure_mint.as_ref()).map(|i| i.rate);
+                        let x = num(&me["rate"][key]);
+                        assert!(
+                            match (a, x) {
+                                (Some(a), Some(x)) => close(a, x),
+                                (None, None) => true,
+                                _ => false,
+                            },
+                            "case {ci} {name} Lv{lv} pureMint {key}: rust={a:?} js={x:?}"
+                        );
+                    }
+                    let md = d.pure_mint.as_ref().expect("diagnostic.pure_mint");
+                    assert!(close(md.berry_energy, num(&me["berryEnergy"]).unwrap()), "case {ci} {name} Lv{lv} pureMint berryEnergy");
+                    assert!(close(md.skill_activation_num, num(&me["skillActivationNum"]).unwrap()), "case {ci} {name} Lv{lv} pureMint skillActivationNum");
+                    for (food, v) in me["foodNumMap"].as_object().unwrap() {
+                        let a = md.food_num_map.iter().find(|(n, _)| n == food).map(|(_, v)| *v).unwrap_or(f64::NAN);
+                        assert!(close(a, num(v).unwrap()), "case {ci} {name} Lv{lv} pureMint food {food}: {a} vs {v}");
+                    }
                 }
             }
         }

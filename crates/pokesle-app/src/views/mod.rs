@@ -107,3 +107,18 @@ pub fn combo(ui: &mut egui::Ui, id: impl std::hash::Hash + std::fmt::Debug, valu
     });
     changed
 }
+
+/// 本家 name-label.vue の splitName 相当: 括弧内の「のすがた」「なすがた」とバケッチャ/パンプジンの「しゅ」を省略する
+pub fn short_pokemon_name(name: &str) -> String {
+    if let Some(idx) = name.find('(')
+        && name.ends_with(')')
+    {
+        let main = &name[..idx];
+        let mut bracket = name[idx..].replace("のすがた", "").replace("なすがた", "");
+        if matches!(main, "バケッチャ" | "パンプジン") {
+            bracket = bracket.replace("しゅ)", ")");
+        }
+        return format!("{main}{b}", b = bracket);
+    }
+    name.to_string()
+}

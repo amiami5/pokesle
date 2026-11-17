@@ -166,14 +166,33 @@ fn is_digits(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }
 
+fn is_lv_line(s: &str) -> bool {
+    is_digits(s) && s.parse::<u32>().ok().is_some_and(|n| (1..=100).contains(&n))
+}
+
 /// `s:5`(スキルレベル)の数字
 fn skill_lv_line(s: &str) -> Option<f64> {
     let rest = s.strip_prefix(['s', 'S'])?.trim_start().strip_prefix(':')?.trim_start();
     if is_digits(rest) { rest.parse().ok() } else { None }
 }
 
-fn is_food_line(s: &str) -> bool {
-    s.chars().count() == 3 && s.chars().all(|c| matches!(c.to_ascii_lowercase(), 'a'..='h'))
+fn is_food_line_syntax(s: &str) -> bool {
+    s.chars().count() == 3
+        && (s.chars().all(|c| matches!(c.to_ascii_lowercase(), 'a'..='h')) || s.chars().all(|c| matches!(c, '1'..='9')))
+}
+
+fn is_food_line(s: &str, pokemon_name: &str) -> bool {
+    if !is_food_line_syntax(s) {
+        return false;
+    }
+    if !s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    let Some(base) = master().pokemon(pokemon_name) else { return false };
+    s.chars().enumerate().all(|(index, c)| {
+        let idx = (c as usize) - ('1' as usize);
+        base.food_list.get(idx).is_some_and(|f| f.num_list.get(index).copied().flatten().is_some_and(|n| n != 0.0))
+    })
 }
 
 fn convert_food_abc(abc: &str, pokemon: &mut BoxPokemon) {
@@ -242,7 +261,7 @@ pub fn infer(text: &str, pokemon: &mut BoxPokemon) {
     pokemon.favorite = rest.iter().any(|l| has_any(l, &favorite_words));
 
     let status: Vec<&str> = rest.iter().copied().filter(|l| !has_any(l, &shiny_words) && !has_any(l, &favorite_words)).collect();
-    if let Some(lv) = status.iter().find(|l| is_digits(l)).and_then(|l| l.parse::<f64>().ok()) {
+    if let Some(lv) = status.iter().find(|l| is_lv_line(l)).and_then(|l| l.parse::<f64>().ok()) {
         pokemon.lv = lv;
     }
     if let Some(lv) = status.iter().find_map(|l| skill_lv_line(l)) {
@@ -251,10 +270,10 @@ pub fn infer(text: &str, pokemon: &mut BoxPokemon) {
 
     let non_lv: Vec<&str> = status.iter().copied().filter(|l| !is_digits(l) && skill_lv_line(l).is_none()).collect();
     pokemon.food_list = vec![String::new(); 3];
-    if let Some(food) = non_lv.iter().find(|l| is_food_line(l)) {
+    if let Some(food) = status.iter().find(|l| is_food_line(l, &pokemon.name)) {
         convert_food_abc(food, pokemon);
     }
-    let other: Vec<&str> = non_lv.iter().copied().filter(|l| !is_food_line(l)).collect();
+    let other: Vec<&str> = non_lv.iter().copied().filter(|l| !is_food_line_syntax(l)).collect();
     pokemon.sub_skill_list = vec![String::new(); 5];
     for (i, line) in other.iter().take(5).enumerate() {
         convert_sub_skill(line, i, pokemon);
@@ -329,5 +348,34 @@ mod tests {
         assert!(p.shiny);
         assert_eq!(p.skill_lv, Some(5.0));
         assert_eq!(p.lv, 25.0);
+    }
+
+    #[test]
+    fn lv_range_and_numeric_food() {
+        let mut p = blank();
+        // 112 は 101 以上のため Lv ではなく食材 AAB として扱われる
+        infer("fushigidane\n112", &mut p);
+        assert_eq!(p.lv, 1.0);
+        assert_eq!(p.food_list, vec!["あまいミツ", "あまいミツ", "あんみんトマト"]);
+
+        // 2枠目に1枠目の番号以外(例: 123 の 2桁目の 2=B)はフシギダネでは取れるが 1枠目に 2 は取れないので無効
+        let mut p2 = blank();
+        infer("fushigidane\n25\n211", &mut p2);
+        assert_eq!(p2.lv, 25.0);
+        assert_eq!(p2.food_list, vec!["", "", ""]);
+
+        // 101以上は Lv に反映しない
+        let mut p3 = blank();
+        infer("pikachu\n101", &mut p3);
+        assert_eq!(p3.lv, 1.0);
+
+        // ダークライのような8食材ポケモンでは 1..=8 を指定できる
+        let mut p4 = blank();
+        infer("da-kurai\n50\n182", &mut p4);
+        assert_eq!(p4.name, "ダークライ");
+        assert_eq!(p4.lv, 50.0);
+        assert_eq!(p4.food_list[0], master().pokemon("ダークライ").unwrap().food_name_list[0]);
+        assert_eq!(p4.food_list[1], master().pokemon("ダークライ").unwrap().food_name_list[7]);
+        assert_eq!(p4.food_list[2], master().pokemon("ダークライ").unwrap().food_name_list[1]);
     }
 }

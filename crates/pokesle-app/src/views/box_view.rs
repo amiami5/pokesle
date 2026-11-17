@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::evaluate_detail::EvaluateDetail;
 use super::pokemon_edit::{EditResult, PokemonEdit};
-use super::{common_setting, fmt_fixed, fmt_num, food_icon, nature_label, style};
+use super::{common_setting, fmt_fixed, fmt_num, food_icon, nature_label, short_pokemon_name, style};
 use crate::app::Shared;
 use crate::job::Job;
 
@@ -1423,8 +1423,8 @@ impl BoxView {
                             let list = result.map_or(&b.after_list, |r| &r.pokemon.after_list);
                             let text = match list.len() {
                                 0 => String::new(),
-                                1 => list[0].clone(),
-                                _ => format!("{}等", list[0]),
+                                1 => short_pokemon_name(&list[0]),
+                                _ => format!("{}等", short_pokemon_name(&list[0])),
                             };
                             ui.label(egui::RichText::new(text).size(11.0)).on_hover_text(list.join("、"));
                         }
@@ -2252,6 +2252,7 @@ fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv
                     ui.label("");
                 }
             };
+            let short_after = short_pokemon_name(&after);
             if detail {
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2261,11 +2262,11 @@ fn eval_cell(ui: &mut egui::Ui, result: Option<&BoxResult>, k: usize, lv: EvalLv
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| value_label(ui, style(egui::RichText::new(text).size(11.0)), &after, v.is_some()),
                         );
-                        ui.label(style(egui::RichText::new(after.as_str()).size(10.0)));
+                        ui.label(style(egui::RichText::new(short_after).size(10.0)));
                     });
                 });
             } else {
-                ui.label(style(egui::RichText::new(after.as_str()).size(10.0)));
+                ui.label(style(egui::RichText::new(short_after).size(10.0)));
                 value_label(ui, style(egui::RichText::new(text).size(11.0)), &after, v.is_some());
                 diff_label(ui);
             }

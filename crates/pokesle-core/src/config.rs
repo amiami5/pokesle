@@ -115,6 +115,9 @@ pub struct Config {
     /// 実行時にだけ指定される: 純粋なミントでの評価も行う
     #[serde(default, deserialize_with = "de_truthy", skip_serializing_if = "std::ops::Not::not")]
     pub pure_mint: bool,
+    /// 実行時にだけ指定される: ミント後のせいかく(None なら「まじめ」)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pure_mint_nature: Option<String>,
     /// 実行時にだけ指定される: ボックス整理モード
     #[serde(default, deserialize_with = "de_truthy", skip_serializing_if = "std::ops::Not::not")]
     pub cleaning: bool,

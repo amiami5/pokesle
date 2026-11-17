@@ -47,6 +47,88 @@
  ],
  "entries": [
   {
+   "date": "2026/11/16",
+   "items": [
+    {
+     "segments": [
+      {
+       "text": "機能改善"
+      }
+     ],
+     "children": [
+      {
+       "segments": [
+        {
+         "text": "モンメン、エルフーンを追加"
+        }
+       ],
+       "children": []
+      },
+      {
+       "segments": [
+        {
+         "text": "新食材、新料理を追加"
+        }
+       ],
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026/11/15",
+   "items": [
+    {
+     "segments": [
+      {
+       "text": "機能改善"
+      }
+     ],
+     "children": [
+      {
+       "segments": [
+        {
+         "text": "簡易診断にミント比較機能を追加"
+        }
+       ],
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "date": "2026/11/12",
+   "items": [
+    {
+     "segments": [
+      {
+       "text": "機能改善"
+      }
+     ],
+     "children": [
+      {
+       "segments": [
+        {
+         "text": "ボックス画面の一部ポケモン名表示を短縮名に変更"
+        }
+       ],
+       "children": []
+      },
+      {
+       "segments": [
+        {
+         "text": "入力アシストで食材情報をする際、ABCだけでなく123形式でも入力できるよう改善"
+        }
+       ],
+       "children": []
+      }
+     ]
+    }
+   ]
+  },
+  {
    "date": "2026/11/7",
    "items": [
     {

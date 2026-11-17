@@ -22,6 +22,7 @@ const FOOD_ICONS: &[(&str, &[u8])] = &[
     ("honey.png", include_bytes!("../../assets/food/honey.png")),
     ("largeleek.png", include_bytes!("../../assets/food/largeleek.png")),
     ("moomoomilk.png", include_bytes!("../../assets/food/moomoomilk.png")),
+    ("nuts.png", include_bytes!("../../assets/food/nuts.png")),
     ("pumpkin.png", include_bytes!("../../assets/food/pumpkin.png")),
     ("pureoil.png", include_bytes!("../../assets/food/pureoil.png")),
     ("slowpoketail.png", include_bytes!("../../assets/food/slowpoketail.png")),

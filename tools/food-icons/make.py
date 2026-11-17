@@ -41,6 +41,7 @@ MAPPING = {
     "coffee.png": "2615",                # めざましコーヒー: ☕
     "pumpkin.png": "1f383",              # ずっしりカボチャ: 🎃
     "avocado.png": "1f951",              # つやつやアボカド: 🥑
+    "nuts.png": "draw:nuts",             # ひとくちナッツ: 自作(ミックスナッツ)
 }
 
 
@@ -154,6 +155,93 @@ def draw_tail() -> Image.Image:
     return im.resize((128, 128), Image.LANCZOS)
 
 
+def draw_nuts() -> Image.Image:
+    """ミックスナッツ(カシューナッツ・アーモンド・ピーナッツ)の自作アイコン"""
+    im = Image.new("RGBA", (128 * S, 128 * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    outline = (135, 68, 28)
+
+    def stroke_path(pts_fn, n, r_fn, color):
+        for i in range(n + 1):
+            t = i / n
+            cx, cy = pts_fn(t)
+            r = r_fn(t) * S
+            d.ellipse([cx * S - r, cy * S - r, cx * S + r, cy * S + r], fill=color)
+
+    # カシューナッツ(上・奥)
+    def cashew_pt(t):
+        a = math.radians(170 - 205 * t)
+        return 60.0 + 18.0 * math.cos(a), 50.0 - 16.5 * math.sin(a)
+
+    def cashew_r(t):
+        return 12.0 + 4.5 * math.sin(math.pi * t)
+
+    stroke_path(cashew_pt, 120, lambda t: cashew_r(t) + 4.0, outline)
+    stroke_path(cashew_pt, 120, cashew_r, (242, 192, 92))
+    stroke_path(
+        lambda t: (cashew_pt(t)[0] - 1.5, cashew_pt(t)[1] - 2.0),
+        100,
+        lambda t: cashew_r(t) * 0.68,
+        (253, 224, 148),
+    )
+
+    # アーモンド(左下)
+    def almond_poly(scale_r=1.0, offset=(0.0, 0.0)):
+        pts = []
+        n = 80
+        ang = math.radians(-35)
+        ca, sa = math.cos(ang), math.sin(ang)
+        for i in range(n):
+            th = 2 * math.pi * i / n
+            u = math.sin(th) * (1.0 - 0.28 * math.cos(th)) * 22.0 * scale_r
+            v = -math.cos(th) * 33.0 * scale_r
+            x = 41.0 + offset[0] + u * ca - v * sa
+            y = 75.0 + offset[1] + u * sa + v * ca
+            pts.append((x * S, y * S))
+        return pts
+
+    d.polygon(almond_poly(1.15), fill=outline)
+    d.polygon(almond_poly(1.0), fill=(214, 118, 52))
+    d.polygon(almond_poly(0.75, (-1.8, -1.8)), fill=(228, 144, 76))
+    ang = math.radians(-35)
+    ca, sa = math.cos(ang), math.sin(ang)
+    for shift in [-7.0, 0.0, 7.0]:
+        line_pts = []
+        for k in range(11):
+            t = -0.62 + 1.24 * k / 10
+            u = shift * (1.0 - 0.35 * t * t)
+            v = t * 22.0
+            line_pts.append(((41.0 + u * ca - v * sa) * S, (75.0 + u * sa + v * ca) * S))
+        d.line(line_pts, fill=(172, 82, 32), width=2 * S)
+
+    # ピーナッツ(右下・手前)
+    def peanut_pt(t):
+        return 95.0 - 33.0 * t, 48.0 + 44.0 * t
+
+    def peanut_r(t):
+        b1 = math.exp(-((t - 0.2) ** 2) / 0.07)
+        b2 = math.exp(-((t - 0.8) ** 2) / 0.07)
+        return 11.5 + 9.2 * (b1 + b2)
+
+    stroke_path(peanut_pt, 120, lambda t: peanut_r(t) + 4.0, outline)
+    stroke_path(peanut_pt, 120, peanut_r, (234, 178, 86))
+    stroke_path(
+        lambda t: (peanut_pt(t)[0] - 2.0, peanut_pt(t)[1] - 2.0),
+        100,
+        lambda t: peanut_r(t) * 0.72,
+        (249, 214, 142),
+    )
+
+    spots = [
+        (88, 50), (96, 55), (84, 60), (92, 65),
+        (78, 70), (74, 80), (66, 84), (72, 92), (60, 93),
+    ]
+    for sx, sy in spots:
+        r = 2.6 * S
+        d.ellipse([sx * S - r, sy * S - r, sx * S + r, sy * S + r], fill=(198, 138, 56))
+    return im.resize((128, 128), Image.LANCZOS)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, src in MAPPING.items():
@@ -163,6 +251,8 @@ def main():
             im = draw_milk()
         elif src == "draw:tail":
             im = draw_tail()
+        elif src == "draw:nuts":
+            im = draw_nuts()
         elif src.startswith("cream:"):
             im = cream(noto(src.removeprefix("cream:")))
         elif src.startswith("hue:"):

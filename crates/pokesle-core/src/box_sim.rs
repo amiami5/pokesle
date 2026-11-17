@@ -126,7 +126,12 @@ impl BoxSimulator {
                             let food_key: String = food_index_list.iter().take(food_num).map(|x| x.to_string()).collect();
 
                             for &pure_mint in &evaluate_types {
-                                let nature = if pure_mint { Some(nature_index("まじめ")) } else { m.nature(&bx.nature).map(|n| nature_index(&n.name)) };
+                                let nature = if pure_mint {
+                                    let mint_name = config.pure_mint_nature.as_deref().unwrap_or("まじめ");
+                                    m.nature(mint_name).map(|n| nature_index(&n.name))
+                                } else {
+                                    m.nature(&bx.nature).map(|n| nature_index(&n.name))
+                                };
                                 self.evaluate_simulator.select_evaluate(&mut simulated, &sub_skill_idx, nature, healer, support)?;
                                 let score = self.evaluate_simulator.select_evaluate_to_score(
                                     &simulated,
@@ -163,11 +168,19 @@ impl BoxSimulator {
                                     }
                                 }
                                 entry.food_num_list = after_pokemon.food_list.iter().map(|f| simulated.food_count[f.food]).collect();
-                                entry.diagnostic = Some(crate::evaluate_table::Diagnostic {
+                                let diag = crate::evaluate_table::Diagnostic {
                                     berry_energy: simulated.b_ep_d,
                                     food_num_map: simulated.food_list.iter().map(|f| (m.foods[f.food].name.clone(), simulated.food_count[f.food])).collect(),
                                     skill_activation_num: simulated.skill_per_day,
-                                });
+                                    pure_mint: None,
+                                };
+                                if pure_mint {
+                                    if let Some(d) = &mut entry.diagnostic {
+                                        d.pure_mint = Some(Box::new(diag));
+                                    }
+                                } else {
+                                    entry.diagnostic = Some(diag);
+                                }
                                 let spec_src = match after_pokemon.specialty {
                                     Specialty::Berry => Some("berry"),
                                     Specialty::Food => Some("food"),

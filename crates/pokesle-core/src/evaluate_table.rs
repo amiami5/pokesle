@@ -608,6 +608,7 @@ pub struct Diagnostic {
     pub berry_energy: f64,
     pub food_num_map: Vec<(String, f64)>,
     pub skill_activation_num: f64,
+    pub pure_mint: Option<Box<Diagnostic>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
