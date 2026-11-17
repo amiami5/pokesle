@@ -294,7 +294,7 @@ impl CheckList {
             for (i, t) in targets.iter().enumerate() {
                 let Some(entry) = entry_of(t) else { continue };
                 let (Some(energy), Some(specialty)) = (&entry.energy, &entry.specialty) else { continue };
-                if !food_list.contains(&t.food_combination) {
+                if !(pokemon.kaihou && food_list.len() == 6) && !food_list.contains(&t.food_combination) {
                     continue;
                 }
                 // 厳選度チェック

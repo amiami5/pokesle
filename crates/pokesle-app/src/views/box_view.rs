@@ -185,7 +185,7 @@ fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
 /// ポケモン編集で厳選情報・アメ情報を出すための材料
 fn edit_env(shared: &Shared) -> super::pokemon_edit::EditEnv {
     super::pokemon_edit::EditEnv {
-        config: shared.config.clone(),
+        config: shared.sim_config(),
         box_list: shared.box_file.list.clone(),
         table: shared.usable_evaluate_table().cloned(),
     }
@@ -210,6 +210,7 @@ fn simulate_key(shared: &Shared, mode: Mode) -> u64 {
         m.remove("candy");
     }
     v.to_string().hash(&mut h);
+    shared.ui_setting.all_specialty.hash(&mut h);
     // 目標Lv・次Lv迄のExp は必要アメ数の計算だけに使う
     let list: Vec<BoxPokemon> = shared.box_file.list.iter().map(|p| BoxPokemon { training: None, next_exp: None, ..p.clone() }).collect();
     serde_json::to_string(&list).unwrap_or_default().hash(&mut h);
@@ -870,7 +871,7 @@ impl BoxView {
             if shared.box_file.list.is_empty() {
                 self.results.clear();
             } else {
-                let mut config = shared.config.clone();
+                let mut config = shared.sim_config();
                 config.cleaning = self.mode.cleaning();
                 config.pure_mint = self.mode == Mode::PureMint;
                 let list = shared.box_file.list.clone();
@@ -928,7 +929,7 @@ impl BoxView {
         }
         self.import_window(ui.ctx(), shared);
         if let Some(d) = &mut self.detail
-            && !d.ui(ui.ctx(), &shared.config, shared.usable_evaluate_table())
+            && !d.ui(ui.ctx(), &shared.sim_config(), shared.usable_evaluate_table())
         {
             self.detail = None;
         }

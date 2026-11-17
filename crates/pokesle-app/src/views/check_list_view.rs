@@ -133,6 +133,7 @@ fn sim_key(shared: &Shared, table: &EvaluateTable) -> u64 {
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     v.to_string().hash(&mut h);
+    shared.ui_setting.all_specialty.hash(&mut h);
     shared.box_file.time.hash(&mut h);
     shared.box_file.list.len().hash(&mut h);
     format!("{:?}{:?}", table.healer, table.support).hash(&mut h);
@@ -226,7 +227,7 @@ impl CheckListView {
         self.poll_job();
         let key = sim_key(shared, &table);
         if self.job.is_none() && self.sim_key != Some(key) && !shared.box_file.list.is_empty() {
-            let config = page_config(&shared.config);
+            let config = page_config(&shared.sim_config());
             let list = shared.box_file.list.clone();
             let t = table.clone();
             self.sim_key = Some(key);
@@ -244,7 +245,7 @@ impl CheckListView {
             return;
         }
         if self.computed.is_none() {
-            self.computed = Some(self.compute(&shared.config, &table));
+            self.computed = Some(self.compute(&shared.sim_config(), &table));
         }
         let Some(c) = &self.computed else { return };
         let open = match self.tab {

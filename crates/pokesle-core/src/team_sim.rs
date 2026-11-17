@@ -691,13 +691,17 @@ pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, with_mint: b
 
 /// ボックス概算(本家 `PokemonBox.simulation` の basic → assist)
 pub fn simulate_box(config: &Config, box_list: &[BoxPokemon], evaluate_table: Option<&EvaluateTable>, with_assist: bool) -> Result<Vec<BoxResult>, String> {
+    let overlay = match evaluate_table {
+        Some(table) if config.kaihou_evaluate => Some(crate::evaluate_table::build_kaihou_overlay(config, box_list, table)?),
+        _ => None,
+    };
     let n = config.thread_num();
     let chunks: Vec<Vec<BoxResult>> = (0..n)
         .into_par_iter()
         .map(|i| {
             let s = box_list.len() * i / n;
             let e = box_list.len() * (i + 1) / n;
-            BoxSimulator::new(config.clone()).basic(&box_list[s..e], evaluate_table)
+            BoxSimulator::new(config.clone()).basic_with_overlay(&box_list[s..e], evaluate_table, overlay.as_ref())
         })
         .collect::<Result<_, _>>()?;
     let basic: Vec<BoxResult> = chunks.into_iter().flatten().collect();

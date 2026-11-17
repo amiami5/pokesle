@@ -1,7 +1,8 @@
 //! 厳選テーブル(本家 `models/simulation/evaluate-table.ts`, `evaluate-simulator.ts`,
 //! `models/sub-skill-combination-worker.ts`)
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{Config, EvaluateConfig};
 use crate::data::{master, Pokemon};
 use crate::js;
+use crate::sim_pokemon::BoxPokemon;
 use crate::simulator::{Mode, PokemonSimulator};
 
 // ---------------------------------------------------------------------------
@@ -199,10 +201,133 @@ pub struct EvaluateWorkerResult {
     pub result: Vec<(String, Vec<(String, EvaluateOutput)>)>,
 }
 
+#[derive(Clone)]
 struct Weight {
     yumebo: bool,
     risabo: bool,
     weight: f64,
+}
+
+struct EvalCombo {
+    sub_skill_list: Vec<Option<usize>>,
+    weights: Vec<Weight>,
+}
+
+fn prepare_eval_combos(combinations: &[SubSkillCombination]) -> (Vec<EvalCombo>, Vec<Option<usize>>, f64) {
+    let m = master();
+    let id_to_pos = |id: u32| m.sub_skills.iter().position(|s| s.id == id);
+    let combos: Vec<EvalCombo> = combinations
+        .iter()
+        .map(|c| EvalCombo {
+            sub_skill_list: c.s.iter().map(|&id| id_to_pos(id)).collect(),
+            weights: c
+                .weights
+                .iter()
+                .enumerate()
+                .filter_map(|(code, w)| {
+                    w.as_ref().map(|(count, _)| Weight { yumebo: code & 1 != 0, risabo: code & 2 != 0, weight: *count })
+                })
+                .collect(),
+        })
+        .collect();
+    let mut nature_list: Vec<Option<usize>> =
+        m.natures.iter().enumerate().filter(|(_, n)| n.good.is_some()).map(|(i, _)| Some(i)).collect();
+    nature_list.push(None);
+    let total_weight = combos.iter().fold(0.0, |a, c| a + c.weights.iter().fold(0.0, |a, x| a + x.weight)) * m.natures.len() as f64;
+    (combos, nature_list, total_weight)
+}
+
+struct EvalContext<'a> {
+    combos: &'a [EvalCombo],
+    nature_list: &'a [Option<usize>],
+    total_weight: f64,
+    healer: f64,
+    support: f64,
+    support_border: f64,
+}
+
+fn evaluate_single_food(
+    lv: u32,
+    pokemon: &Pokemon,
+    food_name_list: &[String],
+    ctx: &EvalContext<'_>,
+    simulator: &mut PokemonSimulator,
+    mut progress: impl FnMut(),
+) -> Result<(EvaluateOutput, Vec<f64>, Vec<f64>), String> {
+    let m = master();
+    // (score, baseScore, pickupEnergyPerHelp, weight)
+    let mut energy_list: Vec<[f64; 4]> = Vec::new();
+    // berry, food, skill, food1, food2, food3, weight
+    let mut common_list: Vec<[f64; 7]> = Vec::new();
+    let mut healer_scores = Vec::new();
+    let mut support_scores = Vec::new();
+
+    let mut simulated = simulator.from_evaluate(pokemon, lv as f64, food_name_list)?;
+    let head_foods: Vec<Option<usize>> = pokemon.food_name_list.iter().take(3).map(|n| m.food_index(n)).collect();
+
+    for c in ctx.combos {
+        for &nature in ctx.nature_list {
+            let nature_weight = if nature.is_none() { 5.0 } else { 1.0 };
+            simulator.select_evaluate(&mut simulated, &c.sub_skill_list, nature, ctx.healer, ctx.support)?;
+            let r = &simulated;
+            let food_n = |k: usize| head_foods.get(k).copied().flatten().map(|f| r.food_count[f]).unwrap_or(0.0);
+            if r.energy_per_day.is_nan() {
+                return Err(format!("計算エラーが発生しました。({})", pokemon.name));
+            }
+            let mut common_weight = 0.0;
+            for w in &c.weights {
+                let raw = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, false);
+                let score = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, true);
+                energy_list.push([score, raw / r.average_help_rate, r.pickup_energy_per_help, w.weight * nature_weight]);
+                common_weight += w.weight * nature_weight;
+            }
+            common_list.push([r.berry_num_per_day, r.food_num_per_day, r.skill_per_day, food_n(0), food_n(1), food_n(2), common_weight]);
+            progress();
+        }
+    }
+
+    let mut result = EvaluateOutput::default();
+    energy_list.sort_by(|a, b| js::cmp_num(a[0], b[0]));
+    let mut weight_sum = 0.0;
+    let mut next_index = 0.0;
+    for item in &energy_list {
+        let next_weight_sum = weight_sum + item[3];
+        while weight_sum <= next_index && next_index < next_weight_sum && result.percentile.energy.len() <= 100 {
+            if result.percentile.energy.len() as f64 == ctx.support_border {
+                healer_scores.push(item[1]);
+                support_scores.push(item[2]);
+                result.base_score = Some(item[1]);
+                result.pickup_energy_per_help = Some(item[2]);
+            }
+            result.percentile.energy.push(item[0]);
+            next_index = js::round((ctx.total_weight - 1.0) * result.percentile.energy.len() as f64 / 100.0);
+        }
+        weight_sum = next_weight_sum;
+    }
+
+    for index in 0..6 {
+        common_list.sort_by(|a, b| js::cmp_num(a[index], b[index]));
+        let target = match index {
+            0 => &mut result.percentile.berry,
+            1 => &mut result.percentile.food,
+            2 => &mut result.percentile.skill,
+            3 => &mut result.percentile.food1,
+            4 => &mut result.percentile.food2,
+            _ => &mut result.percentile.food3,
+        };
+        let mut weight_sum = 0.0;
+        let mut next_index = 0.0;
+        for item in &common_list {
+            let next_weight_sum = weight_sum + item[6];
+            while weight_sum <= next_index && next_index < next_weight_sum && target.len() <= 100 {
+                target.push(item[index]);
+                next_index = js::round((ctx.total_weight - 1.0) * target.len() as f64 / 100.0);
+            }
+            weight_sum = next_weight_sum;
+        }
+    }
+
+    Ok((result, healer_scores, support_scores))
 }
 
 /// 本家 `evaluate-simulator.ts` の処理本体。`pokemon_list` を同じシミュレーターで順番に評価する。
@@ -216,35 +341,19 @@ pub fn evaluate_pokemon(
     score_for_support_evaluate: f64,
     mut progress: impl FnMut(),
 ) -> Result<EvaluateWorkerResult, String> {
-    let m = master();
-    let id_to_pos = |id: u32| m.sub_skills.iter().position(|s| s.id == id);
-    let combos: Vec<(Vec<Option<usize>>, Vec<Weight>, Vec<String>)> = combinations
-        .iter()
-        .map(|c| {
-            let sub_skill_list: Vec<Option<usize>> = c.s.iter().map(|&id| id_to_pos(id)).collect();
-            let names: Vec<String> = c.s.iter().filter_map(|&id| m.sub_skill_by_id(id).map(|s| s.name.clone())).collect();
-            let weights = c
-                .weights
-                .iter()
-                .enumerate()
-                .filter_map(|(code, w)| {
-                    w.as_ref().map(|(count, _)| Weight { yumebo: code & 1 != 0, risabo: code & 2 != 0, weight: *count })
-                })
-                .collect();
-            (sub_skill_list, weights, names)
-        })
-        .collect();
-
-    let mut nature_list: Vec<Option<usize>> =
-        m.natures.iter().enumerate().filter(|(_, n)| n.good.is_some()).map(|(i, _)| Some(i)).collect();
-    nature_list.push(None);
-
-    let total_weight = combos.iter().fold(0.0, |a, (_, w, _)| a + w.iter().fold(0.0, |a, x| a + x.weight)) * m.natures.len() as f64;
+    let (combos, nature_list, total_weight) = prepare_eval_combos(combinations);
     let food_index_list_list: Vec<Vec<usize>> =
         food_combination_list.iter().map(|x| x.chars().map(|c| c.to_digit(10).unwrap_or(99) as usize).collect()).collect();
 
     let mut simulator = PokemonSimulator::new(config.clone(), Mode::Select);
-    let se = &config.select_evaluate;
+    let ctx = EvalContext {
+        combos: &combos,
+        nature_list: &nature_list,
+        total_weight,
+        healer: score_for_healer_evaluate,
+        support: score_for_support_evaluate,
+        support_border: config.select_evaluate.support_border,
+    };
     let mut out = EvaluateWorkerResult::default();
 
     for pokemon in pokemon_list {
@@ -254,77 +363,9 @@ pub fn evaluate_pokemon(
             else {
                 continue;
             };
-
-            // (score, baseScore, pickupEnergyPerHelp, weight)
-            let mut energy_list: Vec<[f64; 4]> = Vec::new();
-            // berry, food, skill, food1, food2, food3, weight
-            let mut common_list: Vec<[f64; 7]> = Vec::new();
-
-            let mut simulated = simulator.from_evaluate(pokemon, lv as f64, &food_name_list)?;
-            let head_foods: Vec<Option<usize>> = pokemon.food_name_list.iter().take(3).map(|n| m.food_index(n)).collect();
-
-            for (sub_skill_list, weights, _) in &combos {
-                for &nature in &nature_list {
-                    let nature_weight = if nature.is_none() { 5.0 } else { 1.0 };
-                    simulator.select_evaluate(&mut simulated, sub_skill_list, nature, score_for_healer_evaluate, score_for_support_evaluate)?;
-                    let r = &simulated;
-                    let food_n = |k: usize| head_foods.get(k).copied().flatten().map(|f| r.food_count[f]).unwrap_or(0.0);
-                    if r.energy_per_day.is_nan() {
-                        return Err(format!("計算エラーが発生しました。({})", pokemon.name));
-                    }
-                    let mut common_weight = 0.0;
-                    for w in weights {
-                        let raw = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, false);
-                        let score = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, true);
-                        energy_list.push([score, raw / r.average_help_rate, r.pickup_energy_per_help, w.weight * nature_weight]);
-                        common_weight += w.weight * nature_weight;
-                    }
-                    common_list.push([r.berry_num_per_day, r.food_num_per_day, r.skill_per_day, food_n(0), food_n(1), food_n(2), common_weight]);
-                    progress();
-                }
-            }
-
-            let mut result = EvaluateOutput::default();
-            energy_list.sort_by(|a, b| js::cmp_num(a[0], b[0]));
-            let mut weight_sum = 0.0;
-            let mut next_index = 0.0;
-            for item in &energy_list {
-                let next_weight_sum = weight_sum + item[3];
-                while weight_sum <= next_index && next_index < next_weight_sum && result.percentile.energy.len() <= 100 {
-                    if result.percentile.energy.len() as f64 == se.support_border {
-                        out.score_for_healer_evaluate_list.push(item[1]);
-                        out.score_for_support_evaluate_list.push(item[2]);
-                        result.base_score = Some(item[1]);
-                        result.pickup_energy_per_help = Some(item[2]);
-                    }
-                    result.percentile.energy.push(item[0]);
-                    next_index = js::round((total_weight - 1.0) * result.percentile.energy.len() as f64 / 100.0);
-                }
-                weight_sum = next_weight_sum;
-            }
-
-            for index in 0..6 {
-                common_list.sort_by(|a, b| js::cmp_num(a[index], b[index]));
-                let target = match index {
-                    0 => &mut result.percentile.berry,
-                    1 => &mut result.percentile.food,
-                    2 => &mut result.percentile.skill,
-                    3 => &mut result.percentile.food1,
-                    4 => &mut result.percentile.food2,
-                    _ => &mut result.percentile.food3,
-                };
-                let mut weight_sum = 0.0;
-                let mut next_index = 0.0;
-                for item in &common_list {
-                    let next_weight_sum = weight_sum + item[6];
-                    while weight_sum <= next_index && next_index < next_weight_sum && target.len() <= 100 {
-                        target.push(item[index]);
-                        next_index = js::round((total_weight - 1.0) * target.len() as f64 / 100.0);
-                    }
-                    weight_sum = next_weight_sum;
-                }
-            }
-
+            let (result, healers, supports) = evaluate_single_food(lv, pokemon, &food_name_list, &ctx, &mut simulator, &mut progress)?;
+            out.score_for_healer_evaluate_list.extend(healers);
+            out.score_for_support_evaluate_list.extend(supports);
             per_food.push((food_combination_list[fi].clone(), result));
         }
         out.result.push((pokemon.name.clone(), per_food));
@@ -547,16 +588,28 @@ pub fn simulate_temporary(config: &Config, pokemon_name: &str, progress: &dyn Pr
 
     let base = m.pokemon(pokemon_name).ok_or_else(|| format!("知らないポケモン: {pokemon_name}"))?;
     let pokemon_list: Vec<&Pokemon> = base.after_list.iter().filter_map(|n| m.pokemon(n)).collect();
-    progress.set(0.0, "サブスキルの組み合わせを準備しています…");
-    let combination_list = sub_skill_combination_list(&evaluate_config.silver_seed);
-
+    let lv_list = [30u32, 50, 60, 70, 80];
     let mut table = EvaluateTable {
         version: m.version.evaluate,
         sleep_time: config.sleep_time,
         check_freq: config.check_freq,
         ..Default::default()
     };
-    let lv_list = [30u32, 50, 60, 70, 80];
+    if base.kaihou && config.kaihou_evaluate {
+        for &lv in &lv_list {
+            let level_rate = 1.025_f64.powf(lv as f64 - 1.0) / (1.0 - 0.002 * (lv as f64 - 1.0));
+            let healer = evaluate_config.score_for_healer_evaluate.unwrap_or(f64::NAN) * level_rate;
+            let support = evaluate_config.score_for_support_evaluate.unwrap_or(f64::NAN) * level_rate;
+            table.healer.insert(lv, healer);
+            table.support.insert(lv, support);
+        }
+        progress.set(1.0, "完了");
+        return Ok(table);
+    }
+
+    progress.set(0.0, "サブスキルの組み合わせを準備しています…");
+    let combination_list = sub_skill_combination_list(&evaluate_config.silver_seed);
+
     for (index, &lv) in lv_list.iter().enumerate() {
         let foods: Vec<String> = if lv < 60 { vec!["00".into(), "01".into()] } else { food_combination_list(lv) };
         let sub_skill_num = crate::simulator::enabled_sub_skill_len(lv as f64);
@@ -581,6 +634,177 @@ pub fn simulate_temporary(config: &Config, pokemon_name: &str, progress: &dyn Pr
     }
     progress.set(1.0, "完了");
     Ok(table)
+}
+
+/// かいほうポケモン(ミュウ・ダークライ)のオンデマンド厳選テーブル:
+/// ポケモン名 → レベル → 食材キー("012" や未解放枠を含む "01_") → パーセンタイル
+pub type KaihouOverlay = HashMap<String, BTreeMap<u32, HashMap<String, PercentileSet>>>;
+
+type ComboCacheMap = HashMap<Vec<(String, bool)>, Arc<SubSkillCombinationList>>;
+
+fn cached_sub_skill_combinations(silver_seed: &HashMap<String, bool>) -> Arc<SubSkillCombinationList> {
+    static CACHE: OnceLock<Mutex<ComboCacheMap>> = OnceLock::new();
+    let mut key: Vec<(String, bool)> = silver_seed.iter().map(|(k, &v)| (k.clone(), v)).collect();
+    key.sort();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = cache.lock().expect("combo cache").get(&key) {
+        return Arc::clone(hit);
+    }
+    let built = Arc::new(sub_skill_combination_list(silver_seed));
+    let mut guard = cache.lock().expect("combo cache");
+    Arc::clone(guard.entry(key).or_insert(built))
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct KaihouCacheKey {
+    sleep_time: u64,
+    check_freq: u64,
+    select_evaluate: String,
+    healer: u64,
+    support: u64,
+    pokemon: String,
+    lv: u32,
+    foods: Vec<String>,
+}
+
+const KAIHOU_CACHE_MAX: usize = 4096;
+
+/// ボックス内の `kaihou` ポケモンについて、所持している食材構成だけをオンデマンドで厳選評価する
+pub fn build_kaihou_overlay(config: &Config, box_list: &[BoxPokemon], table: &EvaluateTable) -> Result<KaihouOverlay, String> {
+    if !config.kaihou_evaluate {
+        return Ok(HashMap::new());
+    }
+    let m = master();
+    let lv_list = config.select_evaluate.enabled_levels();
+
+    // (after, lv, food_key) -> food_names
+    let mut needed: BTreeSet<(String, u32, String, Vec<String>)> = BTreeSet::new();
+    for bx in box_list {
+        let Some(original_base) = m.pokemon(&bx.name) else { continue };
+        if !original_base.kaihou {
+            continue;
+        }
+        if bx.food_list.first().is_none_or(|f| !original_base.food_name_list.contains(f) || m.food(f).is_none()) {
+            continue;
+        }
+        for after in &original_base.after_list {
+            if table.pokemon.contains_key(after) {
+                continue;
+            }
+            for &lv in &lv_list {
+                if !table.healer.contains_key(&lv) || !table.support.contains_key(&lv) {
+                    continue;
+                }
+                let food_num = if lv < 30 { 1 } else if lv < 60 { 2 } else { 3 };
+                let food_names: Vec<String> = (0..food_num)
+                    .map(|k| bx.food_list.get(k).filter(|f| original_base.food_name_list.contains(f)).cloned().unwrap_or_default())
+                    .collect();
+                let food_key: String = (0..food_num)
+                    .map(|k| original_base.food_name_list.iter().position(|x| x == &food_names[k]).map_or_else(|| "_".to_string(), |i| i.to_string()))
+                    .collect();
+                needed.insert((after.clone(), lv, food_key, food_names));
+            }
+        }
+    }
+    if needed.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    static CACHE: OnceLock<Mutex<HashMap<KaihouCacheKey, PercentileSet>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let select_evaluate_json = serde_json::to_string(&config.select_evaluate).unwrap_or_default();
+
+    let mut overlay: KaihouOverlay = HashMap::new();
+    let mut misses: Vec<(String, u32, String, Vec<String>, KaihouCacheKey)> = Vec::new();
+    {
+        let guard = cache.lock().expect("kaihou cache");
+        for (after, lv, food_key, food_names) in needed {
+            let healer = table.healer[&lv];
+            let support = table.support[&lv];
+            let key = KaihouCacheKey {
+                sleep_time: config.sleep_time.to_bits(),
+                check_freq: config.check_freq.to_bits(),
+                select_evaluate: select_evaluate_json.clone(),
+                healer: healer.to_bits(),
+                support: support.to_bits(),
+                pokemon: after.clone(),
+                lv,
+                foods: food_names.clone(),
+            };
+            if let Some(perc) = guard.get(&key) {
+                overlay.entry(after).or_default().entry(lv).or_default().insert(food_key, perc.clone());
+            } else {
+                misses.push((after, lv, food_key, food_names, key));
+            }
+        }
+    }
+    if misses.is_empty() {
+        return Ok(overlay);
+    }
+
+    let combination_list = cached_sub_skill_combinations(&config.select_evaluate.silver_seed);
+    let computed: Vec<(String, u32, String, KaihouCacheKey, PercentileSet)> = misses
+        .into_par_iter()
+        .map(|(after, lv, food_key, food_names, key)| {
+            let pokemon = m.pokemon(&after).ok_or_else(|| format!("知らないポケモン: {after}"))?;
+            let sub_skill_num = crate::simulator::enabled_sub_skill_len(lv as f64);
+            let fallback;
+            let raw_combos: &[SubSkillCombination] = match combination_list.get(sub_skill_num).filter(|_| sub_skill_num > 0) {
+                Some(c) => c,
+                None => {
+                    fallback = [SubSkillCombination { s: vec![], weights: [Some((1.0, vec![])), None, None, None] }];
+                    &fallback
+                }
+            };
+            let (combos, nature_list, total_weight) = prepare_eval_combos(raw_combos);
+            let ctx = EvalContext {
+                combos: &combos,
+                nature_list: &nature_list,
+                total_weight,
+                healer: table.healer[&lv],
+                support: table.support[&lv],
+                support_border: config.select_evaluate.support_border,
+            };
+            let mut simulator = PokemonSimulator::new(config.clone(), Mode::Select);
+            let (out, ..) = evaluate_single_food(lv, pokemon, &food_names, &ctx, &mut simulator, || {})?;
+            Ok((after, lv, food_key, key, out.percentile))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let mut guard = cache.lock().expect("kaihou cache");
+    if guard.len() + computed.len() > KAIHOU_CACHE_MAX {
+        guard.clear();
+    }
+    for (after, lv, food_key, key, perc) in computed {
+        guard.insert(key, perc.clone());
+        overlay.entry(after).or_default().entry(lv).or_default().insert(food_key, perc);
+    }
+    Ok(overlay)
+}
+
+/// 1件のかいほうポケモン用パーセンタイルを取得(キャッシュにあれば即返し、なければ計算)
+pub fn evaluate_kaihou_percentile(config: &Config, table: &EvaluateTable, pokemon_name: &str, lv: u32, food_names: &[String]) -> Option<PercentileSet> {
+    if !config.kaihou_evaluate {
+        return None;
+    }
+    let m = master();
+    let pokemon = m.pokemon(pokemon_name)?;
+    if !pokemon.kaihou {
+        return None;
+    }
+    let food_num = if lv < 30 { 1 } else if lv < 60 { 2 } else { 3 };
+    let foods: Vec<String> = (0..food_num)
+        .map(|k| food_names.get(k).filter(|f| pokemon.food_name_list.contains(f)).cloned().unwrap_or_default())
+        .collect();
+    if foods.first().is_none_or(|f| m.food(f).is_none()) {
+        return None;
+    }
+    let bx = BoxPokemon { name: pokemon.name.clone(), food_list: foods.clone(), ..Default::default() };
+    let overlay = build_kaihou_overlay(config, &[bx], table).ok()?;
+    let food_key: String = (0..food_num)
+        .map(|k| pokemon.food_name_list.iter().position(|x| x == &foods[k]).map_or_else(|| "_".to_string(), |i| i.to_string()))
+        .collect();
+    overlay.get(pokemon_name)?.get(&lv)?.get(&food_key).cloned()
 }
 
 // ---------------------------------------------------------------------------

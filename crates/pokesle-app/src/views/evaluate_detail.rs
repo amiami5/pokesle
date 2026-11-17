@@ -4,7 +4,7 @@ use eframe::egui;
 use pokesle_core::config::Config;
 use pokesle_core::cooking::get_chance_week_effect;
 use pokesle_core::data::{master, Pokemon, Specialty};
-use pokesle_core::evaluate_table::{EvaluateTable, PercentileSet};
+use pokesle_core::evaluate_table::{evaluate_kaihou_percentile, EvaluateTable, PercentileSet};
 use pokesle_core::help_rate::{HelpRate, HelpRateResult};
 use pokesle_core::js::to_fixed;
 use pokesle_core::sim_pokemon::SimPokemon;
@@ -71,7 +71,7 @@ impl EvaluateDetail {
         let sub_skill_idx: Vec<Option<usize>> = sub_skill_list.iter().map(|n| m.sub_skills.iter().position(|s| s.name == *n)).collect();
 
         let mut sim = PokemonSimulator::new(config.clone(), Mode::Select);
-        let foods: Vec<String> = self.food_index_list.iter().filter_map(|&f| base.food_name_list.get(f).cloned()).collect();
+        let foods: Vec<String> = self.food_index_list.iter().map(|&f| base.food_name_list.get(f).cloned().unwrap_or_default()).collect();
         let mut p = sim.from_evaluate(base, lv as f64, &foods)?;
         sim.select_evaluate(&mut p, &sub_skill_idx, self.nature, score_for_healer, score_for_support)?;
         let score = sim.select_evaluate_to_score(
@@ -84,7 +84,13 @@ impl EvaluateDetail {
         let healer_help_rate = help_rate.get_help_rate(&p.other_heal_list);
         let default_help_rate = help_rate.get_help_rate(&[]);
         let food_key: String = self.food_index_list.iter().map(|x| x.to_string()).collect();
-        let percentile = table.pokemon.get(&self.name).and_then(|l| l.get(&lv)).and_then(|l| l.get(&food_key)).cloned();
+        let percentile = table
+            .pokemon
+            .get(&self.name)
+            .and_then(|l| l.get(&lv))
+            .and_then(|l| l.get(&food_key))
+            .cloned()
+            .or_else(|| evaluate_kaihou_percentile(config, table, &self.name, lv, &foods));
         Ok(Computed { p, score, score_for_healer, score_for_support, healer_help_rate, default_help_rate, percentile })
     }
 

@@ -7,7 +7,7 @@ use pokesle_core::data::master;
 use pokesle_core::sim_pokemon::BoxPokemon;
 
 use pokesle_core::box_sim::BoxResult;
-use pokesle_core::config::Config;
+use pokesle_core::config::{AllSpecialtyMode, Config};
 use pokesle_core::evaluate_table::{EvalLv, EvaluateTable};
 use pokesle_core::exp::calc_require_info;
 use pokesle_core::team_sim::simulate_box;
@@ -465,7 +465,7 @@ s:5 (スキルレベル)";
     fn select_section(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, env: &EditEnv) {
         let m = master();
         let Some(base) = m.pokemon(&self.pokemon.name) else { return };
-        if base.kaihou {
+        if base.kaihou && !env.config.kaihou_evaluate {
             ui.label("このポケモンは厳選情報を表示できません");
             return;
         }
@@ -549,11 +549,23 @@ s:5 (スキルレベル)";
 
         // 列: 総合、とくい、(その他)
         let specialty = base.specialty.name();
+        let all_sp = env.config.all_specialty.unwrap_or(AllSpecialtyMode::None);
+        let is_primary = |name: &str| {
+            specialty == name
+                || (specialty == "オール"
+                    && matches!(
+                        (all_sp, name),
+                        (AllSpecialtyMode::Max, _)
+                            | (AllSpecialtyMode::Berry, "きのみ")
+                            | (AllSpecialtyMode::Food, "食材")
+                            | (AllSpecialtyMode::Skill, "スキル")
+                    ))
+        };
         let mut columns: Vec<(&str, &str, egui::Color32, u8)> = vec![
             ("energy", "総合スコア", egui::Color32::from_rgb(220, 48, 50), 1),
-            ("berry", "きのみ", egui::Color32::from_rgb(32, 212, 102), if specialty == "きのみ" { 2 } else { 3 }),
-            ("food", "食材", egui::Color32::from_rgb(245, 183, 72), if specialty == "食材" { 2 } else { 4 }),
-            ("skill", "スキル", egui::Color32::from_rgb(70, 159, 253), if specialty == "スキル" { 2 } else { 5 }),
+            ("berry", "きのみ", egui::Color32::from_rgb(32, 212, 102), if is_primary("きのみ") { 2 } else { 3 }),
+            ("food", "食材", egui::Color32::from_rgb(245, 183, 72), if is_primary("食材") { 2 } else { 4 }),
+            ("skill", "スキル", egui::Color32::from_rgb(70, 159, 253), if is_primary("スキル") { 2 } else { 5 }),
         ];
         columns.sort_by_key(|c| c.3);
         if !self.show_secondary {

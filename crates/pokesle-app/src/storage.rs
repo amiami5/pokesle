@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use pokesle_core::box_io::BoxFile;
-use pokesle_core::config::Config;
+use pokesle_core::config::{AllSpecialtyMode, Config};
 use pokesle_core::evaluate_table::EvaluateTable;
 use serde_json::Value;
 
@@ -73,6 +73,8 @@ pub struct UiSetting {
     pub zoom: f32,
     /// 配色(ライト・ダーク・OS に合わせる)
     pub theme: ThemeSetting,
+    /// 「オール」とくい(ミュウ・ダークライ)の「とくい厳選」で使う項目
+    pub all_specialty: AllSpecialtyMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -95,7 +97,7 @@ impl ThemeSetting {
 
 impl Default for UiSetting {
     fn default() -> Self {
-        UiSetting { font: None, zoom: 1.0, theme: ThemeSetting::Light }
+        UiSetting { font: None, zoom: 1.0, theme: ThemeSetting::Light, all_specialty: AllSpecialtyMode::Max }
     }
 }
 

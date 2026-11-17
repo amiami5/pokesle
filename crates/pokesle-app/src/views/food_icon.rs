@@ -90,7 +90,7 @@ pub fn food_list(ui: &mut egui::Ui, pokemon: &BoxPokemon) {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
         let painter = ui.painter();
         let alpha = if slot < unlock { 1.0 } else { 0.35 };
-        if num.is_none() {
+        if num.is_none() && !(name.is_empty() && base.is_some_and(|b| b.kaihou)) {
             // この枠では採れない食材(本家の error 表示)
             painter.rect_filled(rect, 3.0, egui::Color32::from_rgba_unmultiplied(220, 40, 40, 160));
         }
@@ -100,7 +100,7 @@ pub fn food_list(ui: &mut egui::Ui, pokemon: &BoxPokemon) {
                 painter.image(t.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
             }
             None => {
-                let text: String = name.chars().take(2).collect();
+                let text: String = if name.is_empty() { "-".to_string() } else { name.chars().take(2).collect() };
                 painter.text(rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(size * 0.45), ui.visuals().text_color().gamma_multiply(alpha));
             }
         }

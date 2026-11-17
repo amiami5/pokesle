@@ -88,6 +88,7 @@ pub struct BoxSummaryView {
     error: String,
     sort: Option<(usize, bool)>,
     box_time: Option<String>,
+    all_specialty: Option<pokesle_core::config::AllSpecialtyMode>,
 }
 
 impl Default for BoxSummaryView {
@@ -115,6 +116,7 @@ impl Default for BoxSummaryView {
             error: String::new(),
             sort: None,
             box_time: None,
+            all_specialty: None,
         }
     }
 }
@@ -148,6 +150,10 @@ impl BoxSummaryView {
         if self.box_time != shared.box_file.time {
             self.box_time = shared.box_file.time.clone();
             self.stale = [true; 4];
+        }
+        if self.all_specialty != Some(shared.ui_setting.all_specialty) {
+            self.all_specialty = Some(shared.ui_setting.all_specialty);
+            self.stale[0] = true;
         }
 
         // タブ
@@ -214,7 +220,7 @@ impl BoxSummaryView {
         if self.stale[i] && self.job.is_none() {
             self.stale[i] = false;
             self.output[i] = None;
-            let config = shared.config.clone();
+            let config = shared.sim_config();
             let list = shared.box_file.list.clone();
             let table = shared.usable_evaluate_table().cloned();
             let (each_food, ty, tab) = (self.each_food, self.evaluate_type, self.tab);

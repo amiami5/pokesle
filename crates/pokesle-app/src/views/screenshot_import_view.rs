@@ -380,7 +380,7 @@ impl ScreenshotImportView {
     fn start_edit(&mut self, index: usize, shared: &Shared) {
         let Some(row) = self.row_list.get(index) else { return };
         let env = EditEnv {
-            config: shared.config.clone(),
+            config: shared.sim_config(),
             box_list: shared.box_file.list.clone(),
             table: shared.usable_evaluate_table().cloned(),
         };

@@ -3,6 +3,7 @@
 use eframe::egui;
 
 use pokesle_core::browser_import::{self, BrowserImport};
+use pokesle_core::config::AllSpecialtyMode;
 
 use crate::app::Shared;
 use crate::fonts::{self, FontChoice};
@@ -49,6 +50,7 @@ impl UiSettingView {
         let mut font_changed = false;
         let mut zoom_changed = false;
         let mut theme_changed = false;
+        let mut setting_changed = false;
         ui.heading("設定");
         ui.add_space(6.0);
         egui::Grid::new("ui_setting").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -109,6 +111,30 @@ impl UiSettingView {
 
         ui.add_space(16.0);
         ui.separator();
+        ui.add_space(6.0);
+        ui.heading("厳選評価（ミュウ・ダークライ）");
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("「オール」とくいの「とくい厳選」:");
+            for (mode, label) in [
+                (AllSpecialtyMode::Max, "最大(きのみ/食材/スキル)"),
+                (AllSpecialtyMode::Berry, "きのみ"),
+                (AllSpecialtyMode::Food, "食材"),
+                (AllSpecialtyMode::Skill, "スキル"),
+                (AllSpecialtyMode::None, "表示しない"),
+            ] {
+                if ui.radio_value(&mut setting.all_specialty, mode, label).changed() {
+                    setting_changed = true;
+                }
+            }
+        });
+        ui.label(
+            egui::RichText::new("ミュウ・ダークライの厳選スコアは、所持している食材構成に合わせて自動で計算します。空白の食材・サブスキルは ±0 扱いです。")
+                .color(crate::views::style::muted()),
+        );
+
+        ui.add_space(16.0);
+        ui.separator();
         self.ocr_section(ui, shared);
         ui.add_space(16.0);
         ui.separator();
@@ -124,7 +150,7 @@ impl UiSettingView {
         if zoom_changed {
             ui.ctx().set_zoom_factor(setting.zoom);
         }
-        if (font_changed || zoom_changed || theme_changed)
+        if (font_changed || zoom_changed || theme_changed || setting_changed)
             && let Err(e) = storage::save_ui_setting(setting)
         {
             *status = format!("設定を保存できませんでした: {e}");

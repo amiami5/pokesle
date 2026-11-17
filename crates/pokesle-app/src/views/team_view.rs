@@ -215,7 +215,7 @@ impl TeamView {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(can_run, |ui| {
                 if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
-                    let config = shared.config.clone();
+                    let config = shared.sim_config();
                     self.job_config = Some(config.clone());
                     let list = shared.box_file.list.clone();
                     let table = shared.usable_evaluate_table().cloned();

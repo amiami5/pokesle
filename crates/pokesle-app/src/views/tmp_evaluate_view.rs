@@ -3,6 +3,7 @@
 //! 入力した1匹の厳選度を、進化先・レベル別に評価する。OCR(スクリーンショット入力)は対象外。
 
 use eframe::egui;
+use pokesle_core::config::AllSpecialtyMode;
 use pokesle_core::data::master;
 use pokesle_core::evaluate_table::EvalLv;
 use pokesle_core::js::to_fixed;
@@ -166,7 +167,7 @@ impl TmpEvaluateView {
     fn start_evaluate(&mut self, ctx: &egui::Context, shared: &Shared, with_mint: bool) {
         self.result = None;
         self.error.clear();
-        let config = shared.config.clone();
+        let config = shared.sim_config();
         let pokemon = self.pokemon.clone();
         self.job = Some(Job::spawn(ctx, move |p| evaluate(&config, pokemon, with_mint, &p)));
     }
@@ -287,6 +288,7 @@ impl TmpEvaluateView {
 
         let has_mint = result.has_mint;
         let mint_display = self.mint_chart_display;
+        let all_sp = shared.ui_setting.all_specialty;
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
             for evo in &result.evolutions {
@@ -296,7 +298,7 @@ impl TmpEvaluateView {
                     ui.add_space(2.0);
                     ui.label(egui::RichText::new("厳選度").size(13.0).strong().color(style::muted()));
                     if graph {
-                        chart(ui, evo, has_mint, mint_display);
+                        chart(ui, evo, has_mint, mint_display, all_sp);
                     } else {
                         rate_table(ui, evo, has_mint);
                     }
@@ -435,7 +437,7 @@ fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, with_min
 }
 
 /// 折れ線グラフ(縦軸 0〜100%、横軸は Lv30〜80)
-fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartDisplay) {
+fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartDisplay, all_sp: AllSpecialtyMode) {
     let show_legend_note = has_mint && display == MintChartDisplay::Both;
     let size = egui::vec2(TABLE_W, if show_legend_note { 246.0 } else { 230.0 });
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -460,7 +462,17 @@ fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartD
     for (si, (_, label, color, specialty)) in SERIES.iter().enumerate() {
         let c = style::pick(*color, *color);
         // 進化先のとくい以外は補助情報として薄く表示する
-        let dim = specialty.is_some_and(|s| s != evo.specialty);
+        let dim = specialty.is_some_and(|s| {
+            s != evo.specialty
+                && !(evo.specialty == "オール"
+                    && matches!(
+                        (all_sp, s),
+                        (AllSpecialtyMode::Max, _)
+                            | (AllSpecialtyMode::Berry, "きのみ")
+                            | (AllSpecialtyMode::Food, "食材")
+                            | (AllSpecialtyMode::Skill, "スキル")
+                    ))
+        });
         let c = if dim { c.gamma_multiply(0.4) } else { c };
         let to_points = |rates: &[[Option<f64>; 4]]| -> Vec<egui::Pos2> {
             rates

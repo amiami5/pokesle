@@ -310,15 +310,39 @@ pub struct PokemonSummary {
 }
 
 /// 食材構成ごとの表示で使う、Lv60・サブスキルなし・まじめの各ポケモン(本家 `loadFoodNumInfo`)
-fn food_num_list(config: &Config) -> Result<Vec<SimPokemon>, String> {
+fn food_num_list(config: &Config, box_list: &[BoxPokemon]) -> Result<Vec<SimPokemon>, String> {
     use crate::simulator::{HelpOption, Mode, PokemonSimulator};
+    let m = master();
     let mut c = config.clone();
     c.simulation.expect_type = [("food".to_string(), 0.0), ("skill".to_string(), 0.0)].into_iter().collect();
     let mut simulator = PokemonSimulator::new(c, Mode::About);
     let mut boxes = Vec::new();
     food_combination_pokemon(|name, foods| {
+        if config.kaihou_evaluate && m.pokemon(name).is_some_and(|p| p.kaihou) {
+            return;
+        }
         boxes.push(BoxPokemon { name: name.to_string(), lv: 60.0, food_list: foods, nature: "まじめ".into(), ..Default::default() });
     });
+    if config.kaihou_evaluate {
+        // かいほうポケモン(ミュウ・ダークライ)は512通り出さず、ボックスに所持している食材構成だけを追加する
+        let mut owned: Vec<(usize, String, Vec<String>)> = Vec::new();
+        for bx in box_list {
+            let Some(base) = m.pokemon(&bx.name) else { continue };
+            if !base.kaihou || bx.food_list.first().is_none_or(|f| m.food(f).is_none()) {
+                continue;
+            }
+            let foods: Vec<String> = (0..3)
+                .map(|k| bx.food_list.get(k).filter(|f| base.food_name_list.contains(f)).cloned().unwrap_or_default())
+                .collect();
+            if !owned.iter().any(|(_, n, fl)| n == &base.name && fl == &foods) {
+                owned.push((base.index, base.name.clone(), foods));
+            }
+        }
+        owned.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+        for (_, name, foods) in owned {
+            boxes.push(BoxPokemon { name, lv: 60.0, food_list: foods, nature: "まじめ".into(), ..Default::default() });
+        }
+    }
     let mut out = Vec::new();
     for bx in &boxes {
         let mut p = simulator.from_box(bx, false, 0.0, 0.0)?;
@@ -351,7 +375,7 @@ pub fn pokemon_summary(
         food_count: Vec<f64>,
     }
     let targets: Vec<Target> = if each_food {
-        food_num_list(config)?
+        food_num_list(config, box_list)?
             .into_iter()
             .map(|p| Target {
                 base: p.base,
@@ -385,7 +409,7 @@ pub fn pokemon_summary(
                     let Some(score) = score_of(r, lv, name) else { continue };
                     if each_food {
                         let bf = r.pokemon.box_pokemon.as_ref().map(|b| b.food_list.as_slice()).unwrap_or(&[]);
-                        if !t.food_list.iter().enumerate().all(|(i, f)| bf.get(i) == Some(f)) {
+                        if !t.food_list.iter().enumerate().all(|(i, f)| bf.get(i).map(String::as_str).unwrap_or("") == f.as_str()) {
                             continue;
                         }
                     }
@@ -406,4 +430,39 @@ pub fn pokemon_summary(
         .collect();
     on_progress(1.0);
     Ok(PokemonSummary { lv_list, rows })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AllSpecialtyMode;
+
+    #[test]
+    fn pokemon_summary_each_food_lists_only_owned_kaihou_foods() {
+        let mut table = EvaluateTable::default();
+        for lv in [30, 50, 60, 70] {
+            table.healer.insert(lv, 10000.0);
+            table.support.insert(lv, 150.0);
+        }
+        let mut cfg = Config::default_config();
+        cfg.kaihou_evaluate = true;
+        cfg.all_specialty = Some(AllSpecialtyMode::Max);
+        cfg.select_evaluate.level_list = [(30, true), (50, false), (60, false), (70, false)].into_iter().collect();
+
+        let bx = BoxPokemon {
+            name: "ダークライ".into(),
+            lv: 25.0,
+            food_list: vec!["とくせんリンゴ".into(), "めざましコーヒー".into(), String::new()],
+            sub_skill_list: vec!["きのみの数S".into(), String::new(), String::new(), String::new(), String::new()],
+            nature: "いじっぱり".into(),
+            ..Default::default()
+        };
+        let summary = pokemon_summary(&cfg, &[bx], Some(&table), true, EvaluateType::Specialty, &|_| {}).unwrap();
+        let darkrai_rows: Vec<&PokemonRow> = summary.rows.iter().filter(|r| master().pokemon[r.base].name == "ダークライ").collect();
+        assert_eq!(darkrai_rows.len(), 1);
+        assert_eq!(darkrai_rows[0].food_list, vec!["とくせんリンゴ", "めざましコーヒー", ""]);
+        assert!(darkrai_rows[0].max.value.is_some());
+        // 未所持のミュウ(kaihou)は「食材構成ごと」には出ない
+        assert!(summary.rows.iter().all(|r| !master().pokemon[r.base].name.starts_with("ミュウ(")));
+    }
 }

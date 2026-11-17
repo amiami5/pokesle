@@ -3,9 +3,9 @@
 use std::collections::HashSet;
 
 use crate::check_list::{CheckHit, CheckList, CheckTarget};
-use crate::config::Config;
+use crate::config::{AllSpecialtyMode, Config};
 use crate::data::{master, Specialty, SubSkillKind};
-use crate::evaluate_table::{EvalInfo, EvalLv, EvaluateResult, EvaluateTable};
+use crate::evaluate_table::{build_kaihou_overlay, EvalInfo, EvalLv, EvaluateResult, EvaluateTable, KaihouOverlay};
 use crate::filter::filter_pokemon;
 use crate::js;
 use crate::sim_pokemon::{BoxPokemon, SimPokemon};
@@ -58,6 +58,19 @@ impl BoxSimulator {
 
     /// 本家の 'basic'
     pub fn basic(&mut self, pokemon_list: &[BoxPokemon], evaluate_table: Option<&EvaluateTable>) -> Result<Vec<BoxResult>, String> {
+        let overlay = match evaluate_table {
+            Some(table) if self.config.kaihou_evaluate => Some(build_kaihou_overlay(&self.config, pokemon_list, table)?),
+            _ => None,
+        };
+        self.basic_with_overlay(pokemon_list, evaluate_table, overlay.as_ref())
+    }
+
+    pub fn basic_with_overlay(
+        &mut self,
+        pokemon_list: &[BoxPokemon],
+        evaluate_table: Option<&EvaluateTable>,
+        kaihou_overlay: Option<&KaihouOverlay>,
+    ) -> Result<Vec<BoxResult>, String> {
         let m = master();
         let config = self.config.clone();
         let lv_list = config.select_evaluate.enabled_levels();
@@ -101,9 +114,12 @@ impl BoxSimulator {
                     .iter()
                     .map(|f| original_base.food_name_list.iter().position(|x| x == f).map(|i| i as i64).unwrap_or(-1))
                     .collect();
-                if !food_index_list.contains(&-1) {
+                let allow_partial = config.kaihou_evaluate && original_base.kaihou && food_index_list.first().is_some_and(|&i| i >= 0);
+                if !food_index_list.contains(&-1) || allow_partial {
                     for after in &after_list {
-                        let Some(after_table) = table.pokemon.get(after) else { continue };
+                        let Some(after_table) = table.pokemon.get(after).or_else(|| kaihou_overlay.and_then(|o| o.get(after))) else {
+                            continue;
+                        };
                         let er = evaluate_result.get_or_insert_with(EvaluateResult::default);
                         let after_pokemon = m.pokemon(after).ok_or_else(|| format!("知らないポケモン: {after}"))?;
                         let mut evaluate_max_score = 0.0_f64;
@@ -114,7 +130,10 @@ impl BoxSimulator {
                                 continue;
                             };
                             let food_num = if lv < 30 { 1 } else if lv < 60 { 2 } else { 3 };
-                            let mut simulated = self.evaluate_simulator.from_evaluate(after_pokemon, lv as f64, &bx.food_list)?;
+                            let food_names: Vec<String> = (0..food_num)
+                                .map(|k| bx.food_list.get(k).filter(|f| original_base.food_name_list.contains(f)).cloned().unwrap_or_default())
+                                .collect();
+                            let mut simulated = self.evaluate_simulator.from_evaluate(after_pokemon, lv as f64, &food_names)?;
                             let sub_skill_num = crate::simulator::enabled_sub_skill_len(lv as f64);
                             let sub_skill_list: Vec<String> = m
                                 .use_silver_seed(&bx.sub_skill_list, Some(&config.select_evaluate.silver_seed))
@@ -123,7 +142,9 @@ impl BoxSimulator {
                                 .collect();
                             let sub_skill_idx: Vec<Option<usize>> =
                                 sub_skill_list.iter().map(|n| m.sub_skill(n).map(|s| sub_skill_pos(s.id))).collect();
-                            let food_key: String = food_index_list.iter().take(food_num).map(|x| x.to_string()).collect();
+                            let food_key: String = (0..food_num)
+                                .map(|k| food_index_list.get(k).copied().filter(|&i| i >= 0).map_or_else(|| "_".to_string(), |i| i.to_string()))
+                                .collect();
 
                             for &pure_mint in &evaluate_types {
                                 let nature = if pure_mint {
@@ -185,7 +206,24 @@ impl BoxSimulator {
                                     Specialty::Berry => Some("berry"),
                                     Specialty::Food => Some("food"),
                                     Specialty::Skill => Some("skill"),
-                                    Specialty::All => None,
+                                    Specialty::All => match config.all_specialty {
+                                        Some(AllSpecialtyMode::Berry) => Some("berry"),
+                                        Some(AllSpecialtyMode::Food) => Some("food"),
+                                        Some(AllSpecialtyMode::Skill) => Some("skill"),
+                                        Some(AllSpecialtyMode::Max) => {
+                                            let score_of = |key: &str| {
+                                                let item = entry.get(key);
+                                                if pure_mint { item.and_then(|x| x.pure_mint.as_deref()) } else { item }
+                                                    .map(|x| x.score)
+                                                    .filter(|s| !s.is_nan())
+                                            };
+                                            ["berry", "food", "skill"]
+                                                .into_iter()
+                                                .filter(|k| score_of(k).is_some())
+                                                .max_by(|a, b| js::cmp_num(score_of(a).unwrap_or(f64::NEG_INFINITY), score_of(b).unwrap_or(f64::NEG_INFINITY)))
+                                        }
+                                        Some(AllSpecialtyMode::None) | None => None,
+                                    },
                                 };
                                 if let Some(src) = spec_src {
                                     if !pure_mint {
@@ -228,8 +266,10 @@ impl BoxSimulator {
                         // チェックリスト(本家は同じ項目でも別オブジェクトのため重複して積まれる)
                         let this_check_hit = match &check_list {
                             Some(cl) => {
-                                let food_combination: String =
-                                    food_index_list.iter().map(|&x| char::from_u32((65 + x) as u32).unwrap_or('?')).collect();
+                                let food_combination: String = food_index_list
+                                    .iter()
+                                    .map(|&x| if x >= 0 { char::from_u32((65 + x) as u32).unwrap_or('?') } else { '?' })
+                                    .collect();
                                 let only = er.only(after, &lv_list);
                                 let hit = cl.get_checked(&CheckTarget { base_name: after, food_combination: &food_combination, evaluate_result: &only });
                                 let n = hit.len();
@@ -500,4 +540,72 @@ impl BoxSimulator {
 
 fn sub_skill_pos(id: u32) -> usize {
     master().sub_skills.iter().position(|s| s.id == id).expect("サブスキル")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::evaluate_table::EvaluateTable;
+
+    fn dummy_table() -> EvaluateTable {
+        let mut t = EvaluateTable::default();
+        for lv in [10, 25, 30, 50, 60, 70, 80] {
+            t.healer.insert(lv, 10000.0);
+            t.support.insert(lv, 150.0);
+        }
+        t
+    }
+
+    #[test]
+    fn kaihou_evaluate_and_all_specialty_modes() {
+        let table = dummy_table();
+        let bx = BoxPokemon {
+            name: "ダークライ".into(),
+            lv: 25.0,
+            food_list: vec!["とくせんリンゴ".into(), String::new(), String::new()],
+            sub_skill_list: vec![
+                "きのみの数S".into(),
+                "おてつだいボーナス".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+            nature: "いじっぱり".into(),
+            ..Default::default()
+        };
+
+        let mut cfg = Config::default_config();
+        cfg.kaihou_evaluate = true;
+        cfg.pure_mint = true;
+        cfg.select_evaluate.level_list = [(30, true), (50, false), (60, true), (70, false)].into_iter().collect();
+
+        // Max モード
+        cfg.all_specialty = Some(AllSpecialtyMode::Max);
+        let res = BoxSimulator::new(cfg.clone()).basic(std::slice::from_ref(&bx), Some(&table)).unwrap();
+        let er = res[0].evaluate_result.as_ref().expect("kaihou evaluate_result");
+        let entry = er.get(EvalLv::Lv(60), "ダークライ").unwrap();
+        let max_expected = [entry.berry.as_ref().unwrap().score, entry.food.as_ref().unwrap().score, entry.skill.as_ref().unwrap().score]
+            .into_iter()
+            .fold(0.0_f64, f64::max);
+        assert!((entry.specialty.as_ref().unwrap().score - max_expected).abs() < 1e-12);
+        let mint_max = [
+            entry.berry.as_ref().unwrap().pure_mint.as_ref().unwrap().score,
+            entry.food.as_ref().unwrap().pure_mint.as_ref().unwrap().score,
+            entry.skill.as_ref().unwrap().pure_mint.as_ref().unwrap().score,
+        ]
+        .into_iter()
+        .fold(0.0_f64, f64::max);
+        assert!((entry.specialty.as_ref().unwrap().pure_mint.as_ref().unwrap().score - mint_max).abs() < 1e-12);
+
+        // Berry / None モード
+        cfg.all_specialty = Some(AllSpecialtyMode::Berry);
+        let res_b = BoxSimulator::new(cfg.clone()).basic(std::slice::from_ref(&bx), Some(&table)).unwrap();
+        let entry_b = res_b[0].evaluate_result.as_ref().unwrap().get(EvalLv::Lv(30), "ダークライ").unwrap();
+        assert_eq!(entry_b.specialty.as_ref().unwrap().score, entry_b.berry.as_ref().unwrap().score);
+
+        cfg.all_specialty = Some(AllSpecialtyMode::None);
+        let res_n = BoxSimulator::new(cfg).basic(std::slice::from_ref(&bx), Some(&table)).unwrap();
+        let entry_n = res_n[0].evaluate_result.as_ref().unwrap().get(EvalLv::Lv(30), "ダークライ").unwrap();
+        assert!(entry_n.specialty.is_none());
+    }
 }

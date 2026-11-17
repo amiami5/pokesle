@@ -71,6 +71,14 @@ impl Shared {
     pub fn usable_evaluate_table(&self) -> Option<&EvaluateTable> {
         self.evaluate_table.as_ref().filter(|t| t.is_enable(&self.config))
     }
+
+    /// 画面・計算で使う実効設定(ミュウ・ダークライのオンデマンド厳選とオールとくいの設定を反映)
+    pub fn sim_config(&self) -> Config {
+        let mut c = self.config.clone();
+        c.kaihou_evaluate = true;
+        c.all_specialty = Some(self.ui_setting.all_specialty);
+        c
+    }
 }
 
 fn now_iso() -> String {

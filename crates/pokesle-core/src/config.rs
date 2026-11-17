@@ -92,6 +92,19 @@ fn default_one() -> f64 {
     1.0
 }
 
+/// 「オール」とくい(ミュウ・ダークライ)の「とくい厳選」の扱い
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AllSpecialtyMode {
+    /// きのみ・食材・スキルのうち最も高い値
+    #[default]
+    Max,
+    Berry,
+    Food,
+    Skill,
+    None,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -121,6 +134,12 @@ pub struct Config {
     /// 実行時にだけ指定される: ボックス整理モード
     #[serde(default, deserialize_with = "de_truthy", skip_serializing_if = "std::ops::Not::not")]
     pub cleaning: bool,
+    /// 実行時にだけ指定される: かいほうポケモン(ミュウ・ダークライ)もオンデマンドで厳選評価する
+    #[serde(default, deserialize_with = "de_truthy", skip_serializing_if = "std::ops::Not::not")]
+    pub kaihou_evaluate: bool,
+    /// 実行時にだけ指定される: オールとくいの「とくい厳選」の扱い
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub all_specialty: Option<AllSpecialtyMode>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
