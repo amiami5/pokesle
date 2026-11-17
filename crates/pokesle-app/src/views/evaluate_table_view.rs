@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use eframe::egui;
-use pokesle_core::data::{master, Pokemon, Specialty};
+use pokesle_core::data::{master, Pokemon};
 use pokesle_core::evaluate_table::{evaluate_energy_detail, sub_skill_combination_list, EnergyDetail, EvaluateTable, SubSkillCombinationList};
 use pokesle_core::sim_pokemon::BoxPokemon;
 
@@ -27,12 +27,27 @@ const PERCENTILE_W: f32 = 64.0;
 /// グラフの最小幅(本家のモバイル表示と同じ。これより狭いときは横にスクロールする)
 const GRAPH_MIN_WIDTH: f32 = 1680.0;
 const GRAPH_MIN_HEIGHT: f32 = 500.0;
-const SPECIALTY_LIST: [&str; 3] = ["きのみ", "食材", "スキル"];
+const SPECIALTY_LIST: [&str; 4] = ["きのみ", "食材", "スキル", "オール"];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewTab {
     Graph,
     Table,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GraphAxis {
+    Type,
+    Specialty,
+    All,
+}
+
+impl GraphAxis {
+    const ALL: [(GraphAxis, &str); 3] = [(GraphAxis::Type, "タイプ別"), (GraphAxis::Specialty, "とくい別"), (GraphAxis::All, "全体")];
+
+    fn label(self) -> &'static str {
+        GraphAxis::ALL.iter().find(|(a, _)| *a == self).map_or("タイプ別", |(_, l)| *l)
+    }
 }
 
 /// 一覧の1行(ポケモン × 食材構成)
@@ -58,6 +73,7 @@ pub struct EvaluateTableView {
     lv: Option<u32>,
     step: u32,
     graph_percentile: i32,
+    graph_axis: GraphAxis,
     sort: Option<(usize, bool)>,
     job: Option<(Pending, Job<DetailOutput>)>,
     /// サブスキルの組み合わせ(銀種の設定ごと。作るのに少しかかるので使い回す)
@@ -68,7 +84,18 @@ pub struct EvaluateTableView {
 
 impl Default for EvaluateTableView {
     fn default() -> Self {
-        EvaluateTableView { tab: ViewTab::Graph, lv: None, step: 5, graph_percentile: 100, sort: None, job: None, combinations: None, detail: None, error: String::new() }
+        EvaluateTableView {
+            tab: ViewTab::Graph,
+            lv: None,
+            step: 5,
+            graph_percentile: 100,
+            graph_axis: GraphAxis::Type,
+            sort: None,
+            job: None,
+            combinations: None,
+            detail: None,
+            error: String::new(),
+        }
     }
 }
 
@@ -120,6 +147,14 @@ impl EvaluateTableView {
                     self.sort = None;
                 }
             } else {
+                ui.label(egui::RichText::new("横軸").color(style::th_color()).strong());
+                let mut axis_text = self.graph_axis.label().to_string();
+                if combo(ui, "et_axis", &mut axis_text, GraphAxis::ALL.iter().map(|(_, l)| l.to_string()), 100.0)
+                    && let Some((axis, _)) = GraphAxis::ALL.iter().find(|(_, l)| *l == axis_text)
+                {
+                    self.graph_axis = *axis;
+                }
+                ui.add_space(12.0);
                 ui.label(egui::RichText::new("表示する厳選度").color(style::th_color()).strong());
                 ui.add(egui::DragValue::new(&mut self.graph_percentile).range(0..=100).speed(0.2));
                 ui.label("%");
@@ -141,7 +176,7 @@ impl EvaluateTableView {
             ui.label("このレベルの厳選テーブルがありません。");
         } else {
             match self.tab {
-                ViewTab::Graph => graph(ui, &rows, self.graph_percentile.clamp(0, 100) as usize),
+                ViewTab::Graph => graph(ui, &rows, self.graph_percentile.clamp(0, 100) as usize, self.graph_axis),
                 ViewTab::Table => {
                     if let Some(p) = self.table(ui, &rows) {
                         self.open_detail(ui.ctx(), shared, p.0, p.1);
@@ -353,12 +388,14 @@ struct Point {
     x: f64,
     y: f64,
     name: String,
-    category: usize,
+    type_name: String,
+    specialty: &'static str,
     color: egui::Color32,
 }
 
-/// 食材構成が複数あるポケモンは、指定厳選度で最も高い値を代表値とする。同じカテゴリの点は列の中で左右にずらす
-fn graph_points(rows: &[Row], percentile: usize, categories: &[(String, &'static str)]) -> Vec<Point> {
+/// 食材構成が複数あるポケモンは、指定厳選度で最も高い値を代表値とする。
+/// 横軸の設定に応じてタイプ別・とくい別・スコア順に並べる。
+fn graph_points(rows: &[Row], percentile: usize, axis: GraphAxis) -> Vec<Point> {
     let m = master();
     let mut best: Vec<(&'static Pokemon, f64)> = Vec::new();
     for r in rows {
@@ -372,37 +409,34 @@ fn graph_points(rows: &[Row], percentile: usize, categories: &[(String, &'static
             None => best.push((r.base, v)),
         }
     }
-    let mut grouped: Vec<Vec<(&'static Pokemon, f64)>> = vec![Vec::new(); categories.len()];
-    for (base, v) in best {
-        if base.specialty == Specialty::All {
-            continue;
-        }
-        let specialty = base.specialty.name();
-        if !SPECIALTY_LIST.contains(&specialty) {
-            continue;
-        }
-        if let Some(i) = categories.iter().position(|(t, s)| *t == base.type_name && *s == specialty) {
-            grouped[i].push((base, v));
-        }
-    }
-    let mut out = Vec::new();
-    for (ci, mut list) in grouped.into_iter().enumerate() {
-        list.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.name.cmp(&b.0.name)));
-        let n = list.len();
-        for (i, (base, v)) in list.into_iter().enumerate() {
-            let offset = if n <= 1 { 0.0 } else { (i as f64 / (n - 1) as f64 - 0.5) * 0.64 };
-            let color = parse_color(&m.berries[base.berry].type_color).unwrap_or(egui::Color32::GRAY);
-            out.push(Point { x: ci as f64 + offset, y: v, name: base.name.clone(), category: ci, color });
-        }
-    }
-    out
+    best.retain(|(base, _)| SPECIALTY_LIST.contains(&base.specialty.name()));
+    let type_order = |ty: &str| m.berry_type_order.iter().position(|t| t == ty).unwrap_or(usize::MAX);
+    let specialty_order = |sp: &str| SPECIALTY_LIST.iter().position(|s| *s == sp).unwrap_or(usize::MAX);
+    best.sort_by(|(a, va), (b, vb)| {
+        let primary = match axis {
+            GraphAxis::Type => type_order(&a.type_name).cmp(&type_order(&b.type_name)),
+            GraphAxis::Specialty => specialty_order(a.specialty.name()).cmp(&specialty_order(b.specialty.name())),
+            GraphAxis::All => std::cmp::Ordering::Equal,
+        };
+        primary
+            .then_with(|| va.partial_cmp(vb).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    best.into_iter()
+        .enumerate()
+        .map(|(i, (base, v))| Point {
+            x: i as f64,
+            y: v,
+            name: base.name.clone(),
+            type_name: base.type_name.clone(),
+            specialty: base.specialty.name(),
+            color: parse_color(&m.berries[base.berry].type_color).unwrap_or(egui::Color32::GRAY),
+        })
+        .collect()
 }
 
-fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize) {
-    let m = master();
-    let categories: Vec<(String, &'static str)> =
-        m.berry_type_order.iter().flat_map(|t| SPECIALTY_LIST.iter().map(move |s| (t.clone(), *s))).collect();
-    let points = graph_points(rows, percentile, &categories);
+fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize, axis: GraphAxis) {
+    let points = graph_points(rows, percentile, axis);
     let median = {
         let mut v: Vec<f64> = points.iter().map(|p| p.y).collect();
         v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -421,11 +455,11 @@ fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize) {
         let painter = ui.painter_at(rect);
         let font = egui::FontId::proportional(11.0);
         let text_color = style::muted();
-        let plot = egui::Rect::from_min_max(rect.min + egui::vec2(64.0, 28.0), rect.max - egui::vec2(10.0, 46.0));
+        let plot = egui::Rect::from_min_max(rect.min + egui::vec2(64.0, 28.0), rect.max - egui::vec2(10.0, 32.0));
 
         let max = points.iter().map(|p| p.y).fold(0.0, f64::max).max(1.0);
         let (_, y_max, step) = nice_range(0.0, max);
-        let n = categories.len() as f64;
+        let n = (points.len() as f64).max(1.0);
         let to_screen = |x: f64, y: f64| {
             egui::pos2(plot.left() + ((x + 0.5) / n) as f32 * plot.width(), plot.bottom() - (y / y_max) as f32 * plot.height())
         };
@@ -440,14 +474,18 @@ fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize) {
             y += step;
         }
         painter.text(rect.left_top() + egui::vec2(4.0, 4.0), egui::Align2::LEFT_TOP, "期待値", font.clone(), text_color);
-        for (i, (_, specialty)) in categories.iter().enumerate() {
-            let x = to_screen(i as f64, 0.0).x;
-            painter.vline(x, plot.y_range(), grid);
-            painter.text(egui::pos2(x, plot.bottom() + 4.0), egui::Align2::CENTER_TOP, specialty, egui::FontId::proportional(10.0), text_color);
-        }
-        for (g, ty) in m.berry_type_order.iter().enumerate() {
-            let x = to_screen((g * 3 + 1) as f64, 0.0).x;
-            painter.text(egui::pos2(x, plot.bottom() + 20.0), egui::Align2::CENTER_TOP, ty, egui::FontId::proportional(12.0), style::ink());
+        for (i, p) in points.iter().enumerate() {
+            let prev = i.checked_sub(1).and_then(|j| points.get(j));
+            let label = match axis {
+                GraphAxis::Type if prev.is_none_or(|pr| pr.type_name != p.type_name) => Some(p.type_name.as_str()),
+                GraphAxis::Specialty if prev.is_none_or(|pr| pr.specialty != p.specialty) => Some(p.specialty),
+                _ => None,
+            };
+            if let Some(label) = label {
+                let x = to_screen(i as f64, 0.0).x;
+                painter.vline(x, plot.y_range(), grid);
+                painter.text(egui::pos2(x, plot.bottom() + 6.0), egui::Align2::CENTER_TOP, label, egui::FontId::proportional(11.0), style::ink());
+            }
         }
 
         // 中央値の補助線
@@ -456,18 +494,45 @@ fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize) {
             painter.hline(plot.x_range(), y, egui::Stroke::new(1.0, egui::Color32::from_rgb(0xee, 0, 0)));
         }
 
-        // 点と名前
+        // 点と名前(他のラベルと重ならない候補位置へ順に配置する)
         let halo = style::surface().gamma_multiply(0.9);
         let name_font = egui::FontId::proportional(11.0);
         let border = egui::Stroke::new(1.0, style::pick(0x555555, 0xcccccc));
         let screen: Vec<egui::Pos2> = points.iter().map(|p| to_screen(p.x, p.y)).collect();
-        for (i, (p, pos)) in points.iter().zip(&screen).enumerate() {
+        let offsets = [6.0_f32, 19.0, 32.0, 45.0, 58.0, 71.0, 84.0, 97.0];
+        let mut occupied: Vec<egui::Rect> = Vec::new();
+        for (p, pos) in points.iter().zip(&screen) {
             painter.circle(*pos, 4.0, p.color, border);
-            let at = egui::pos2(pos.x, pos.y - 5.0 - (i % 2) as f32 * 11.0);
-            for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
-                painter.text(at + egui::vec2(dx, dy), egui::Align2::CENTER_BOTTOM, &p.name, name_font.clone(), halo);
+            let galley = painter.layout_no_wrap(p.name.clone(), name_font.clone(), style::ink());
+            let w = galley.size().x;
+            let h = 13.0_f32;
+            let pad = 2.0_f32;
+            let rect_for = |y: f32, above: bool| {
+                let top = if above { y - h } else { y };
+                egui::Rect::from_min_max(egui::pos2(pos.x - w / 2.0 - pad, top - pad), egui::pos2(pos.x + w / 2.0 + pad, top + h + pad))
+            };
+            let mut chosen = (pos.y - offsets[0], true);
+            'find: for d in offsets {
+                for (y, above) in [(pos.y - d, true), (pos.y + d, false)] {
+                    let r = rect_for(y, above);
+                    if r.left() >= plot.left()
+                        && r.right() <= plot.right()
+                        && r.top() >= rect.top()
+                        && r.bottom() <= rect.bottom()
+                        && !occupied.iter().any(|o| r.intersects(*o))
+                    {
+                        chosen = (y, above);
+                        break 'find;
+                    }
+                }
             }
-            painter.text(at, egui::Align2::CENTER_BOTTOM, &p.name, name_font.clone(), style::ink());
+            occupied.push(rect_for(chosen.0, chosen.1));
+            let align = if chosen.1 { egui::Align2::CENTER_BOTTOM } else { egui::Align2::CENTER_TOP };
+            let at = egui::pos2(pos.x, chosen.0);
+            for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                painter.text(at + egui::vec2(dx, dy), align, &p.name, name_font.clone(), halo);
+            }
+            painter.text(at, align, &p.name, name_font.clone(), style::ink());
         }
 
         // ホバー(点 → 中央値の順)
@@ -475,8 +540,7 @@ fn graph(ui: &mut egui::Ui, rows: &[Row], percentile: usize) {
             let near = screen.iter().enumerate().map(|(i, s)| (i, (*s - pointer).length())).filter(|(_, d)| *d <= 8.0).min_by(|a, b| a.1.total_cmp(&b.1));
             let text = if let Some((i, _)) = near {
                 let p = &points[i];
-                let (ty, sp) = &categories[p.category];
-                Some(format!("{}\n{ty}・{sp}: {}", p.name, fmt_num(p.y)))
+                Some(format!("{}\n{}・{}: {}", p.name, p.type_name, p.specialty, fmt_num(p.y)))
             } else if plot.contains(pointer) && median_y.is_some_and(|y| (pointer.y - y).abs() <= 5.0) {
                 Some("中央値".to_string())
             } else {

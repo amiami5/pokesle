@@ -35,7 +35,7 @@ enum Fmt {
 }
 
 /// 「シミュ詳細」の列(本家 index.vue の `config.pokemonList.simulatedInfo`)
-const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 25] = [
+const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 26] = [
     ("speed", "おてつだい\n時間", Fmt::Num(0), |p| p.speed),
     ("dayHelpNum", "日中おてつ\nだい回数", Fmt::Num(2), |p| p.day_help_num),
     ("nightHelpNum", "夜間おてつ\nだい回数", Fmt::Num(2), |p| p.night_help_num),
@@ -44,7 +44,8 @@ const DETAIL_COLUMNS: [(&str, &str, Fmt, fn(&SimPokemon) -> f64); 25] = [
     ("bEpD", "きのみ\n/日", Fmt::Num(1), |p| p.b_ep_d),
     ("foodRate", "食材\n率", Fmt::Percent(1), |p| p.food_rate),
     ("foodNum", "食材\n個数", Fmt::Num(1), |p| p.food_num),
-    ("fEpH", "食材\n/手伝い", Fmt::Num(1), |p| p.f_ep_h),
+    ("fEpH", "食材エナジー\n/手伝い", Fmt::Num(1), |p| p.f_ep_h),
+    ("foodHelpNumPerDay", "食材回数\n/日", Fmt::Num(2), |p| p.f_ep_d / p.f_ep_h),
     ("fEpD", "食材\n/日", Fmt::Num(1), |p| p.f_ep_d),
     ("pickupEnergyPerHelp", "きのみ+食材\n/手伝い", Fmt::Num(1), |p| p.pickup_energy_per_help),
     ("pickupEnergyPerDay", "きのみ+食材\n/日", Fmt::Num(1), |p| p.pickup_energy_per_day),

@@ -196,13 +196,22 @@ pub fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config, tmp: bool) {
             num_unit(ui, &mut c.check_freq, 1.0, 60.0, "回");
             ui.end_row();
 
-            lbl(ui, "おてつだいボーナス評価");
+            lbl(ui, "おてつだいボーナス設定");
             ui.vertical(|ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("本人がおてボ持ちの時");
                     ui.add_sized([80.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus).range(0.0..=4.0));
                     ui.label("匹");
+                    ui.add_space(6.0);
+                    ui.label("そうでない時");
+                    ui.add_sized([80.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus_without_self).range(0.0..=4.0));
+                    ui.label("匹");
                 });
-                small(ui, "自分以外の4匹におてつだいボーナスが何匹いるか指定します。\n3匹にすると、おてボ＋おてスピMが最も高く評価されます。", 400.0);
+                small(
+                    ui,
+                    "自分以外のチーム内のおてつだいボーナス持ちの匹数を指定します。\n3匹にすると、おてボ＋おてスピMが最も高く評価されます。\nおてつだいボーナスを重視して厳選している場合は、「そうでない時」の設定値を低くすると差をつけられます。",
+                    400.0,
+                );
             });
             ui.end_row();
 

@@ -177,7 +177,7 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
 
             th(ui, "料理の種類");
             let current = s.cooking_type.clone().unwrap_or_default();
-            let names = [("", "すべて"), ("カレー", "カレー・シチュー"), ("サラダ", "サラダ"), ("デザート", "デザート・ドリンク")];
+            let names = [("カレー", "カレー・シチュー"), ("サラダ", "サラダ"), ("デザート", "デザート・ドリンク"), ("", "なんでも！")];
             let text = names.iter().find(|x| x.0 == current).map(|x| x.1).unwrap_or("");
             egui::ComboBox::from_id_salt("cooking_type").selected_text(text).show_ui(ui, |ui| {
                 for (v, l) in names {
@@ -226,48 +226,50 @@ fn all_checked(ev: &EventBonus) -> bool {
 
 fn event_bonus_label(c: &Config) -> Label {
     let s = &c.simulation;
-    let mut l: Label = vec![("イベントボーナス：".into(), false)];
-    if s.event_bonus_list.is_empty() {
-        l.push(("なし".into(), false));
-    } else {
-        let text = s
-            .event_bonus_list
-            .iter()
-            .map(|ev| {
-                let target = if all_checked(ev) {
-                    "全員".to_string()
-                } else {
-                    SPECIALTIES
-                        .iter()
-                        .filter(|x| ev.target.specialties.get(**x).copied().unwrap_or(false))
-                        .map(|x| x.to_string())
-                        .chain(TYPE_LIST.iter().filter(|t| ev.target.types.get(**t).copied().unwrap_or(false)).map(|t| t.to_string()))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                };
-                let effect = [
-                    (ev.berry != 0.0).then(|| format!("きのみ+{}", js_num(ev.berry))),
-                    (ev.food != 0.0).then(|| format!("食材+{}", js_num(ev.food))),
-                    (ev.skill_rate != 1.0).then(|| format!("スキル確率x{}", js_num(ev.skill_rate))),
-                    (ev.skill_lv != 0.0).then(|| format!("スキルレベル+{}", js_num(ev.skill_lv))),
-                    (ev.bag != 0.0).then(|| format!("所持数+{}", js_num(ev.bag))),
-                    (ev.bag_rate != 1.0).then(|| format!("所持数x{}", js_num(ev.bag_rate))),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" ");
-                format!("{target}({effect})")
-            })
+    let mut parts: Vec<String> = s
+        .event_bonus_list
+        .iter()
+        .filter_map(|ev| {
+            let target = if all_checked(ev) {
+                "全員".to_string()
+            } else {
+                SPECIALTIES
+                    .iter()
+                    .filter(|x| ev.target.specialties.get(**x).copied().unwrap_or(false))
+                    .map(|x| x.to_string())
+                    .chain(TYPE_LIST.iter().filter(|t| ev.target.types.get(**t).copied().unwrap_or(false)).map(|t| t.to_string()))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let effect = [
+                (ev.berry != 0.0).then(|| format!("きのみ+{}", js_num(ev.berry))),
+                (ev.food != 0.0).then(|| format!("食材+{}", js_num(ev.food))),
+                (ev.skill_rate != 1.0).then(|| format!("スキル確率x{}", js_num(ev.skill_rate))),
+                (ev.skill_lv != 0.0).then(|| format!("スキルレベル+{}", js_num(ev.skill_lv))),
+                (ev.bag != 0.0).then(|| format!("所持数+{}", js_num(ev.bag))),
+                (ev.bag_rate != 1.0).then(|| format!("所持数x{}", js_num(ev.bag_rate))),
+            ]
+            .into_iter()
+            .flatten()
             .collect::<Vec<_>>()
             .join(" ");
-        l.push((text, true));
-    }
+            (!effect.is_empty()).then(|| format!("{target}({effect})"))
+        })
+        .collect();
     if s.event_bonus.skill.berry_burst != 1.0 {
-        l.push((format!(" きのみバーストx{}", js_num(s.event_bonus.skill.berry_burst)), true));
+        parts.push(format!("きのみバーストx{}", js_num(s.event_bonus.skill.berry_burst)));
     }
     if s.event_bonus.skill.food_get != 1.0 {
-        l.push((format!(" 食材系スキルx{}", js_num(s.event_bonus.skill.food_get)), true));
+        parts.push(format!("食材系スキルx{}", js_num(s.event_bonus.skill.food_get)));
+    }
+    if let Some(food) = s.event_bonus.food.as_deref().filter(|f| !f.is_empty()) {
+        parts.push(format!("{food}ボーナス"));
+    }
+    let mut l: Label = vec![("イベントボーナス：".into(), false)];
+    if parts.is_empty() {
+        l.push(("なし".into(), false));
+    } else {
+        l.push((parts.join(" "), true));
     }
     l
 }
@@ -369,11 +371,35 @@ fn event_bonus_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                 });
             });
             ui.end_row();
+
+            th(ui, "食材ボーナス");
+            ui.vertical(|ui| {
+                let current = s.event_bonus.food.as_deref().filter(|f| !f.is_empty()).unwrap_or("未選択");
+                ui.label(format!("対象食材：{current}"));
+                ui.horizontal_wrapped(|ui| {
+                    ui.set_max_width(500.0);
+                    ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+                    for food in &master().foods {
+                        let selected = s.event_bonus.food.as_deref() == Some(food.name.as_str());
+                        if food_icon::food_choice(ui, &food.name, selected).clicked() {
+                            s.event_bonus.food = if selected { None } else { Some(food.name.clone()) };
+                            changed = true;
+                        }
+                    }
+                });
+                small(
+                    ui,
+                    "食材とくい・オールとくいは食材を拾うたびに対象食材を1個追加で獲得します。\n対象食材を含むレシピと、レシピ外の追加食材として投入した対象食材のエナジーが1.5倍になります。",
+                    500.0,
+                );
+            });
+            ui.end_row();
         });
         if form_button(ui, "リセット", ButtonKind::Normal).clicked() {
             s.event_bonus_list.clear();
             s.event_bonus.skill.berry_burst = 1.0;
             s.event_bonus.skill.food_get = 1.0;
+            s.event_bonus.food = None;
             changed = true;
         }
     });

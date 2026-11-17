@@ -15,6 +15,7 @@ pub struct EvaluatedCooking {
     pub lv3: Option<f64>,
     pub lv4: Option<f64>,
     pub recipe_lv_bonus: f64,
+    pub event_food_rate: f64,
     pub fix_energy: f64,
     pub fix_add_energy: f64,
     pub enable: bool,
@@ -76,6 +77,7 @@ pub fn evaluate_lv_list(sim: Option<&SimulationConfig>) -> Vec<EvaluatedCooking>
                 lv3: None,
                 lv4: None,
                 recipe_lv_bonus: 0.0,
+                event_food_rate: 1.0,
                 fix_energy: 0.0,
                 fix_add_energy: 0.0,
                 enable: true,
@@ -112,7 +114,12 @@ pub fn evaluate_lv_list(sim: Option<&SimulationConfig>) -> Vec<EvaluatedCooking>
             }
 
             c.recipe_lv_bonus = recipe_bonus(c.lv);
-            c.fix_energy = cooking.energy * c.recipe_lv_bonus;
+            if let Some(event_food) = sim.and_then(|s| s.event_bonus.food.as_deref()).and_then(|n| m.food_index(n))
+                && cooking.food_list.iter().any(|cf| cf.food == event_food)
+            {
+                c.event_food_rate = 1.5;
+            }
+            c.fix_energy = cooking.energy * c.recipe_lv_bonus * c.event_food_rate;
             c.fix_add_energy = c.fix_energy - cooking.raw_energy;
 
             if let Some(sim) = sim {

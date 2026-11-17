@@ -134,7 +134,8 @@
    "skill": {
     "berryBurst": 1,
     "foodGet": 1
-   }
+   },
+   "food": null
   },
   "potSize": 81,
   "bagOverOperation": true,
@@ -656,6 +657,7 @@
   },
   "helpBonus": 20,
   "teamHelpBonus": 1,
+  "teamHelpBonusWithoutSelf": 1,
   "supportBorder": 90,
   "supportRankNum": 20,
   "cookingPowerUpType": 1,
@@ -1368,6 +1370,7 @@
   },
   "helpBonus": 20,
   "teamHelpBonus": 1,
+  "teamHelpBonusWithoutSelf": 1,
   "supportBorder": 90,
   "supportRankNum": 20,
   "cookingPowerUpType": 1,

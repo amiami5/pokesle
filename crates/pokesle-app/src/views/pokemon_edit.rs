@@ -785,20 +785,7 @@ fn setting_item(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui))
 
 /// 食材の選択肢1つ(36px の枠)。選ばれているものは明るい背景に緑の太枠、選ばれていないものは暗く沈める
 fn food_choice(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
-    let r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let bright = selected || r.hovered();
-    let fill = if bright { egui::Color32::WHITE } else { style::pick(0xb9bfcb, 0x3a4152) };
-    let stroke = if selected { egui::Stroke::new(2.0, style::mint()) } else { egui::Stroke::new(1.0, style::line_color()) };
-    ui.painter().rect(rect, 6.0, fill, stroke, egui::StrokeKind::Inside);
-    let inner = egui::Rect::from_center_size(rect.center(), egui::vec2(29.0, 29.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-        if !bright {
-            ui.multiply_opacity(0.55);
-        }
-        food_icon::food_icon(ui, name, 29.0);
-    });
-    r.on_hover_text(name)
+    food_icon::food_choice(ui, name, selected)
 }
 
 /// サブスキルのラベル(本家 sub-skill-label.vue の short)。クリックできる

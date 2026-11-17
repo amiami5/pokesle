@@ -264,11 +264,12 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
     for c in &cooking_list {
         let cooking = c.cooking();
         for cf in &cooking.food_list {
-            let v = m.foods[cf.food].energy * cooking.rate * c.recipe_lv_bonus * food_common_rate;
+            let v = m.foods[cf.food].energy * cooking.rate * c.recipe_lv_bonus * c.event_food_rate * food_common_rate;
             let cur = food_energy_map[cf.food].unwrap_or(0.0);
             food_energy_map[cf.food] = Some(js::max(if cur == 0.0 || cur.is_nan() { 0.0 } else { cur }, v));
         }
     }
+    let event_food_idx = sim.event_bonus.food.as_deref().and_then(|n| m.food_index(n));
 
     let mut simulator = PokemonSimulator::new(config.clone(), Mode::Team);
     let mut help_rate = HelpRate::new(config, None);
@@ -520,7 +521,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                                 let num = js::min(pot_remain, r.1);
                                 pot_remain -= num;
                                 r.1 -= num;
-                                add_food_power += r.2 * num;
+                                add_food_power += r.2 * if Some(r.0) == event_food_idx { 1.5 } else { 1.0 } * num;
                                 if r.1 <= 0.0 {
                                     remain_pos += 1;
                                 }

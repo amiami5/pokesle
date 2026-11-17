@@ -150,7 +150,7 @@ impl PokemonSimulator {
             let cooking = c.cooking();
             for cf in &cooking.food_list {
                 let e = &mut food_energy_map[cf.food];
-                e.max = js::max(e.max, m.foods[cf.food].energy * cooking.rate * c.recipe_lv_bonus * food_common_rate);
+                e.max = js::max(e.max, m.foods[cf.food].energy * cooking.rate * c.recipe_lv_bonus * c.event_food_rate * food_common_rate);
             }
         }
 
@@ -545,7 +545,16 @@ impl PokemonSimulator {
 
         let food_len = pokemon.food_list.len() as f64;
         pokemon.food_num = pokemon.food_list.iter().fold(0.0, |a, x| a + x.num) / food_len;
-        pokemon.f_ep_h = pokemon.food_list.iter().fold(0.0, |a, x| a + x.energy * x.num) / food_len * self.food_energy_weight;
+        let event_food_name = if self.mode != Mode::Select && base.specialty.is_food_like() {
+            self.config.simulation.event_bonus.food.as_deref().filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+        let event_food_energy = event_food_name.and_then(|n| m.food(n)).map_or(0.0, |f| f.energy);
+        if event_food_name.is_some() {
+            pokemon.food_num += 1.0;
+        }
+        pokemon.f_ep_h = (pokemon.food_list.iter().fold(0.0, |a, x| a + x.energy * x.num) / food_len + event_food_energy) * self.food_energy_weight;
         let food_energy_per_help_for_support =
             pokemon.food_list.iter().fold(0.0, |a, x| a + x.energy * x.base_num) / food_len * self.food_energy_weight;
 
@@ -816,6 +825,11 @@ impl PokemonSimulator {
         pokemon.berry_num_per_day = pokemon.berry_num * berry_help_num;
 
         pokemon.food_count.iter_mut().for_each(|x| *x = 0.0);
+        let event_food_idx = if self.mode != Mode::Select && pokemon.base().specialty.is_food_like() {
+            self.config.simulation.event_bonus.food.as_deref().and_then(|n| m.food_index(n))
+        } else {
+            None
+        };
         if self.expect_type.get("food") == Some(&0.0) {
             let food_get_chance = pokemon.normal_help_num * pokemon.food_rate;
             pokemon.f_ep_d = pokemon.f_ep_h * food_get_chance;
@@ -823,6 +837,9 @@ impl PokemonSimulator {
             let len = pokemon.food_list.len() as f64;
             for f in &pokemon.food_list {
                 pokemon.food_count[f.food] += f.num / len * food_get_chance;
+            }
+            if let Some(ef_idx) = event_food_idx {
+                pokemon.food_count[ef_idx] += food_get_chance;
             }
         } else {
             pokemon.f_ep_d = 0.0;
@@ -832,6 +849,23 @@ impl PokemonSimulator {
                 pokemon.f_ep_d += num * fp.energy;
                 pokemon.food_num_per_day += num;
                 pokemon.food_count[fp.food] += num;
+            }
+            if let Some(ef_idx) = event_food_idx {
+                let food_get_num: f64 = pokemon
+                    .food_prob_list
+                    .clone()
+                    .into_iter()
+                    .map(|fp| {
+                        if fp.num != 0.0 && !fp.num.is_nan() {
+                            self.prob_border.get(pokemon.food_rate * fp.weight, pokemon.normal_help_num)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .sum();
+                pokemon.f_ep_d += food_get_num * m.foods[ef_idx].energy * self.food_energy_weight;
+                pokemon.food_num_per_day += food_get_num;
+                pokemon.food_count[ef_idx] += food_get_num;
             }
         }
 
@@ -1333,7 +1367,13 @@ impl PokemonSimulator {
         let berry_rate = get_pokemon_evaluate_setting(&self.config.select_evaluate, pokemon.base()).berry_energy_rate;
         self.calc_parameter(pokemon, sub_skill_list, nature, berry_rate);
 
-        let help_bonus = self.config.select_evaluate.team_help_bonus + if pokemon.has_sub_skill(SubSkillKind::HelpBonus) { 1.0 } else { 0.0 };
+        let has_help_bonus = pokemon.has_sub_skill(SubSkillKind::HelpBonus);
+        let team_help_bonus = if has_help_bonus {
+            self.config.select_evaluate.team_help_bonus
+        } else {
+            self.config.select_evaluate.team_help_bonus_without_self
+        };
+        let help_bonus = team_help_bonus + if has_help_bonus { 1.0 } else { 0.0 };
         let genki_bonus = if pokemon.has_sub_skill(SubSkillKind::GenkiBonus) { 1.0 } else { 0.0 };
         self.calc_status(pokemon, help_bonus, genki_bonus, None);
 
@@ -1360,8 +1400,8 @@ impl PokemonSimulator {
         )?;
 
         // おてボの残り評価はシンプルに倍率にする
-        if pokemon.has_sub_skill(SubSkillKind::HelpBonus) {
-            let thb = self.config.select_evaluate.team_help_bonus;
+        if has_help_bonus {
+            let thb = team_help_bonus;
             pokemon.energy_per_day *= (1.0 - pokemon.speed_bonus) * (1.0 / (1.0 - thb * 0.05 - 0.05) - 1.0 / (1.0 - thb * 0.05)) * 4.0 + 1.0;
         }
         Ok(())

@@ -88,6 +88,10 @@ fn de_opt_num<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> 
     })
 }
 
+fn default_one() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -208,6 +212,8 @@ pub struct SkillEventBonus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBonusGlobal {
     pub skill: SkillEventBonus,
+    #[serde(default)]
+    pub food: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -456,6 +462,8 @@ pub struct EvaluateConfig {
     pub silver_seed: HashMap<String, bool>,
     pub help_bonus: f64,
     pub team_help_bonus: f64,
+    #[serde(default = "default_one")]
+    pub team_help_bonus_without_self: f64,
     pub support_border: f64,
     pub support_rank_num: f64,
     pub cooking_power_up_type: f64,
