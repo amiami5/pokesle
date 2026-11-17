@@ -201,7 +201,21 @@ impl TeamView {
                     }
                 });
             });
-            changed |= ui.checkbox(&mut shared.config.food_unlimited, "食材無制限").changed();
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                changed |= ui.checkbox(&mut shared.config.food_unlimited, "食材無制限").changed();
+                ui.add_space(8.0);
+                ui.add_enabled_ui(!shared.config.food_unlimited, |ui| {
+                    if style::form_button(ui, "全部0にする", style::ButtonKind::Normal).clicked() {
+                        for v in shared.config.food_default_num.values_mut() {
+                            if *v != 0.0 {
+                                *v = 0.0;
+                                changed = true;
+                            }
+                        }
+                    }
+                });
+            });
         });
         if changed {
             shared.save_config();
