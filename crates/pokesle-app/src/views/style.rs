@@ -200,15 +200,29 @@ fn popup_id(ctx_id: &str) -> egui::Id {
     egui::Id::new(("setting_popup", ctx_id))
 }
 
-/// 設定ポップアップを開く
+fn popup_focus_id(ctx_id: &str) -> egui::Id {
+    egui::Id::new(("setting_popup_focus", ctx_id))
+}
+
+/// 設定ポップアップを開く(すでに開いている場合は前面に出す)
 pub fn open_popup(ctx: &egui::Context, id: &str) {
-    ctx.data_mut(|d| d.insert_temp(popup_id(id), true));
+    let was_open = is_popup_open(ctx, id);
+    ctx.data_mut(|d| {
+        d.insert_temp(popup_id(id), true);
+        if was_open {
+            d.insert_temp(popup_focus_id(id), true);
+        }
+    });
+    if was_open {
+        ctx.request_repaint();
+    }
 }
 
 /// 設定ポップアップを閉じる(保存済みの位置・サイズは残る)
 pub fn close_popup(ctx: &egui::Context, id: &str) {
     ctx.data_mut(|d| {
         d.remove::<bool>(popup_id(id));
+        d.remove::<bool>(popup_focus_id(id));
         d.remove::<Option<[f32; 4]>>(popup_geometry_id(id).with("init"));
     });
 }
@@ -233,6 +247,13 @@ pub fn popup_sized(ctx: &egui::Context, id: &str, title: &str, default_size: egu
     if !is_popup_open(ctx, id) {
         return;
     }
+    let focus = ctx.data_mut(|d| {
+        let f = d.get_temp::<bool>(popup_focus_id(id)).unwrap_or(false);
+        if f {
+            d.remove::<bool>(popup_focus_id(id));
+        }
+        f
+    });
     let saved: Option<[f32; 4]> = ctx.data_mut(|d| d.get_persisted(popup_geometry_id(id)));
     // ビルダーに渡す初期位置・サイズは開いたときの値に固定する。毎フレーム最新の保存値を渡すと、
     // 実際のウィンドウの寸法(DPI の丸め)との差で毎フレーム位置・サイズ変更を送り合い、小窓が痙攣する
@@ -264,11 +285,19 @@ pub fn popup_sized(ctx: &egui::Context, id: &str, title: &str, default_size: egu
         if class == egui::ViewportClass::EmbeddedWindow {
             // 別ウィンドウに対応しない環境では、従来どおりアプリ内の小窓にする
             let mut open = true;
-            egui::Window::new(title).id(popup_id(id).with("win")).open(&mut open).collapsible(false).resizable(true).default_size(size).show(ctx, body);
+            if let Some(resp) = egui::Window::new(title).id(popup_id(id).with("win")).open(&mut open).collapsible(false).resizable(true).default_size(size).show(ctx, body)
+                && focus
+            {
+                ctx.ctx().move_to_top(resp.response.layer_id);
+            }
             if !open {
                 close = true;
             }
             return;
+        }
+        if focus {
+            ctx.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         egui::CentralPanel::default().frame(egui::Frame::new().fill(surface())).show(ctx, body);
         // 位置とサイズを覚える
@@ -285,10 +314,7 @@ pub fn popup_sized(ctx: &egui::Context, id: &str, title: &str, default_size: egu
         }
     });
     if close {
-        ctx.data_mut(|d| {
-            d.remove::<bool>(popup_id(id));
-            d.remove::<Option<[f32; 4]>>(init_id);
-        });
+        close_popup(ctx, id);
     }
 }
 
@@ -444,4 +470,29 @@ pub fn lv_arrows(ui: &mut egui::Ui, shown: f64) -> Option<f64> {
     }
     ui.spacing_mut().item_spacing.x = old_spacing;
     next
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_popup_requests_focus_only_when_already_open() {
+        let ctx = egui::Context::default();
+        let id = "other";
+
+        // 初回オープン時はフォーカス要求フラグは立てない
+        open_popup(&ctx, id);
+        assert!(is_popup_open(&ctx, id));
+        assert!(!ctx.data(|d| d.get_temp::<bool>(popup_focus_id(id))).unwrap_or(false));
+
+        // すでに開いている状態で再度押されたときはフォーカス要求フラグを立てる
+        open_popup(&ctx, id);
+        assert!(ctx.data(|d| d.get_temp::<bool>(popup_focus_id(id))).unwrap_or(false));
+
+        // 閉じるとフラグもクリアされる
+        close_popup(&ctx, id);
+        assert!(!is_popup_open(&ctx, id));
+        assert!(!ctx.data(|d| d.get_temp::<bool>(popup_focus_id(id))).unwrap_or(false));
+    }
 }
