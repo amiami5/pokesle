@@ -245,6 +245,7 @@ pub fn infer(text: &str, pokemon: &mut BoxPokemon) {
         // 本家は空のときも食材・サブスキルを空にする
         pokemon.food_list = vec![String::new(); 3];
         pokemon.sub_skill_list = vec![String::new(); 5];
+        pokemon.nature.clear();
         pokemon.shiny = false;
         pokemon.favorite = false;
         return;
@@ -278,6 +279,7 @@ pub fn infer(text: &str, pokemon: &mut BoxPokemon) {
     for (i, line) in other.iter().take(5).enumerate() {
         convert_sub_skill(line, i, pokemon);
     }
+    pokemon.nature.clear();
     convert_nature(other.get(5).copied(), pokemon);
 }
 
@@ -296,7 +298,8 @@ pub fn to_text(pokemon: &BoxPokemon) -> String {
             }
         })
         .collect();
-    let mut lines: Vec<String> = vec![pokemon.name.clone(), pokemon.lv.to_string()];
+    let lv = if pokemon.lv > 0.0 && !pokemon.lv.is_nan() { pokemon.lv.to_string() } else { String::new() };
+    let mut lines: Vec<String> = vec![pokemon.name.clone(), lv];
     if pokemon.shiny {
         lines.push("shiny".into());
     }
@@ -377,5 +380,18 @@ mod tests {
         assert_eq!(p4.food_list[0], master().pokemon("ダークライ").unwrap().food_name_list[0]);
         assert_eq!(p4.food_list[1], master().pokemon("ダークライ").unwrap().food_name_list[7]);
         assert_eq!(p4.food_list[2], master().pokemon("ダークライ").unwrap().food_name_list[1]);
+    }
+
+    #[test]
+    fn nature_is_cleared_when_removed_and_zero_lv_omitted_in_to_text() {
+        let mut p = blank();
+        infer("fushigidane\n10\naab\notebo\nkinos\nsukim\nshokus\nshojil\nnonki", &mut p);
+        assert_eq!(p.nature, "のんき");
+
+        infer("fushigidane\n10\naab\notebo\nkinos\nsukim\nshokus\nshojil", &mut p);
+        assert!(p.nature.is_empty());
+
+        let zero_lv = BoxPokemon { name: "フシギダネ".into(), lv: 0.0, ..Default::default() };
+        assert_eq!(to_text(&zero_lv), "フシギダネ");
     }
 }

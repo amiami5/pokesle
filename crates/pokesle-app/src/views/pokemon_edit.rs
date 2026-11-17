@@ -61,21 +61,18 @@ pub enum EditResult {
     Cancel,
 }
 
+fn empty_pokemon() -> BoxPokemon {
+    BoxPokemon {
+        food_list: vec![String::new(); 3],
+        sub_skill_list: vec![String::new(); 5],
+        ..Default::default()
+    }
+}
+
 impl PokemonEdit {
     pub fn new(index: Option<usize>, pokemon: Option<BoxPokemon>) -> PokemonEdit {
-        let m = master();
         let is_initial = pokemon.is_some();
-        let pokemon = pokemon.unwrap_or_else(|| {
-            let base = &m.pokemon[0];
-            BoxPokemon {
-                name: base.name.clone(),
-                lv: 10.0,
-                food_list: vec![base.food_name_list[0].clone(); 3],
-                sub_skill_list: m.sub_skills.iter().take(5).map(|s| s.name.clone()).collect(),
-                nature: "まじめ".into(),
-                ..Default::default()
-            }
-        });
+        let pokemon = pokemon.unwrap_or_else(empty_pokemon);
         let assist_text = if index.is_some() || is_initial { assist::to_text(&pokemon) } else { String::new() };
         PokemonEdit {
             index,
@@ -175,9 +172,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
         {
             // 名前・Lv・食材・サブスキル・せいかく(本家の DesignTable)
             self.name_row(ui);
-            let Some(base) = m.pokemon(&self.pokemon.name) else {
-                return;
-            };
+            let base = m.pokemon(&self.pokemon.name);
             design_row(ui, "Lv", |ui| {
                 ui.spacing_mut().slider_width = 320.0;
                 ui.horizontal(|ui| {
@@ -186,23 +181,26 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
                 });
             });
             design_row(ui, "食材", |ui| {
-                self.pokemon.food_list.resize(3, base.food_name_list[0].clone());
+                self.pokemon.food_list.resize(3, String::new());
                 ui.horizontal_top(|ui| {
                     for slot in 0..3 {
                         if slot > 0 {
                             let (r, _) = ui.allocate_exact_size(egui::vec2(9.0, 36.0), egui::Sense::hover());
                             ui.painter().vline(r.center().x, r.y_range(), egui::Stroke::new(1.0, style::line_color()));
                         }
-                        let options: Vec<&str> = base.food_list.iter().filter(|f| f.num_list.get(slot).copied().flatten().is_some()).map(|f| f.name.as_str()).collect();
+                        let options: Vec<&str> = base.map_or(Vec::new(), |b| {
+                            b.food_list.iter().filter(|f| f.num_list.get(slot).copied().flatten().is_some()).map(|f| f.name.as_str()).collect()
+                        });
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 5.0;
                             if options.is_empty() {
                                 ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
                             }
+                            let kaihou = base.is_some_and(|b| b.kaihou);
                             for name in options {
                                 let selected = self.pokemon.food_list[slot] == name;
                                 if food_choice(ui, name, selected).clicked() {
-                                    self.pokemon.food_list[slot] = if base.kaihou && selected { String::new() } else { name.to_string() };
+                                    self.pokemon.food_list[slot] = if kaihou && selected { String::new() } else { name.to_string() };
                                 }
                             }
                         });
@@ -217,7 +215,7 @@ Shift+Enter:改行、ESC:全てクリア、Alt+C:色違い",
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(18.0, 10.0);
                 setting_item(ui, "スキルLv", |ui| {
-                    let hint = base.evolve_lv.to_string();
+                    let hint = base.map_or_else(|| "省略可".to_string(), |b| b.evolve_lv.to_string());
                     style::opt_number(ui, "edit_skill_lv", &mut self.pokemon.skill_lv, true, 56.0, &hint);
                 });
                 setting_item(ui, "睡眠時間", |ui| {
@@ -443,18 +441,10 @@ s:5 (スキルレベル)";
 
     /// 本家 reset: 入力を全てクリアする
     fn reset(&mut self) {
-        let m = master();
-        let base = &m.pokemon[0];
-        self.pokemon = BoxPokemon {
-            name: base.name.clone(),
-            lv: 10.0,
-            food_list: vec![base.food_name_list[0].clone(); 3],
-            sub_skill_list: m.sub_skills.iter().take(5).map(|s| s.name.clone()).collect(),
-            nature: "まじめ".into(),
-            ..Default::default()
-        };
-        self.search = self.pokemon.name.clone();
+        self.pokemon = empty_pokemon();
+        self.search.clear();
         self.assist_text.clear();
+        self.sub_active = 0;
         self.insert_to = None;
         self.error.clear();
     }
@@ -896,5 +886,29 @@ fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 
             }
         }
         flush(&mut run);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_edit_requires_nature_before_assist_enter_can_save() {
+        let mut edit = PokemonEdit::new(None, None);
+        assert!(box_io::check(&edit.pokemon).is_err());
+
+        // サブスキル5個目まで入力した段階では、せいかく未入力のため保存可能にならない
+        assist::infer("fushigidane\n10\naab\notebo\nkinos\nsukim\nshokus\nshojil", &mut edit.pokemon);
+        assert!(edit.pokemon.nature.is_empty());
+        assert!(box_io::check(&edit.pokemon).is_err());
+
+        // せいかくまで入力すると保存可能になる
+        assist::infer("fushigidane\n10\naab\notebo\nkinos\nsukim\nshokus\nshojil\nnonki", &mut edit.pokemon);
+        assert!(box_io::check(&edit.pokemon).is_ok());
+
+        // リセット後は再び未完了状態に戻る
+        edit.reset();
+        assert!(box_io::check(&edit.pokemon).is_err());
     }
 }
