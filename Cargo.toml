@@ -6,7 +6,7 @@ members = ["crates/pokesle-core", "crates/pokesle-ocr", "crates/pokesle-app"]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = ""
+repository = "https://github.com/amiami5/pokesle"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

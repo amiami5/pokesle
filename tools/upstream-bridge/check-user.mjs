@@ -3,6 +3,7 @@
 // 使い方: node --experimental-transform-types tools/upstream-bridge/run.mjs check-user.mjs
 //   CFG=<config.json>  設定ファイルを差し替える(ブラウザ版の config を貼った JSON など)
 //   UP_SRC=<dir>       本家の src を差し替える(別コミットとの比較用)
+//   IDS=1,2,3          確認したいボックス番号(1始まり、カンマ区切り)。未指定時は先頭10件
 //   SPLIT=1            本家と同じく workerNum 個に分割して計算する / TOP=1 概算上位 / DET=1 内訳
 import { readFileSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';

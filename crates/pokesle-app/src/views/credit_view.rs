@@ -26,7 +26,7 @@ pub fn ui(ui: &mut egui::Ui) {
 
         ui.separator();
         ui.heading("食材アイコン");
-        ui.label("食材アイコンは Noto Emoji(Copyright 2013 Google LLC、SIL Open Font License 1.1)と、本アプリで描いた絵(オイル・シッポ・ミルク)です。");
+        ui.label("食材アイコンは Noto Emoji(Copyright 2013 Google LLC、SIL Open Font License 1.1)と、本アプリで描いた絵(オイル・シッポ・ミルク・ナッツ)です。");
         ui.label("Noto Emoji のうち、エッグは白に、ワカクサ大豆はクリーム色に色を変えています。");
         ui.hyperlink("https://github.com/googlefonts/noto-emoji");
         ui.add(egui::Label::new(egui::RichText::new(NOTO_EMOJI_LICENSE).monospace()).wrap());
