@@ -305,6 +305,9 @@ pub struct SimulationConfig {
     pub fix_lv: Option<f64>,
     #[serde(deserialize_with = "de_truthy")]
     pub fix_evolve: bool,
+    /// サマリーきのみ集計用: 進化仮定時に進化前・中間進化も候補に含めて比較する
+    #[serde(skip)]
+    pub fix_evolve_all_stages: bool,
     #[serde(deserialize_with = "de_truthy")]
     pub fix_evolve_exclude_sleep: bool,
     pub fix_resource_mode: f64,

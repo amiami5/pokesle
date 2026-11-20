@@ -78,7 +78,16 @@ pub struct BerryRow {
 
 pub fn berry_summary(config: &Config, box_list: &[BoxPokemon], table: Option<&EvaluateTable>, on_progress: OnProgress) -> Result<Vec<BerryRow>, String> {
     let m = master();
-    let sims = simulate_settings(config, box_list, table, |_| {}, (0.0, 1.0), on_progress)?;
+    let sims = simulate_settings(
+        config,
+        box_list,
+        table,
+        |c| {
+            c.simulation.fix_evolve_all_stages = true;
+        },
+        (0.0, 1.0),
+        on_progress,
+    )?;
     Ok(m.berries
         .iter()
         .enumerate()
@@ -464,5 +473,59 @@ mod tests {
         assert!(darkrai_rows[0].max.value.is_some());
         // 未所持のミュウ(kaihou)は「食材構成ごと」には出ない
         assert!(summary.rows.iter().all(|r| !master().pokemon[r.base].name.starts_with("ミュウ(")));
+    }
+
+    #[test]
+    fn berry_summary_prefers_higher_berry_energy_evolution_stage() {
+        use std::collections::{BTreeMap, HashMap};
+
+        use crate::evaluate_table::PercentileSet;
+
+        let mut table = EvaluateTable::default();
+        for lv in [30, 50, 60, 70] {
+            table.healer.insert(lv, 10000.0);
+            table.support.insert(lv, 150.0);
+        }
+        // 育成仮定のボーダー判定(this_fix = true)を通すためダミーエントリを用意
+        for name in ["ケッキング", "ライチュウ"] {
+            let mut lv_map = BTreeMap::new();
+            let mut food_map = HashMap::new();
+            food_map.insert("00".to_string(), PercentileSet { energy: vec![0.0, 1.0], ..Default::default() });
+            lv_map.insert(50, food_map);
+            table.pokemon.insert(name.to_string(), lv_map);
+        }
+
+        let mut cfg = Config::default_config();
+        cfg.simulation.fix_evolve = true;
+        cfg.simulation.fix_border = Some(0.0);
+        cfg.select_evaluate.level_list = [(30, false), (50, true), (60, false), (70, false)].into_iter().collect();
+
+        let namakero = BoxPokemon {
+            index: 0,
+            name: "ナマケロ".into(),
+            lv: 10.0,
+            food_list: vec!["あんみんトマト".into(), "あんみんトマト".into(), "あんみんトマト".into()],
+            sub_skill_list: vec!["きのみの数S".into(), String::new(), String::new(), String::new(), String::new()],
+            nature: "いじっぱり".into(),
+            ..Default::default()
+        };
+        let pichu = BoxPokemon {
+            index: 1,
+            name: "ピチュー".into(),
+            lv: 10.0,
+            food_list: vec!["とくせんリンゴ".into(), "とくせんリンゴ".into(), "とくせんリンゴ".into()],
+            sub_skill_list: vec!["きのみの数S".into(), String::new(), String::new(), String::new(), String::new()],
+            nature: "いじっぱり".into(),
+            ..Default::default()
+        };
+
+        let rows = berry_summary(&cfg, &[namakero, pichu], Some(&table), &|_| {}).unwrap();
+        let ki = rows.iter().find(|r| r.name == "キー").unwrap();
+        let ubu = rows.iter().find(|r| r.name == "ウブ").unwrap();
+
+        // cols[2] = Lv50仮定: ナマケロはケッキングよりきのみエナジーが高い中間進化のヤルキモノが選ばれる
+        assert_eq!(ki.cols[2].pokemon.as_ref().unwrap().base().name, "ヤルキモノ");
+        // ピチューは最終進化のライチュウが選ばれる
+        assert_eq!(ubu.cols[2].pokemon.as_ref().unwrap().base().name, "ライチュウ");
     }
 }

@@ -288,10 +288,30 @@ impl BoxSimulator {
                         if !config.cleaning
                             && this_fix
                             && (config.simulation.fix_evolve || config.simulation.fix_resource_mode == 1.0)
-                            && (!config.simulation.fix_evolve_exclude_sleep
-                                || !m.pokemon(after).and_then(|p| p.require_sleep.get(&bx.name)).copied().unwrap_or(false))
                         {
-                            add_pokemon_list.push(after.clone());
+                            let can_evolve_to = |target: &str| {
+                                !config.simulation.fix_evolve_exclude_sleep
+                                    || !m.pokemon(target).and_then(|p| p.require_sleep.get(&bx.name)).copied().unwrap_or(false)
+                            };
+                            if can_evolve_to(after) && !add_pokemon_list.contains(after) {
+                                add_pokemon_list.push(after.clone());
+                            }
+                            if config.simulation.fix_evolve_all_stages {
+                                // 最終進化から evolve.before を辿り、中間進化と元の姿も候補に追加する
+                                let mut cur = m.pokemon(after).and_then(|p| p.evolve.before.as_deref());
+                                while let Some(prev) = cur {
+                                    if prev == bx.name {
+                                        break;
+                                    }
+                                    if can_evolve_to(prev) && !add_pokemon_list.iter().any(|x| x == prev) {
+                                        add_pokemon_list.push(prev.to_string());
+                                    }
+                                    cur = m.pokemon(prev).and_then(|p| p.evolve.before.as_deref());
+                                }
+                                if !add_pokemon_list.contains(&bx.name) {
+                                    add_pokemon_list.push(bx.name.clone());
+                                }
+                            }
                         }
                     }
                 }
