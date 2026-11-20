@@ -4,6 +4,7 @@ description = "ポケスリのスクリーンショット取得と文字認識(O
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 pokesle-core = { path = "../pokesle-core" }

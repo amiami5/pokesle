@@ -4,6 +4,7 @@ description = "ポケスリシミュレーターの計算コア(reimer0204/pokes
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde.workspace = true
