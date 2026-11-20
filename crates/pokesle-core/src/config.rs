@@ -316,6 +316,8 @@ pub struct SimulationConfig {
     /// false/0: なし、1: 厳選設定のスキルレベル、2: 最大
     #[serde(deserialize_with = "de_js_num")]
     pub fix_skill_seed: f64,
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub fix_sleep_ribbon: bool,
     #[serde(deserialize_with = "de_truthy")]
     pub fix_check_list: bool,
     #[serde(deserialize_with = "de_opt_num")]

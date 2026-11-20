@@ -147,6 +147,7 @@
   "fixResourceMode": 0,
   "fixSubSkillSeed": false,
   "fixSkillSeed": false,
+  "fixSleepRibbon": false,
   "fixCheckList": true,
   "fixBorder": null,
   "fixBorderSpecialty": null,

@@ -568,6 +568,9 @@ fn fix_label(c: &Config) -> Label {
         if s.fix_skill_seed == 2.0 {
             parts.push("金種最大".into());
         }
+        if s.fix_sleep_ribbon {
+            parts.push("おやすみリボン".into());
+        }
         text.push_str(&format!("( {} )", parts.join(" ")));
     }
     style::plain(text)
@@ -668,6 +671,15 @@ fn fix_setting(ui: &mut egui::Ui, c: &mut Config, box_list: &[BoxPokemon]) -> bo
                     });
                 });
                 small(ui, "メインスキルの種を与えたと仮定", 400.0);
+            });
+            ui.end_row();
+
+            th(ui, "おやすみリボン");
+            ui.vertical(|ui| {
+                ui.add_enabled_ui(fix, |ui| {
+                    changed |= ui.checkbox(&mut s.fix_sleep_ribbon, "2000時間まで寝たと仮定").changed();
+                });
+                small(ui, "2000時間未満のポケモンは睡眠時間2000時間として計算します（2000時間以上の場合はそのまま）。", 400.0);
             });
             ui.end_row();
         });

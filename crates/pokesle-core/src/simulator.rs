@@ -369,6 +369,12 @@ impl PokemonSimulator {
             }
         }
 
+        let sleep_time = if fixable && sim.fix_sleep_ribbon {
+            Some(bx.sleep_time.unwrap_or(0.0).max(2000.0))
+        } else {
+            bx.sleep_time
+        };
+
         let event_bonus_list = self.matching_event_bonus(base);
         let mut pokemon = self.init_simulated_pokemon(
             base,
@@ -376,7 +382,7 @@ impl PokemonSimulator {
             &bx.food_list,
             skill_lv,
             event_bonus_list,
-            bx.sleep_time,
+            sleep_time,
             use_candy,
             use_shard,
             berry_match,

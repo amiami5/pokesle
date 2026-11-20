@@ -519,7 +519,8 @@ mod tests {
             ..Default::default()
         };
 
-        let rows = berry_summary(&cfg, &[namakero, pichu], Some(&table), &|_| {}).unwrap();
+        let box_list = [namakero, pichu];
+        let rows = berry_summary(&cfg, &box_list, Some(&table), &|_| {}).unwrap();
         let ki = rows.iter().find(|r| r.name == "キー").unwrap();
         let ubu = rows.iter().find(|r| r.name == "ウブ").unwrap();
 
@@ -527,5 +528,13 @@ mod tests {
         assert_eq!(ki.cols[2].pokemon.as_ref().unwrap().base().name, "ヤルキモノ");
         // ピチューは最終進化のライチュウが選ばれる
         assert_eq!(ubu.cols[2].pokemon.as_ref().unwrap().base().name, "ライチュウ");
+
+        // おやすみリボン2000時間仮定ONでヤルキモノ(残り進化1回)のきのみエナジーがさらに上昇する
+        let base_energy = ki.cols[2].value.unwrap();
+        cfg.simulation.fix_sleep_ribbon = true;
+        let rows_ribbon = berry_summary(&cfg, &box_list, Some(&table), &|_| {}).unwrap();
+        let ki_ribbon = rows_ribbon.iter().find(|r| r.name == "キー").unwrap();
+        assert_eq!(ki_ribbon.cols[2].pokemon.as_ref().unwrap().base().name, "ヤルキモノ");
+        assert!(ki_ribbon.cols[2].value.unwrap() > base_energy);
     }
 }
