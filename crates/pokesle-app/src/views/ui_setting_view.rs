@@ -8,8 +8,11 @@ use pokesle_core::config::AllSpecialtyMode;
 use crate::app::Shared;
 use crate::fonts::{self, FontChoice};
 use crate::job::Job;
+#[allow(unused_imports)]
 use crate::storage::{self, OcrEngineChoice, ThemeSetting, UiSetting};
+#[allow(unused_imports)]
 use pokesle_ocr::google_vision::{self, FREE_UNITS_PER_MONTH};
+#[allow(unused_imports)]
 use pokesle_ocr::windows_ocr::WindowsOcr;
 
 #[derive(Default)]
@@ -23,8 +26,10 @@ pub struct UiSettingView {
     import_config: bool,
     import_box: bool,
     /// Windows 標準 OCR が使えるかの確認結果(初めて表示したときに調べる)
+    #[allow(dead_code)]
     windows_ocr_check: Option<Result<(), String>>,
     /// 食材アイコンの見本の取り込み直し
+    #[allow(dead_code)]
     sample_import: crate::views::food_sample_import::FoodSampleImport,
 }
 
@@ -135,9 +140,6 @@ impl UiSettingView {
 
         ui.add_space(16.0);
         ui.separator();
-        self.ocr_section(ui, shared);
-        ui.add_space(16.0);
-        ui.separator();
         self.import_section(ui, shared);
         let Shared { ui_setting: setting, status, .. } = shared;
 
@@ -158,6 +160,7 @@ impl UiSettingView {
     }
 
     /// スクリーンショットの文字認識(エンジンの選択・Google Cloud Vision の API キーと利用回数)
+    #[allow(dead_code)]
     fn ocr_section(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
         use crate::views::style;
         ui.add_space(6.0);

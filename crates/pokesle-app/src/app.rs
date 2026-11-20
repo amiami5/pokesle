@@ -11,6 +11,7 @@ use crate::views::{screenshot_import_view::ScreenshotImportView, tmp_evaluate_vi
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum Tab {
     Box,
     ScreenshotImport,
@@ -33,8 +34,7 @@ type NavItem = (Tab, &'static str, bool);
 
 /// ヘッダーのグループ(本家 app.vue)。(見出し, リンク)
 const NAV: [(&str, &[NavItem]); 4] = [
-    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::ScreenshotImport, "スクショ
-から追加", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
+    ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
     ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", true), (Tab::TmpEvaluate, "簡易診断", true)]),
     ("その他", &[(Tab::Data, "データ", true), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", true), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
