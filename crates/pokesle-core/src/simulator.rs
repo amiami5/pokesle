@@ -1402,7 +1402,12 @@ impl PokemonSimulator {
         // おてボの残り評価はシンプルに倍率にする
         if has_help_bonus {
             let thb = team_help_bonus;
-            pokemon.energy_per_day *= (1.0 - pokemon.speed_bonus) * (1.0 / (1.0 - thb * 0.05 - 0.05) - 1.0 / (1.0 - thb * 0.05)) * 4.0 + 1.0;
+            let base = self.config.select_evaluate.team_help_bonus_base / 100.0;
+            pokemon.energy_per_day += pokemon.energy_per_day
+                * (1.0 - pokemon.speed_bonus)
+                * (1.0 / (1.0 - ((thb + 1.0) * 0.05 + base).min(0.35)) - 1.0 / (1.0 - base))
+                / (thb + 1.0)
+                * 4.0;
         }
         Ok(())
     }

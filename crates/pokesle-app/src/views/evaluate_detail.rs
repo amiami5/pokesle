@@ -619,14 +619,52 @@ fn energy_table(ui: &mut egui::Ui, config: &Config, base: &Pokemon, c: &Computed
     }
     row("", "スキルエナジー", format!("{} × {}", f(p.skill_energy, 0), f(p.skill_per_day, 2)), f(p.skill_energy_per_day, 1));
 
-    let subtotal = p.b_ep_d + p.f_ep_d + p.skill_energy_per_day;
-    row("小計", "", format!("{} + {} + {}", f(p.b_ep_d, 1), f(p.f_ep_d, 1), f(p.skill_energy_per_day, 1)), f(subtotal, 0));
-    let mut s = f(subtotal, 0);
-    if has("おてつだいボーナス") {
+    let otetsudai_bonus = if has("おてつだいボーナス") {
         let thb = se.team_help_bonus;
-        let rate = ((1.0 - p.speed_bonus) * (1.0 / (1.0 - thb * 0.05 - 0.05) - 1.0 / (1.0 - thb * 0.05)) * 4.0 + 1.0) * 100.0;
-        s += &format!("\n× {}% ※おてつだいボーナスによる最終補正", f(rate, 1));
+        let base = se.team_help_bonus_base;
+        let bonus = (p.b_ep_d + p.f_ep_d + p.skill_energy_per_day)
+            * (1.0 - p.speed_bonus)
+            * (1.0 / (1.0 - ((thb + 1.0) * 0.05 + base / 100.0).min(0.35)) - 1.0 / (1.0 - base / 100.0))
+            / (thb + 1.0)
+            * 4.0;
+        row(
+            "",
+            "おてつだいボーナス",
+            format!(
+                concat!(
+                    "({} + {} + {}) ※きのみ、食材、スキルの合計\n",
+                    "× {}% ※おてつだいスピード補正を除いて素の速度のスコアにする\n",
+                    "× (\n",
+                    "　100% ÷ (100% - min({}% + {}%, 35%)) ※おてボ{}匹編成時の効率アップ率\n",
+                    "　- 100% ÷ (100% - {}%) ※おてボなしの値を引いて増分だけにする\n",
+                    ")\n",
+                    "÷ {}匹 ※おてボ編成数で割って1匹あたりの効果量にする\n",
+                    "× 4 ※自分以外の4匹分",
+                ),
+                f(p.b_ep_d, 1),
+                f(p.f_ep_d, 1),
+                f(p.skill_energy_per_day, 1),
+                f((1.0 - p.speed_bonus) * 100.0, 1),
+                n((thb + 1.0) * 5.0),
+                n(base),
+                n(thb + 1.0),
+                n(base),
+                n(thb + 1.0),
+            ),
+            f(bonus, 1),
+        );
+        bonus
+    } else {
+        0.0
+    };
+
+    let subtotal = p.b_ep_d + p.f_ep_d + p.skill_energy_per_day + otetsudai_bonus;
+    let mut subtotal_formula = format!("{} + {} + {}", f(p.b_ep_d, 1), f(p.f_ep_d, 1), f(p.skill_energy_per_day, 1));
+    if otetsudai_bonus > 0.0 {
+        subtotal_formula += &format!(" + {}", f(otetsudai_bonus, 1));
     }
+    row("小計", "", subtotal_formula, f(subtotal, 1));
+    let mut s = f(subtotal, 1);
     if has("ゆめのかけらボーナス") {
         s += &format!("\n× (100% + 6% × {}%) ※ゆめのかけらボーナス", n(se.shard_bonus));
     }

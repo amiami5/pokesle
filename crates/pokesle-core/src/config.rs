@@ -92,6 +92,10 @@ fn default_one() -> f64 {
     1.0
 }
 
+fn default_fourteen() -> f64 {
+    14.0
+}
+
 /// 「オール」とくい(ミュウ・ダークライ)の「とくい厳選」の扱い
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -484,6 +488,8 @@ pub struct EvaluateConfig {
     pub silver_seed: HashMap<String, bool>,
     pub help_bonus: f64,
     pub team_help_bonus: f64,
+    #[serde(default = "default_fourteen")]
+    pub team_help_bonus_base: f64,
     #[serde(default = "default_one")]
     pub team_help_bonus_without_self: f64,
     pub support_border: f64,

@@ -200,12 +200,16 @@ pub fn evaluate_setting(ui: &mut egui::Ui, c: &mut Config, tmp: bool) {
             ui.vertical(|ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.label("本人がおてボ持ちの時");
-                    ui.add_sized([80.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus).range(0.0..=4.0));
+                    ui.add_sized([60.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus).range(0.0..=4.0));
                     ui.label("匹");
                     ui.add_space(6.0);
                     ui.label("そうでない時");
-                    ui.add_sized([80.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus_without_self).range(0.0..=4.0));
+                    ui.add_sized([60.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus_without_self).range(0.0..=4.0));
                     ui.label("匹");
+                    ui.add_space(6.0);
+                    ui.label("おてボ以外の短縮幅");
+                    ui.add_sized([60.0, 22.0], egui::DragValue::new(&mut e.team_help_bonus_base).range(0.0..=21.0));
+                    ui.label("%");
                 });
                 small(
                     ui,

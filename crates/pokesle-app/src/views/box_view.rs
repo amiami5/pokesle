@@ -155,9 +155,29 @@ fn fmt_value(v: f64, fmt: Fmt) -> String {
     }
 }
 
-/// キーワード絞り込み(本家 index.vue の keyword)。名前・メモ・タイプ・きのみ・最終進化・食材(名前とABC)・
-/// サブスキル(名前と略称)・性格・スキルのどれかに含まれていればよい
+/// キーワードを OR グループ・AND キーワードへ分割する(AND 優先)。
+fn split_keyword_groups(query: &str) -> Vec<Vec<&str>> {
+    query
+        .split('|')
+        .flat_map(|s| s.split(" OR "))
+        .map(|group| group.trim().split_whitespace().filter(|&w| w != "AND").collect::<Vec<_>>())
+        .filter(|keywords| !keywords.is_empty())
+        .collect()
+}
+
+/// キーワード絞り込み(本家 index.vue の keyword)。
+/// `|` または ` OR ` で OR 分割し、各グループ内は空白または ` AND ` で AND 分割して評価する(AND 優先)。
 fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
+    let keyword_groups = split_keyword_groups(query);
+    if keyword_groups.is_empty() {
+        return true;
+    }
+    keyword_groups.iter().any(|keywords| keywords.iter().all(|kw| keyword_match_single(p, kw)))
+}
+
+/// 単一キーワードでの一致判定。名前・メモ・タイプ・きのみ・最終進化・食材(名前とABC)・
+/// サブスキル(名前と略称)・性格・スキルのどれかに含まれていればよい
+fn keyword_match_single(p: &BoxPokemon, query: &str) -> bool {
     let m = master();
     let base = m.pokemon(&p.name);
     let skill = base.map(|b| m.pokemon_skill(b).name.as_str()).unwrap_or("");
@@ -2528,5 +2548,16 @@ mod tests {
         let mut set: HashSet<usize> = [1, 3].into_iter().collect();
         shift_set_on_move(&mut set, 1, 2);
         assert_eq!(set, [2, 3].into_iter().collect());
+    }
+
+    #[test]
+    fn keyword_groups_split_and_or() {
+        assert_eq!(split_keyword_groups("ピカチュウ ライチュウ"), vec![vec!["ピカチュウ", "ライチュウ"]]);
+        assert_eq!(split_keyword_groups("ピカチュウ AND きのみS"), vec![vec!["ピカチュウ", "きのみS"]]);
+        assert_eq!(
+            split_keyword_groups("ピカチュウ きのみS | ライチュウ OR ゲンガー AND おてボ"),
+            vec![vec!["ピカチュウ", "きのみS"], vec!["ライチュウ"], vec!["ゲンガー", "おてボ"]]
+        );
+        assert!(split_keyword_groups("  | OR  ").is_empty());
     }
 }
