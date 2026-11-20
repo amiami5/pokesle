@@ -11,6 +11,7 @@
 | パス | 内容 |
 | --- | --- |
 | `crates/pokesle-core` | 計算・マスターデータ(UI 非依存) |
+| `crates/pokesle-ocr` | スクリーンショット取得・文字認識(OCR) |
 | `crates/pokesle-app` | Windows アプリ(egui / eframe) |
 | `upstream/` | 本家リポジトリ(git submodule、追従元) |
 | `tools/upstream-bridge` | 本家の TypeScript を Node.js で直接読み込み、データ書き出しと正解データ生成を行うスクリプト |
@@ -18,7 +19,7 @@
 ## ビルド
 
 ```sh
-git clone --recursive <this repo>
+git clone --recursive https://github.com/amiami5/pokesle.git
 cargo run -p pokesle-app --release
 ```
 
