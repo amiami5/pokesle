@@ -574,10 +574,16 @@ fn de_truthy_map<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, boo
     })
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// チェックリストの設定(`summary.checklist`)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChecklistConfig {
+    #[serde(default = "default_true", deserialize_with = "de_truthy")]
+    pub show_mint: bool,
     pub pokemon_condition: PokemonConditionConfig,
     pub food: FoodChecklistConfig,
     pub skill: SkillChecklistConfig,
@@ -706,6 +712,9 @@ pub struct SkillChecklistConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldChecklistConfig {
+    /// ミント使用後がチェックリストに該当した場合、フィールド別からも除外
+    #[serde(default, deserialize_with = "de_truthy")]
+    pub exclude_mint: bool,
     /// フィールド別画面に進化後を表示
     #[serde(default, deserialize_with = "de_truthy")]
     pub shinkago: bool,

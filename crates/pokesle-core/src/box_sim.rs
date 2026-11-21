@@ -188,7 +188,10 @@ impl BoxSimulator {
                                         *slot = Some(item);
                                     }
                                 }
-                                entry.food_num_list = after_pokemon.food_list.iter().map(|f| simulated.food_count[f.food]).collect();
+                                // 通常のチェックリストがミント後の食材量を参照しないよう、元の値を保持する。
+                                if !pure_mint {
+                                    entry.food_num_list = after_pokemon.food_list.iter().map(|f| simulated.food_count[f.food]).collect();
+                                }
                                 let diag = crate::evaluate_table::Diagnostic {
                                     berry_energy: simulated.b_ep_d,
                                     food_num_map: simulated.food_list.iter().map(|f| (m.foods[f.food].name.clone(), simulated.food_count[f.food])).collect(),

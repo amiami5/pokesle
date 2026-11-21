@@ -35,8 +35,8 @@ pub struct PokemonEdit {
     box_job: Option<Job<Vec<BoxResult>>>,
     box_results: Option<Vec<BoxResult>>,
     box_key: Option<String>,
-    /// 編集中の個体の概算(チェックリスト該当つき)
-    own: Option<(String, Option<BoxResult>)>,
+    /// 編集中の個体の概算(チェックリスト該当つき: 通常, ミント後)
+    own: Option<(String, Option<(BoxResult, Option<BoxResult>)>)>,
     graph: bool,
     show_secondary: bool,
     /// 所持アメの編集値(種ポケのアメ名, 個数)。保存後に設定へ反映してもらう
@@ -505,14 +505,28 @@ s:5 (スキルレベル)";
         }
 
         // 編集中の個体の概算(ボックス整理と同じチェックリスト判定をする)
+        let can_evaluate_mint = m.nature(&self.pokemon.nature).is_some_and(|n| n.good.is_some());
         let own_key = serde_json::to_string(&self.pokemon).unwrap_or_default();
         if self.own.as_ref().is_none_or(|(k, _)| *k != own_key) {
             let mut c = env.config.clone();
             c.cleaning = true;
-            let r = simulate_box(&c, std::slice::from_ref(&self.pokemon), Some(table), false).ok().and_then(|v| v.into_iter().next());
+            c.pure_mint = can_evaluate_mint;
+            c.pure_mint_nature = Some("がんばりや".to_string());
+            let mut list = vec![self.pokemon.clone()];
+            if can_evaluate_mint {
+                let mut mp = self.pokemon.clone();
+                mp.nature = "がんばりや".to_string();
+                list.push(mp);
+            }
+            let r = simulate_box(&c, &list, Some(table), false).ok().and_then(|v| {
+                let mut it = v.into_iter();
+                let normal = it.next()?;
+                let mint = it.next();
+                Some((normal, mint))
+            });
             self.own = Some((own_key, r));
         }
-        let Some((_, Some(own))) = &self.own else {
+        let Some((_, Some((own, own_mint)))) = &self.own else {
             ui.label("評価できませんでした");
             return;
         };
@@ -522,24 +536,31 @@ s:5 (スキルレベル)";
         };
 
         // チェックリスト
-        ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("チェックリスト").strong());
-            if own.hit_check_list.is_empty() {
-                ui.label("該当なし");
-            }
-            for hit in &own.hit_check_list {
-                use pokesle_core::check_list::CheckHit;
-                ui.label("✅");
-                match hit {
-                    CheckHit::Food(i) => {
-                        food_icon::food_icon(ui, &m.foods[*i].name, 20.0);
-                    }
-                    other => {
-                        ui.label(other.label());
+        let show_check_hits = |ui: &mut egui::Ui, title: &str, hits: &[pokesle_core::check_list::CheckHit]| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(title).strong());
+                if hits.is_empty() {
+                    ui.label("該当なし");
+                }
+                for hit in hits {
+                    use pokesle_core::check_list::CheckHit;
+                    ui.label("✅");
+                    match hit {
+                        CheckHit::Food(i) => {
+                            food_icon::food_icon(ui, &m.foods[*i].name, 20.0);
+                        }
+                        other => {
+                            ui.label(other.label());
+                        }
                     }
                 }
-            }
-        });
+            });
+        };
+        show_check_hits(ui, "チェックリスト", &own.hit_check_list);
+        if can_evaluate_mint {
+            let mint_hits = own_mint.as_ref().map(|x| x.hit_check_list.as_slice()).unwrap_or(&[]);
+            show_check_hits(ui, "チェックリスト（ミント後）", mint_hits);
+        }
 
         ui.horizontal(|ui| {
             ui.radio_value(&mut self.graph, true, "グラフ");
@@ -588,6 +609,9 @@ s:5 (スキルレベル)";
                 .fold(None, |acc: Option<f64>, s| Some(acc.map_or(s, |a| a.max(s))))
         };
         let own_score = |lv: EvalLv, after: &str, key: &str| -> Option<f64> { er.get(lv, after)?.get(key).map(|i| i.score).filter(|s| !s.is_nan()) };
+        let own_mint_score = |lv: EvalLv, after: &str, key: &str| -> Option<f64> {
+            er.get(lv, after)?.get(key)?.pure_mint.as_ref().map(|i| i.score).filter(|s| !s.is_nan())
+        };
         let pct = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{}%", fmt_fixed(v * 100.0, 1)));
 
         if self.graph {
@@ -601,16 +625,21 @@ s:5 (スキルレベル)";
                             lvs.iter().map(|&lv| box_best(lv, after, key, false)).collect(),
                             lvs.iter().map(|&lv| box_best(lv, after, key, true)).collect(),
                         ];
+                        let mint_series: Option<Vec<Option<f64>>> =
+                            can_evaluate_mint.then(|| lvs.iter().map(|&lv| own_mint_score(lv, after, key)).collect());
                         ui.vertical(|ui| {
                             ui.label(*name);
                             let labels: Vec<String> = lvs.iter().map(|&lv| lv_label(lv)).collect();
-                            mini_chart(ui, &labels, &series, *color);
+                            mini_chart(ui, &labels, &series, mint_series.as_deref(), *color);
                         });
                     }
                 });
             }
             ui.horizontal(|ui| {
                 ui.label("━ 本個体");
+                if can_evaluate_mint {
+                    ui.label("┄ ミント後");
+                }
                 ui.label("┅ 同種族1位");
                 ui.label("┈ 同種族・同食材1位");
             });
@@ -855,13 +884,21 @@ fn nature_select(ui: &mut egui::Ui, value: &mut String) {
     }
 }
 
-/// 厳選度の折れ線グラフ(縦軸は 0〜(最大を20刻みに切り上げた値)%)。系列は 本個体・同種族1位・同種族同食材1位
-fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 3], color: egui::Color32) {
+/// 厳選度の折れ線グラフ(縦軸は 0〜(最大を20刻みに切り上げた値)%)。系列は 本個体・同種族1位・同種族同食材1位(+ミント後)
+fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 3], mint_series: Option<&[Option<f64>]>, color: egui::Color32) {
     let size = egui::vec2(300.0, 150.0);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let plot = egui::Rect::from_min_max(rect.min + egui::vec2(36.0, 6.0), rect.max - egui::vec2(6.0, 20.0));
-    let max_score = series.iter().flatten().flatten().copied().filter(|v| v.is_finite()).fold(0.0_f64, f64::max) * 100.0;
+    let max_score = series
+        .iter()
+        .flatten()
+        .chain(mint_series.into_iter().flatten())
+        .flatten()
+        .copied()
+        .filter(|v| v.is_finite())
+        .fold(0.0_f64, f64::max)
+        * 100.0;
     let axis_max = ((max_score / 20.0).ceil() * 20.0).max(20.0);
     let muted = style::muted();
     let font = egui::FontId::proportional(10.0);
@@ -878,12 +915,16 @@ fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 
     for (i, l) in labels.iter().enumerate() {
         painter.text(egui::pos2(x_of(i), plot.bottom() + 3.0), egui::Align2::CENTER_TOP, l, font.clone(), muted);
     }
-    let styles = [(color, 3.0), (egui::Color32::from_gray(0x55), 2.0), (egui::Color32::from_gray(0x99), 2.0)];
-    for (data, (c, w)) in series.iter().zip(styles) {
+    let draw_series = |data: &[Option<f64>], c: egui::Color32, w: f32, dashed: bool| {
         let mut run: Vec<egui::Pos2> = Vec::new();
         let flush = |run: &mut Vec<egui::Pos2>| {
             if run.len() > 1 {
-                painter.add(egui::Shape::line(std::mem::take(run), egui::Stroke::new(w, c)));
+                if dashed {
+                    painter.add(egui::Shape::dashed_line(run, egui::Stroke::new(w, c), 6.0, 3.0));
+                    run.clear();
+                } else {
+                    painter.add(egui::Shape::line(std::mem::take(run), egui::Stroke::new(w, c)));
+                }
             }
             run.clear();
         };
@@ -898,6 +939,13 @@ fn mini_chart(ui: &mut egui::Ui, labels: &[String], series: &[Vec<Option<f64>>; 
             }
         }
         flush(&mut run);
+    };
+    let styles = [(color, 3.0), (egui::Color32::from_gray(0x55), 2.0), (egui::Color32::from_gray(0x99), 2.0)];
+    for (data, (c, w)) in series.iter().zip(styles) {
+        draw_series(data, c, w, false);
+    }
+    if let Some(mint) = mint_series {
+        draw_series(mint, color, 3.0, true);
     }
 }
 

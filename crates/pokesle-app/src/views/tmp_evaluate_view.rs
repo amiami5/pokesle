@@ -238,12 +238,13 @@ impl TmpEvaluateView {
         ui.add_space(6.0);
 
         let running = self.job.is_some();
+        let can_evaluate_mint = m.nature(&self.pokemon.nature).is_some_and(|n| n.good.is_some());
         ui.add_enabled_ui(!running, |ui| {
             ui.horizontal(|ui| {
                 if style::form_button(ui, "通常評価", style::ButtonKind::Execute).clicked() {
                     self.start_evaluate(ui.ctx(), shared, false);
                 }
-                if style::form_button(ui, "ミント評価", style::ButtonKind::Execute).clicked() {
+                if ui.add_enabled_ui(can_evaluate_mint, |ui| style::form_button(ui, "ミント評価", style::ButtonKind::Execute)).inner.clicked() {
                     self.start_evaluate(ui.ctx(), shared, true);
                 }
             });

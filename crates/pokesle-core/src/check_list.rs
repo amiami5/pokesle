@@ -70,6 +70,7 @@ pub struct PokemonCheckRow {
     /// 食材構成("全て" または "AAA/AAB" など)
     pub food_name: String,
     pub checked: bool,
+    pub mint_checked: bool,
     /// 最も厳選度の高い判定対象
     pub hit: Option<usize>,
     /// 目標(改行区切り)
@@ -90,6 +91,7 @@ pub struct FoodCheckRow {
     pub score: f64,
     pub lv: u32,
     pub checked: bool,
+    pub mint_checked: bool,
     pub checked_pokemon_list: Vec<String>,
     pub hit: usize,
     pub rate: f64,
@@ -128,6 +130,7 @@ pub struct SkillCheckRow {
     pub score: f64,
     pub lv: u32,
     pub checked: bool,
+    pub mint_checked: bool,
     pub checked_pokemon_list: Vec<String>,
     pub hit: usize,
     pub rate: f64,
@@ -337,6 +340,7 @@ impl CheckList {
                 condition: ci,
                 food_name,
                 checked,
+                mint_checked: false,
                 hit,
                 target,
                 energy_score: hit_entry.and_then(|e| e.energy.as_ref()).map(|x| x.score),
@@ -415,6 +419,7 @@ impl CheckList {
                 score: top.score,
                 lv: top.lv,
                 checked,
+                mint_checked: false,
                 checked_pokemon_list: list.iter().filter(|x| x.score >= border).map(|x| targets[x.index].base_name.to_string()).collect(),
                 hit: top.index,
                 rate: top.score / best_food_score,
@@ -474,6 +479,7 @@ impl CheckList {
                 score: top.score,
                 lv: top.lv,
                 checked,
+                mint_checked: false,
                 checked_pokemon_list: list.iter().filter(|x| x.score >= border).map(|x| targets[x.index].base_name.to_string()).collect(),
                 hit: top.index,
                 rate: top.score / best_skill_score,
@@ -496,6 +502,78 @@ impl CheckList {
         self.pokemon_check_list(targets, Some(&mut result), Some(&food), Some(&skill));
         result
     }
+}
+
+pub trait CheckRow {
+    fn key(&self) -> usize;
+    fn checked(&self) -> bool;
+    fn set_checked(&mut self, v: bool);
+    fn set_mint_checked(&mut self, v: bool);
+}
+
+impl CheckRow for PokemonCheckRow {
+    fn key(&self) -> usize {
+        self.pokemon
+    }
+    fn checked(&self) -> bool {
+        self.checked
+    }
+    fn set_checked(&mut self, v: bool) {
+        self.checked = v;
+    }
+    fn set_mint_checked(&mut self, v: bool) {
+        self.mint_checked = v;
+    }
+}
+
+impl CheckRow for FoodCheckRow {
+    fn key(&self) -> usize {
+        self.food
+    }
+    fn checked(&self) -> bool {
+        self.checked
+    }
+    fn set_checked(&mut self, v: bool) {
+        self.checked = v;
+    }
+    fn set_mint_checked(&mut self, v: bool) {
+        self.mint_checked = v;
+    }
+}
+
+impl CheckRow for SkillCheckRow {
+    fn key(&self) -> usize {
+        self.skill
+    }
+    fn checked(&self) -> bool {
+        self.checked
+    }
+    fn set_checked(&mut self, v: bool) {
+        self.checked = v;
+    }
+    fn set_mint_checked(&mut self, v: bool) {
+        self.mint_checked = v;
+    }
+}
+
+/// 本家 `withMintChecked`: 最良値とボックスは両方を含め、厳選済の表記はミント前の該当を優先する。
+pub fn with_mint_checked<R: CheckRow>(
+    normal: &CheckListResult<R>,
+    mint: &CheckListResult<R>,
+    mut combined: CheckListResult<R>,
+    exclude_mint_from_field: bool,
+) -> CheckListResult<R> {
+    let normal_checked: HashMap<usize, bool> = normal.rows.iter().map(|r| (r.key(), r.checked())).collect();
+    let mint_checked: std::collections::HashSet<usize> = mint.rows.iter().filter(|r| r.checked()).map(|r| r.key()).collect();
+    for row in &mut combined.rows {
+        let k = row.key();
+        row.set_checked(normal_checked.get(&k).copied().unwrap_or(false));
+        row.set_mint_checked(mint_checked.contains(&k));
+    }
+    if !exclude_mint_from_field {
+        combined.target_pokemon_list = normal.target_pokemon_list.clone();
+    }
+    combined
 }
 
 /// 本家 check-list.vue の食材構成("AAB" など)。見つからない食材は "@" になる

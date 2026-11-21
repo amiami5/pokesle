@@ -6,8 +6,8 @@ use eframe::egui;
 use egui_extras::{Column, TableBuilder};
 use pokesle_core::box_sim::BoxResult;
 use pokesle_core::check_list::{
-    field_check_list, food_combination, CheckList, CheckListResult, CheckTarget, FieldRow, FoodCheckRow, PokemonCheckRow, ScoreEntry, SkillCheckRow,
-    SLEEP_TYPES,
+    field_check_list, food_combination, with_mint_checked, CheckList, CheckListResult, CheckTarget, FieldRow, FoodCheckRow, PokemonCheckRow,
+    ScoreEntry, SkillCheckRow, SLEEP_TYPES,
 };
 use pokesle_core::config::{Config, PokemonCondition, PokemonTarget};
 use pokesle_core::data::master;
@@ -59,9 +59,10 @@ struct Computed {
 pub struct CheckListView {
     tab: Tab,
     setting_tab: SettingTab,
-    job: Option<Job<Vec<BoxResult>>>,
-    /// 一覧用の概算結果(仮定計算なし・いつ育なし)
+    job: Option<Job<(Vec<BoxResult>, usize)>>,
+    /// 一覧用の概算結果(仮定計算なし・いつ育なし)。前半が通常個体、後半(mint_start以降)がミント後個体
     results: Vec<BoxResult>,
+    mint_start: usize,
     /// 概算に使った設定・ボックス・厳選テーブルの指紋
     sim_key: Option<u64>,
     computed: Option<Computed>,
@@ -81,6 +82,7 @@ impl Default for CheckListView {
             setting_tab: SettingTab::Pokemon,
             job: None,
             results: Vec::new(),
+            mint_start: 0,
             sim_key: None,
             computed: None,
             unchecked_only: false,
@@ -120,6 +122,7 @@ fn percent(x: Option<f64>) -> String {
 /// 一覧用の概算の設定(本家 check-list.vue: いつ育・仮定計算なし)
 fn page_config(config: &Config) -> Config {
     let mut c = config.clone();
+    c.pure_mint = false;
     c.simulation.bag_over_operation = false;
     c.simulation.fix = false;
     c
@@ -133,6 +136,7 @@ fn sim_key(shared: &Shared, table: &EvaluateTable) -> u64 {
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
     v.to_string().hash(&mut h);
+    shared.config.summary.checklist.show_mint.hash(&mut h);
     shared.ui_setting.all_specialty.hash(&mut h);
     shared.box_file.time.hash(&mut h);
     shared.box_file.list.len().hash(&mut h);
@@ -142,14 +146,20 @@ fn sim_key(shared: &Shared, table: &EvaluateTable) -> u64 {
 }
 
 /// ボックスのポケモンの短い表示(名前 Lv)
-fn pokemon_text(r: &BoxResult) -> String {
+fn pokemon_text(r: &BoxResult, is_mint: bool) -> String {
     let b = r.pokemon.box_pokemon.as_ref();
-    format!("{} Lv{}", b.map(|b| b.name.as_str()).unwrap_or(&r.pokemon.base().name), r.pokemon.lv)
+    let name = b.map(|b| b.name.as_str()).unwrap_or(&r.pokemon.base().name);
+    if is_mint {
+        format!("{name} Lv{} 🌿", r.pokemon.lv)
+    } else {
+        format!("{name} Lv{}", r.pokemon.lv)
+    }
 }
 
-fn pokemon_hover(r: &BoxResult) -> String {
+fn pokemon_hover(r: &BoxResult, is_mint: bool) -> String {
     let Some(b) = r.pokemon.box_pokemon.as_ref() else { return String::new() };
-    format!("ボックス No.{}\n{}\n{}\n{}", b.index + 1, b.nature, b.food_list.join(" / "), b.sub_skill_list.join(" / "))
+    let nature = if is_mint { "🌿 ミント使用後 (がんばりや)".to_string() } else { b.nature.clone() };
+    format!("ボックス No.{}\n{}\n{}\n{}", b.index + 1, nature, b.food_list.join(" / "), b.sub_skill_list.join(" / "))
 }
 
 /// 空欄を null とする数値入力
@@ -228,12 +238,28 @@ impl CheckListView {
         let key = sim_key(shared, &table);
         if self.job.is_none() && self.sim_key != Some(key) && !shared.box_file.list.is_empty() {
             let config = page_config(&shared.sim_config());
-            let list = shared.box_file.list.clone();
+            let mut list = shared.box_file.list.clone();
+            let mint_start = list.len();
+            if shared.config.summary.checklist.show_mint {
+                let m = master();
+                let mint_list: Vec<_> = shared
+                    .box_file
+                    .list
+                    .iter()
+                    .filter(|p| m.nature(&p.nature).is_some_and(|n| n.good.is_some()))
+                    .map(|p| {
+                        let mut mp = p.clone();
+                        mp.nature = "がんばりや".to_string();
+                        mp
+                    })
+                    .collect();
+                list.extend(mint_list);
+            }
             let t = table.clone();
             self.sim_key = Some(key);
             self.job = Some(Job::spawn(ui.ctx(), move |p| {
                 p.set(0.0, "ボックスの厳選度を計算しています…");
-                simulate_box(&config, &list, Some(&t), true)
+                simulate_box(&config, &list, Some(&t), true).map(|r| (r, mint_start))
             }));
         }
         if let Some(job) = &self.job {
@@ -253,6 +279,8 @@ impl CheckListView {
             Tab::Food => self.food_table(ui, c),
             Tab::Skill => self.skill_table(ui, c),
             Tab::Field => {
+                ui.label("各エナジー列は厳選基準生成で計算したエナジーの期待値です。単に未厳選が多いフィールドではなく、優先して厳選したい強いポケモンが多く出るフィールドに行きたい時に参考にしてください。");
+                ui.add_space(4.0);
                 field_table(ui, c);
                 None
             }
@@ -278,8 +306,9 @@ impl CheckListView {
             self.job = None;
             self.computed = None;
             match r {
-                Ok(list) => {
+                Ok((list, mint_start)) => {
                     self.results = list;
+                    self.mint_start = mint_start;
                     self.error.clear();
                 }
                 Err(e) => self.error = e,
@@ -301,9 +330,32 @@ impl CheckListView {
             .map(|(r, c)| CheckTarget { base_name: &r.pokemon.base().name, food_combination: c, evaluate_result: r.evaluate_result.as_ref().unwrap_or(&empty) })
             .collect();
         let cl = CheckList::new(config, Some(table));
-        let food = cl.food_check_list(&targets, None);
-        let skill = cl.skill_check_list(&targets, None);
-        let pokemon = cl.pokemon_check_list(&targets, None, Some(&food), Some(&skill));
+        let normal_len = self.mint_start.min(targets.len());
+        let (food, skill, pokemon) = if config.summary.checklist.show_mint && normal_len < targets.len() {
+            let normal_targets = &targets[..normal_len];
+            let mint_targets = &targets[normal_len..];
+            let normal_food = cl.food_check_list(normal_targets, None);
+            let normal_skill = cl.skill_check_list(normal_targets, None);
+            let normal_pokemon = cl.pokemon_check_list(normal_targets, None, Some(&normal_food), Some(&normal_skill));
+            let mint_food = cl.food_check_list(mint_targets, None);
+            let mint_skill = cl.skill_check_list(mint_targets, None);
+            let mint_pokemon = cl.pokemon_check_list(mint_targets, None, Some(&mint_food), Some(&mint_skill));
+            let combined_food = cl.food_check_list(&targets, None);
+            let combined_skill = cl.skill_check_list(&targets, None);
+            let combined_pokemon = cl.pokemon_check_list(&targets, None, Some(&combined_food), Some(&combined_skill));
+            let exclude = config.summary.checklist.field.exclude_mint;
+            (
+                with_mint_checked(&normal_food, &mint_food, combined_food, exclude),
+                with_mint_checked(&normal_skill, &mint_skill, combined_skill, exclude),
+                with_mint_checked(&normal_pokemon, &mint_pokemon, combined_pokemon, exclude),
+            )
+        } else {
+            let normal_targets = &targets[..normal_len];
+            let food = cl.food_check_list(normal_targets, None);
+            let skill = cl.skill_check_list(normal_targets, None);
+            let pokemon = cl.pokemon_check_list(normal_targets, None, Some(&food), Some(&skill));
+            (food, skill, pokemon)
+        };
         let all_targets: Vec<String> =
             pokemon.target_pokemon_list.iter().chain(&food.target_pokemon_list).chain(&skill.target_pokemon_list).cloned().collect();
         let field = field_check_list(config, Some(table), &all_targets);
@@ -315,14 +367,19 @@ impl CheckListView {
     }
 
     fn pokemon_cell(&self, ui: &mut egui::Ui, index: Option<usize>) {
-        if let Some(r) = index.and_then(|i| self.result(i)) {
-            ui.label(pokemon_text(r)).on_hover_text(pokemon_hover(r));
+        if let Some(i) = index
+            && let Some(r) = self.results.get(i)
+        {
+            let is_mint = i >= self.mint_start;
+            ui.label(pokemon_text(r, is_mint)).on_hover_text(pokemon_hover(r, is_mint));
         }
     }
 
-    fn checked_cell(ui: &mut egui::Ui, checked: bool) {
+    fn checked_cell(ui: &mut egui::Ui, checked: bool, mint_checked: bool) {
         if checked {
             ui.colored_label(egui::Color32::from_rgb(40, 170, 80), "済");
+        } else if mint_checked {
+            ui.colored_label(egui::Color32::from_rgb(40, 170, 80), "済（🌿）");
         }
     }
 
@@ -371,7 +428,7 @@ impl CheckListView {
                         row.col(|ui| {
                             ui.label(&r.target);
                         });
-                        row.col(|ui| Self::checked_cell(ui, r.checked));
+                        row.col(|ui| Self::checked_cell(ui, r.checked, r.mint_checked));
                         row.col(|ui| {
                             ui.label(percent(r.energy_score));
                         });
@@ -430,7 +487,7 @@ impl CheckListView {
                         row.col(|ui| {
                             ui.label(fmt_fixed(r.border, 1));
                         });
-                        row.col(|ui| Self::checked_cell(ui, r.checked));
+                        row.col(|ui| Self::checked_cell(ui, r.checked, r.mint_checked));
                         row.col(|ui| {
                             ui.label(fmt_fixed(r.score, 1)).on_hover_text(format!("Lv{}", r.lv));
                         });
@@ -492,7 +549,7 @@ impl CheckListView {
                         row.col(|ui| {
                             ui.label(fmt_fixed(r.score, 1)).on_hover_text(format!("Lv{}", r.lv));
                         });
-                        row.col(|ui| Self::checked_cell(ui, r.checked));
+                        row.col(|ui| Self::checked_cell(ui, r.checked, r.mint_checked));
                         row.col(|ui| {
                             ui.label(percent(Some(r.rate)));
                         });
@@ -748,9 +805,16 @@ impl CheckListView {
             SettingTab::Food => changed |= food_setting(ui, &mut shared.config, lv_list),
             SettingTab::Skill => changed |= skill_setting(ui, &mut shared.config, lv_list),
             SettingTab::Other => {
-                let f = &mut shared.config.summary.checklist.field;
-                changed |= ui.checkbox(&mut f.bakeccha_matome, "バケッチャ・パンプジンをまとめて表示").changed();
-                changed |= ui.checkbox(&mut f.shinkago, "フィールド別画面に進化後を表示").changed();
+                let cl = &mut shared.config.summary.checklist;
+                changed |= ui.checkbox(&mut cl.show_mint, "ミント使用後も一覧に表示する").changed();
+                changed |= ui
+                    .add_enabled(
+                        cl.show_mint,
+                        egui::Checkbox::new(&mut cl.field.exclude_mint, "ミント使用後がチェックリストに該当した場合、フィールド別からも除外"),
+                    )
+                    .changed();
+                changed |= ui.checkbox(&mut cl.field.bakeccha_matome, "バケッチャ・パンプジンをまとめて表示").changed();
+                changed |= ui.checkbox(&mut cl.field.shinkago, "フィールド別画面に進化後を表示").changed();
             }
         });
         changed |= self.target_window(ui.ctx(), &mut shared.config);

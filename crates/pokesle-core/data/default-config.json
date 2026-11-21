@@ -147,7 +147,6 @@
   "fixResourceMode": 0,
   "fixSubSkillSeed": false,
   "fixSkillSeed": false,
-  "fixSleepRibbon": false,
   "fixCheckList": true,
   "fixBorder": null,
   "fixBorderSpecialty": null,
@@ -955,6 +954,7 @@
  },
  "summary": {
   "checklist": {
+   "showMint": true,
    "pokemonCondition": {
     "list": [
      {
@@ -1370,6 +1370,7 @@
     "skillSpecialtyOnly": true
    },
    "field": {
+    "excludeMint": false,
     "shinkago": false,
     "bakecchaMatome": true
    }
