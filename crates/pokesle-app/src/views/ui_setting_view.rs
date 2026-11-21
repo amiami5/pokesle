@@ -157,6 +157,18 @@ impl UiSettingView {
         {
             *status = format!("設定を保存できませんでした: {e}");
         }
+
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let hash = env!("POKESLE_GIT_HASH");
+            ui.label(egui::RichText::new(format!("ビルド: {hash}")).color(crate::views::style::muted()));
+            if ui.small_button("コピー").clicked() {
+                ui.ctx().copy_text(hash.to_string());
+                *status = format!("コミットハッシュ ({hash}) をコピーしました");
+            }
+        });
     }
 
     /// スクリーンショットの文字認識(エンジンの選択・Google Cloud Vision の API キーと利用回数)
