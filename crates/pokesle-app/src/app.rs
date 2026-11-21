@@ -196,28 +196,41 @@ impl App {
         let require_refresh = self.shared.usable_evaluate_table().is_none();
         // 未確認の更新履歴があれば「!」を付ける
         let history_unread = self.shared.config.version.history.as_f64().unwrap_or(0.0) < pokesle_core::data::master().version.history as f64;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 5.0;
-            ui.add_space(10.0);
-            ui.label(egui::RichText::new("ポケスリシミュ").size(22.0).strong().color(egui::Color32::WHITE));
-            ui.add_space(14.0);
-            for (title, items) in NAV {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.add_space(5.0);
-                    ui.label(egui::RichText::new(title).size(11.0).color(egui::Color32::from_rgb(0xd8, 0xdd, 0xe7)));
-                    ui.add_space(3.0);
-                    ui.horizontal(|ui| {
-                        for &(tab, label, implemented) in items {
-                            let disabled = !implemented || (require_refresh && matches!(tab, Tab::CheckList | Tab::EvaluateTable));
-                            let caution = (require_refresh && tab == Tab::Setting) || (tab == Tab::History && history_unread);
-                            if nav_item(ui, label, self.tab == tab, disabled, caution, implemented).clicked() {
-                                self.tab = tab;
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.add_space(5.0);
+                let hash = env!("POKESLE_GIT_HASH");
+                let text = egui::RichText::new(hash).size(11.0).monospace().color(egui::Color32::from_rgb(0xd8, 0xdd, 0xe7));
+                let res = ui.add(egui::Label::new(text).sense(egui::Sense::click())).on_hover_text("ビルド時のコミットハッシュ (クリックでコピー)").on_hover_cursor(egui::CursorIcon::PointingHand);
+                if res.clicked() {
+                    ui.ctx().copy_text(hash.to_string());
+                    self.shared.status = format!("コミットハッシュ ({hash}) をコピーしました");
+                }
+            });
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
+                ui.spacing_mut().item_spacing.x = 5.0;
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("ポケスリシミュ").size(22.0).strong().color(egui::Color32::WHITE));
+                ui.add_space(14.0);
+                for (title, items) in NAV {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.add_space(5.0);
+                        ui.label(egui::RichText::new(title).size(11.0).color(egui::Color32::from_rgb(0xd8, 0xdd, 0xe7)));
+                        ui.add_space(3.0);
+                        ui.horizontal(|ui| {
+                            for &(tab, label, implemented) in items {
+                                let disabled = !implemented || (require_refresh && matches!(tab, Tab::CheckList | Tab::EvaluateTable));
+                                let caution = (require_refresh && tab == Tab::Setting) || (tab == Tab::History && history_unread);
+                                if nav_item(ui, label, self.tab == tab, disabled, caution, implemented).clicked() {
+                                    self.tab = tab;
+                                }
                             }
-                        }
+                        });
                     });
-                });
-            }
+                }
+            });
         });
     }
 }
