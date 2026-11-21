@@ -18,14 +18,49 @@
 
 ## ビルド
 
-```sh
-git clone --recursive https://github.com/amiami5/pokesle.git
+まっさらな Windows 環境からソースコードを取得してビルド・起動するまでの手順です。
+
+### 1. 必要なツールのインストール
+
+1. **Git**（ソースコードの取得に必要）
+   - [Git for Windows](https://git-scm.com/downloads/win) からインストーラーをダウンロードしてインストールします（設定は既定のままで構いません）。
+   - PowerShell から `winget` で入れる場合:
+     ```powershell
+     winget install --id Git.Git -e
+     ```
+
+2. **Visual Studio Build Tools**（Rust の Windows 向けビルド・リンクに必要）
+   - [Visual Studio のダウンロード](https://visualstudio.microsoft.com/ja/downloads/) ページ内の「Build Tools for Visual Studio」をダウンロードし、ワークロードで **「C++ によるデスクトップ開発」**（MSVC ビルドツールおよび Windows SDK）を選択してインストールします。
+   - 次の `rustup-init.exe` を先に実行した場合でも、未導入であればインストーラーから導入を案内されます。
+
+3. **Rust（1.89 以降 / edition 2024 対応）**
+   - [rustup.rs](https://rustup.rs/) から `rustup-init.exe` をダウンロードして実行し、既定の設定のままインストールします。
+   - PowerShell から `winget` で入れる場合:
+     ```powershell
+     winget install --id Rustlang.Rustup -e
+     ```
+   - すでに古い Rust が入っている場合は更新してください（`is_multiple_of` と let チェーンを使っているため、1.89 未満ではビルドできません）。
+     ```powershell
+     rustup update
+     ```
+
+> インストール完了後、`PATH` を反映するため **PowerShell（またはコマンドプロンプト）をいったん閉じて開き直してください**。
+
+### 2. 取得とビルド・起動
+
+開き直した PowerShell で以下を実行します。
+
+```powershell
+git clone https://github.com/amiami5/pokesle.git
+cd pokesle
 cargo run -p pokesle-app --release
 ```
 
-日本語フォントは同梱せず、Windows 標準のフォント(游ゴシック等)を実行時に読み込みます。
+初回は依存ライブラリの取得とコンパイルに数分かかります。完了するとアプリが起動します。
 
-Rust 1.89 以降(edition 2024)が必要です。`is_multiple_of` と let チェーンを使っているため、古い Rust ではビルドできません。`rustup update` で更新してください。
+- 実行ファイル（`target\release\pokesle.exe`）だけをビルドしたい場合は、`cargo build -p pokesle-app --release` を実行してください。
+- 本家への追従スクリプト（`tools/upstream-bridge`）も使う場合は、`git clone --recursive https://github.com/amiami5/pokesle.git` でサブモジュールごと取得してください（通常のビルドには不要です）。
+- 日本語フォントは同梱せず、Windows 標準のフォント（游ゴシック等）を実行時に読み込みます。
 
 ## ブラウザ版(本家)からのデータ移行
 
