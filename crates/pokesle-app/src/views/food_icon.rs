@@ -67,12 +67,22 @@ pub fn food_choice(ui: &mut egui::Ui, name: &str, selected: bool) -> egui::Respo
     let stroke = if selected { egui::Stroke::new(2.0, style::mint()) } else { egui::Stroke::new(1.0, style::line_color()) };
     ui.painter().rect(rect, 6.0, fill, stroke, egui::StrokeKind::Inside);
     let inner = egui::Rect::from_center_size(rect.center(), egui::vec2(29.0, 29.0));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-        if !bright {
-            ui.multiply_opacity(0.55);
+    let alpha = if bright { 1.0 } else { 0.55 };
+    match food_texture(ui.ctx(), name) {
+        Some(t) => {
+            let tint = egui::Color32::WHITE.gamma_multiply(alpha);
+            ui.painter().image(t.id(), inner, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
         }
-        food_icon(ui, name, 29.0);
-    });
+        None => {
+            ui.painter().text(
+                inner.center(),
+                egui::Align2::CENTER_CENTER,
+                name,
+                egui::FontId::proportional(11.0),
+                ui.visuals().text_color().gamma_multiply(alpha),
+            );
+        }
+    }
     r.on_hover_text(name)
 }
 
