@@ -304,6 +304,8 @@ pub struct SimulationConfig {
     pub field: String,
     pub field_ex: f64,
     pub field_bonus: f64,
+    #[serde(default)]
+    pub field_bonus_map: HashMap<String, f64>,
     pub berry_list: Vec<String>,
     pub berry_energy_rate: HashMap<String, f64>,
     /// 空文字は「全カテゴリ」
@@ -780,6 +782,11 @@ impl Config {
         crate::config_migrate::migrate_saved(&mut saved);
         let mut base = default_config_value();
         merge_object(&mut base, &saved);
+        if let Some(saved_map) = saved.get("simulation").and_then(|s| s.get("fieldBonusMap")).and_then(|v| v.as_object())
+            && let Some(sim) = base.get_mut("simulation").and_then(|s| s.as_object_mut())
+        {
+            sim.insert("fieldBonusMap".into(), Value::Object(saved_map.clone()));
+        }
         Self::from_value(&base)
     }
 
@@ -844,5 +851,24 @@ mod tests {
         let cfg = Config::from_saved(&saved).unwrap();
         assert_eq!(cfg.simulation.event_bonus.pot.add, 0.0);
         assert_eq!(cfg.simulation.event_bonus.pot.rate, 1.0);
+    }
+
+    #[test]
+    fn field_bonus_map_persists_across_from_saved() {
+        let saved = serde_json::json!({
+            "simulation": {
+                "field": "シアンの砂浜",
+                "fieldBonus": 75,
+                "fieldBonusMap": {
+                    "ワカクサ本島": 85,
+                    "シアンの砂浜": 75
+                }
+            }
+        });
+        let cfg = Config::from_saved(&saved).unwrap();
+        assert_eq!(cfg.simulation.field, "シアンの砂浜");
+        assert_eq!(cfg.simulation.field_bonus, 75.0);
+        assert_eq!(cfg.simulation.field_bonus_map.get("ワカクサ本島").copied(), Some(85.0));
+        assert_eq!(cfg.simulation.field_bonus_map.get("シアンの砂浜").copied(), Some(75.0));
     }
 }

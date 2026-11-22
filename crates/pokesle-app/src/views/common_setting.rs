@@ -97,7 +97,9 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                     egui::Grid::new(("field_list", ex)).num_columns(3).spacing([16.0, 5.0]).show(ui, |ui| {
                         for (i, f) in m.fields.iter().filter(|f| f.ex == ex).enumerate() {
                             if ui.radio(s.field == f.name, &f.name).clicked() && s.field != f.name {
+                                s.field_bonus_map.insert(s.field.clone(), s.field_bonus);
                                 s.field = f.name.clone();
+                                s.field_bonus = s.field_bonus_map.get(&s.field).copied().unwrap_or(0.0);
                                 changed = true;
                             }
                             if i % 3 == 2 {
@@ -170,8 +172,20 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
 
             th(ui, "フィールドボーナス");
             ui.horizontal(|ui| {
-                changed |= number(ui, &mut s.field_bonus, 1.0, 40.0);
+                let mut fb_changed = number(ui, &mut s.field_bonus, 1.0, 40.0);
                 ui.label("%");
+                if ui.button("-5").clicked() {
+                    s.field_bonus = (s.field_bonus - 5.0).max(0.0);
+                    fb_changed = true;
+                }
+                if ui.button("+5").clicked() {
+                    s.field_bonus += 5.0;
+                    fb_changed = true;
+                }
+                if fb_changed {
+                    s.field_bonus_map.insert(s.field.clone(), s.field_bonus);
+                    changed = true;
+                }
             });
             ui.end_row();
 

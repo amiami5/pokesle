@@ -96,7 +96,8 @@
   "field": "ワカクサ本島",
   "fieldEx": 1,
   "fieldExMainBerry": "",
-  "fieldBonus": 85,
+  "fieldBonus": 0,
+  "fieldBonusMap": {},
   "berryList": [
    "",
    "",
