@@ -236,10 +236,34 @@ pub struct SkillEventBonus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PotEventBonus {
+    #[serde(default)]
+    pub add: f64,
+    #[serde(default = "default_one")]
+    pub rate: f64,
+}
+
+impl Default for PotEventBonus {
+    fn default() -> Self {
+        Self { add: 0.0, rate: 1.0 }
+    }
+}
+
+impl PotEventBonus {
+    /// 鍋サイズにイベントボーナスの倍率・追加、スキル拡張、いいキャンプチケットを適用する
+    pub fn apply(&self, base_pot: f64, skill_add: f64, camp_ticket: bool) -> f64 {
+        crate::js::round((base_pot * self.rate + self.add + skill_add) * if camp_ticket { 1.5 } else { 1.0 })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBonusGlobal {
     pub skill: SkillEventBonus,
     #[serde(default)]
     pub food: Option<String>,
+    #[serde(default)]
+    pub pot: PotEventBonus,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -792,5 +816,33 @@ mod tests {
         let mut base = serde_json::json!({ "a": 1, "b": { "c": [1, 2], "d": 3 } });
         merge_object(&mut base, &serde_json::json!({ "a": 2, "x": 9, "b": { "c": [5], "e": 1 } }));
         assert_eq!(base, serde_json::json!({ "a": 2, "b": { "c": [5], "d": 3 } }));
+    }
+
+    #[test]
+    fn pot_event_bonus_apply_and_default() {
+        let def = PotEventBonus::default();
+        assert_eq!(def.add, 0.0);
+        assert_eq!(def.rate, 1.0);
+        assert_eq!(def.apply(87.0, 0.0, false), 87.0);
+        assert_eq!(def.apply(87.0, 10.0, true), 146.0);
+
+        let event_pot = PotEventBonus { add: 5.0, rate: 1.5 };
+        // 87 * 1.5 + 5 + 10 = 145.5 -> round = 146
+        assert_eq!(event_pot.apply(87.0, 10.0, false), 146.0);
+        // (87 * 1.5 + 5 + 0) * 1.5 = 203.25 -> round = 203
+        assert_eq!(event_pot.apply(87.0, 0.0, true), 203.0);
+
+        // 旧保存データ(potキーなし)でもデフォルト値で読み込めること
+        let saved = serde_json::json!({
+            "simulation": {
+                "eventBonus": {
+                    "skill": { "berryBurst": 1.5, "foodGet": 1.0 },
+                    "food": null
+                }
+            }
+        });
+        let cfg = Config::from_saved(&saved).unwrap();
+        assert_eq!(cfg.simulation.event_bonus.pot.add, 0.0);
+        assert_eq!(cfg.simulation.event_bonus.pot.rate, 1.0);
     }
 }

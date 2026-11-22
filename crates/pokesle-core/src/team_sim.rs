@@ -478,9 +478,11 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             if sim.cooking_weight > 0.0 {
                 let mut selected: Vec<Option<(&EvaluatedCooking, f64, f64, bool, usize)>> = Vec::new();
                 for (count, &(week, i)) in cooking_timing_list.iter().enumerate() {
-                    let pot_size = js::round(
-                        ((if week == 6.0 { sim.pot_size * 2.0 } else { sim.pot_size }) + cooking_power_up_effect_list.get(count).copied().unwrap_or(f64::NAN))
-                            * if sim.camp_ticket { 1.5 } else { 1.0 },
+                    let base_pot = if week == 6.0 { sim.pot_size * 2.0 } else { sim.pot_size };
+                    let pot_size = sim.event_bonus.pot.apply(
+                        base_pot,
+                        cooking_power_up_effect_list.get(count).copied().unwrap_or(f64::NAN),
+                        sim.camp_ticket,
                     );
                     let mut best = None;
                     for c in &target_cooking_list {

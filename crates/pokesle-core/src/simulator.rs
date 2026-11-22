@@ -105,7 +105,7 @@ impl PokemonSimulator {
         let fixed_pot_size = if mode == Mode::Select {
             m.cooking_stats.pot_max
         } else {
-            js::round(config.simulation.pot_size * if config.simulation.camp_ticket { 1.5 } else { 1.0 })
+            config.simulation.event_bonus.pot.apply(config.simulation.pot_size, 0.0, config.simulation.camp_ticket)
         };
 
         // 今週の料理タイプのリスト
@@ -1265,8 +1265,10 @@ impl PokemonSimulator {
                     }
                     Mode::About => {
                         for add in split_three(effect_num, cooking_power_up_effect) {
-                            let after_pot = js::round(
-                                (self.config.simulation.pot_size + add) * if self.config.simulation.camp_ticket { 1.5 } else { 1.0 },
+                            let after_pot = self.config.simulation.event_bonus.pot.apply(
+                                self.config.simulation.pot_size,
+                                add,
+                                self.config.simulation.camp_ticket,
                             );
                             if let Some(after) = get_best_cooking(&mut self.best_cooking_cache, &self.cooking_list, after_pot) {
                                 let default = self.default_best_cooking.map(|b| b.last_energy).unwrap_or(f64::NAN);

@@ -265,6 +265,12 @@ fn event_bonus_label(c: &Config) -> Label {
     if let Some(food) = s.event_bonus.food.as_deref().filter(|f| !f.is_empty()) {
         parts.push(format!("{food}ボーナス"));
     }
+    if s.event_bonus.pot.add != 0.0 {
+        parts.push(format!("鍋+{}", js_num(s.event_bonus.pot.add)));
+    }
+    if s.event_bonus.pot.rate != 1.0 {
+        parts.push(format!("鍋x{}", js_num(s.event_bonus.pot.rate)));
+    }
     let mut l: Label = vec![("イベントボーナス：".into(), false)];
     if parts.is_empty() {
         l.push(("なし".into(), false));
@@ -394,12 +400,26 @@ fn event_bonus_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                 );
             });
             ui.end_row();
+
+            th(ui, "鍋拡張");
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    changed |= number(ui, &mut s.event_bonus.pot.add, 1.0, 60.0);
+                    ui.label("個追加");
+                    ui.add_space(12.0);
+                    changed |= number(ui, &mut s.event_bonus.pot.rate, 0.1, 60.0);
+                    ui.label("倍");
+                });
+                small(ui, "適用タイプによらずなべの大きさに適用されます。", 500.0);
+            });
+            ui.end_row();
         });
         if form_button(ui, "リセット", ButtonKind::Normal).clicked() {
             s.event_bonus_list.clear();
             s.event_bonus.skill.berry_burst = 1.0;
             s.event_bonus.skill.food_get = 1.0;
             s.event_bonus.food = None;
+            s.event_bonus.pot = Default::default();
             changed = true;
         }
     });

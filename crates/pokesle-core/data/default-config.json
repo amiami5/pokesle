@@ -135,7 +135,11 @@
     "berryBurst": 1,
     "foodGet": 1
    },
-   "food": null
+   "food": null,
+   "pot": {
+    "add": 0,
+    "rate": 1
+   }
   },
   "potSize": 87,
   "bagOverOperation": true,
