@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'リリースタグ（例: v0.1.0。空欄時は Cargo.toml の version から v<version> を使用）'
+        description: 'リリースタグ（例: 20261124。空欄時は実行日(JST)の YYYYMMDD を使用）'
         required: false
         type: string
       prerelease:
@@ -46,11 +46,7 @@ jobs:
             if ("${{ github.ref_type }}" -eq "tag") {
               $tag = "${{ github.ref_name }}"
             } else {
-              $match = Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
-              if (-not $match) {
-                throw "Cargo.toml から version を取得できませんでした"
-              }
-              $tag = "v$($match.Matches[0].Groups[1].Value)"
+              $tag = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(9)).ToString('yyyyMMdd')
             }
           }
 
