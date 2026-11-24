@@ -26,7 +26,7 @@ fn base_config(config: &Config, fix: bool, fix_lv: Option<f64>) -> Config {
     let mut c = config.clone();
     let s = &mut c.simulation;
     s.field = "ワカクサ本島".into();
-    s.field_bonus = 0.0;
+    s.field_settings.entry("ワカクサ本島".into()).or_default().bonus = 0.0;
     s.berry_list = vec![String::new(), String::new(), String::new()];
     s.mode = 0.0;
     s.fix = fix;

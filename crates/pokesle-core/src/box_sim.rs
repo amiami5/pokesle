@@ -397,8 +397,9 @@ impl BoxSimulator {
             result.extend(extra);
         }
 
-        let field_bonus = config.simulation.field_bonus;
-        let shard_to_energy = config.simulation.shard_to_energy.unwrap_or(config.select_evaluate.shard_energy_rate / 4.0);
+        let field_bonus = config.simulation.field_bonus();
+        let shard_to_energy = config.simulation.shard_to_energy.unwrap_or_else(|| config.research_shard_to_energy(4.0));
+        let research_shard_rate = config.simulation.event_bonus.research.shard;
         for r in &mut result {
             let p = &mut r.pokemon;
             let help_bonus = (if p.has_sub_skill(SubSkillKind::HelpBonus) { 1.0 } else { 0.0 }) + config.simulation.help_bonus.unwrap_or(0.0);
@@ -408,7 +409,11 @@ impl BoxSimulator {
             self.simulator.calc_help(p, &HelpOption { box_pokemon_list: pokemon_list, ..Default::default() })?;
 
             let mut tmp = p.energy_per_day * (100.0 + field_bonus) / 100.0;
-            tmp += (tmp * if config.simulation.research_rank_max { 0.5 } else { 0.0 } + p.shard * shard_to_energy) * config.simulation.shard_weight / 100.0;
+            tmp += (tmp * (research_shard_rate - 1.0)
+                + tmp * if config.simulation.research_rank_max { 0.5 } else { 0.0 }
+                + p.shard * shard_to_energy)
+                * config.simulation.shard_weight
+                / 100.0;
             p.tmp_score = Some(tmp);
         }
         Ok(result)
@@ -448,9 +453,10 @@ impl BoxSimulator {
         heal_check.sort_by(|a, b| js::cmp_num(b.tmp_score.unwrap_or(f64::NAN), a.tmp_score.unwrap_or(f64::NAN)));
 
         let box_idx = |p: &SimPokemon| p.box_index();
-        let field_bonus = config.simulation.field_bonus;
-        let shard_to_energy = config.simulation.shard_to_energy.unwrap_or(config.select_evaluate.shard_energy_rate / 4.0);
-        let shard_energy_rate = config.select_evaluate.shard_energy_rate;
+        let field_bonus = config.simulation.field_bonus();
+        let shard_to_energy = config.simulation.shard_to_energy.unwrap_or_else(|| config.research_shard_to_energy(4.0));
+        let research_shard_per_energy = config.research_shard_rate();
+        let research_shard_rate = config.simulation.event_bonus.research.shard;
 
         let mut out = Vec::with_capacity(targets.len());
         for i in targets {
@@ -474,14 +480,14 @@ impl BoxSimulator {
                 let mut l = others(&energy_top5, 4);
                 l.push(p.clone());
                 for sub in l {
-                    support_shard += sub.energy_per_day / shard_energy_rate * 0.06;
+                    support_shard += sub.energy_per_day * research_shard_per_energy * research_shard_rate * 0.06;
                 }
             }
             if config.simulation.research_rank_max && p.has_sub_skill(SubSkillKind::ResearchExpBonus) {
                 let mut l = others(&help_bonus_top5, 4);
                 l.push(p.clone());
                 for sub in l {
-                    support_shard += sub.energy_per_day / shard_energy_rate / 2.0 * 0.09;
+                    support_shard += (sub.energy_per_day * research_shard_per_energy / 2.0) * 0.09;
                 }
             }
 
@@ -551,7 +557,9 @@ impl BoxSimulator {
             p.support_energy_per_day = support_energy;
             p.support_shard_per_day = support_shard;
             let mut score = (p.energy_per_day + p.support_energy_per_day) * (100.0 + field_bonus) / 100.0;
-            score += (score * if config.simulation.research_rank_max { 0.5 } else { 0.0 } + (p.shard + p.support_shard_per_day) * shard_to_energy)
+            score += (score * (research_shard_rate - 1.0)
+                + score * if config.simulation.research_rank_max { 0.5 } else { 0.0 }
+                + (p.shard + p.support_shard_per_day) * shard_to_energy)
                 * config.simulation.shard_weight
                 / 100.0;
             p.score = score;

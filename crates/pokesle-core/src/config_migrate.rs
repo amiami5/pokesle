@@ -13,6 +13,8 @@ use crate::data::master;
 const EVALUATE_SETTING_MIGRATION_VERSION: f64 = 20260919.0;
 /// 本家の `CHECK_LIST_POKEMON_TARGET_MIGRATION_VERSION`
 const CHECK_LIST_POKEMON_TARGET_MIGRATION_VERSION: f64 = 20260928.0;
+/// 本家の `FIELD_SETTING_MIGRATION_VERSION`
+const FIELD_SETTING_MIGRATION_VERSION: f64 = 20261123.0;
 const SPECIALTY_LIST: [&str; 4] = ["きのみ", "食材", "スキル", "オール"];
 
 fn truthy(v: Option<&Value>) -> bool {
@@ -27,6 +29,10 @@ fn array_len(v: Option<&Value>) -> usize {
 pub fn migrate_saved(saved: &mut Value) {
     let Some(root) = saved.as_object_mut() else { return };
     let saved_version = root.get("v").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+    if saved_version < FIELD_SETTING_MIGRATION_VERSION {
+        migrate_field_settings(root);
+    }
 
     // 旧の銀種設定(1つの真偽値)を、サブスキルごとの設定にする
     if let Some(select) = root.get_mut("selectEvaluate").and_then(|v| v.as_object_mut())
@@ -69,6 +75,30 @@ pub fn migrate_saved(saved: &mut Value) {
     {
         migrate_check_list_pokemon_condition(checklist);
     }
+}
+
+fn migrate_field_settings(root: &mut Map<String, Value>) {
+    let sim = root.entry("simulation").or_insert_with(|| json!({}));
+    if !sim.is_object() {
+        *sim = json!({});
+    }
+    let sim_obj = sim.as_object_mut().expect("object");
+    let default_bonus = sim_obj.get("fieldBonus").filter(|v| !v.is_null()).cloned().unwrap_or_else(|| json!(0));
+    let bonus_map = sim_obj.get("fieldBonusMap").and_then(|v| v.as_object()).cloned();
+    let mut field_settings = Map::new();
+    for field in &master().fields {
+        let bonus = bonus_map
+            .as_ref()
+            .and_then(|m| m.get(&field.name))
+            .filter(|v| !v.is_null())
+            .cloned()
+            .unwrap_or_else(|| default_bonus.clone());
+        let shard_efficiency = if field.ex { 10000 } else { 12000 };
+        field_settings.insert(field.name.clone(), json!({ "bonus": bonus, "shardEfficiency": shard_efficiency }));
+    }
+    sim_obj.insert("fieldSettings".into(), Value::Object(field_settings));
+    sim_obj.remove("fieldBonus");
+    sim_obj.remove("fieldBonusMap");
 }
 
 fn present_owned(map: &Map<String, Value>, key: &str) -> Option<Value> {

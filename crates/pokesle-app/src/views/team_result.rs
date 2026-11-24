@@ -565,10 +565,11 @@ pub fn team_table(ui: &mut egui::Ui, team: &TeamResult, config: &Config, result_
     table.row(ui, None, vec![th(2, "残り食材"), num(n + 1, to_fixed(team.remain_food_energy, 1))]);
 
     let span = n + 1;
-    let fb = 1.0 + config.simulation.field_bonus / 100.0;
+    let fb = 1.0 + config.simulation.field_bonus() / 100.0;
     table.row(ui, Some(("エナジー", true)), vec![th(1, "エナジー"), num(span, round_str(team.raw_energy))]);
     table.row(ui, Some(("", false)), vec![th(1, "FB込み"), num(span, round_str(team.raw_energy * fb))]);
-    table.row(ui, Some(("ゆめのかけら", true)), vec![th(1, "エナジー"), num(span, round_str(team.energy_shard))]);
+    table.row(ui, Some(("ゆめかけ", true)), vec![th(1, "リサーチ"), num(span, round_str(team.energy_shard))]);
+    table.row(ui, Some(("", false)), vec![th(1, "リサーチEXP変換"), num(span, round_str(team.research_exp))]);
     table.row(ui, Some(("", false)), vec![th(1, "ボーナス"), num(span, round_str(team.bonus_shard))]);
     table.row(ui, Some(("", false)), vec![th(1, "スキル"), num(span, round_str(team.skill_shard))]);
     table.row(ui, None, vec![th(2, "スコア"), num(span, round_str(team.score))]);

@@ -1321,6 +1321,11 @@ impl PokemonSimulator {
         }
         pokemon.cooking_power_up_effect = total_cooking_power_up_effect;
 
+        // コピーやゆびをふるを含め、全スキルの獲得分へイベント倍率を一度だけ適用する。
+        if self.mode != Mode::Select {
+            pokemon.shard *= self.config.simulation.event_bonus.skill.shard;
+        }
+
         // チーム全体のげんき回復による増加エナジー
         if pokemon.other_heal > 0.0 && self.mode == Mode::Select {
             let hr = self.help_rate.get_help_rate(&pokemon.other_heal_list);

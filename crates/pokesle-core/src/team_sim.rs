@@ -83,6 +83,7 @@ pub struct TeamResult {
     pub energy: f64,
     pub raw_energy: f64,
     pub energy_shard: f64,
+    pub research_exp: f64,
     pub bonus_shard: f64,
     pub skill_shard: f64,
     pub today_shard: f64,
@@ -550,29 +551,38 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
 
             // フィールドボーナス
             let raw_energy = energy;
-            energy *= (100.0 + sim.field_bonus) / 100.0;
+            energy *= (100.0 + sim.field_bonus()) / 100.0;
             if energy.is_nan() {
                 return Err("計算ロジックに誤りが見つかりました".into());
             }
 
-            let se = &config.select_evaluate;
+            let research_shard_rate = sim.event_bonus.research.shard;
+            let research_shard_per_energy = config.research_shard_rate();
             let rrm = sim.research_rank_max;
-            let (energy_shard, research_exp, today_shard, today_research_exp);
+            let (base_energy_shard, energy_shard, research_exp, today_shard, today_research_exp);
             if let Some(day) = ts.day {
                 let shard_energy = energy * (7.0 - day);
-                energy_shard = shard_energy / se.shard_energy_rate;
-                research_exp = if rrm { shard_energy / se.shard_energy_rate * 0.5 } else { 0.0 };
+                base_energy_shard = shard_energy * research_shard_per_energy;
+                energy_shard = base_energy_shard * research_shard_rate;
+                research_exp = if rrm { base_energy_shard * 0.5 } else { 0.0 };
                 let before = ts.before_energy.unwrap_or(0.0);
-                today_shard = (before + energy) / se.shard_energy_rate;
-                today_research_exp = if rrm { (before + energy) / se.shard_energy_rate * 0.5 } else { 0.0 };
+                let base_today_shard = (before + energy) * research_shard_per_energy;
+                today_shard = base_today_shard * research_shard_rate;
+                today_research_exp = if rrm { base_today_shard * 0.5 } else { 0.0 };
             } else {
-                energy_shard = energy * 4.0 / se.shard_energy_rate;
+                base_energy_shard = energy * 4.0 * research_shard_per_energy;
+                energy_shard = base_energy_shard * research_shard_rate;
                 today_shard = energy_shard;
-                research_exp = if rrm { energy * 4.0 / se.shard_energy_rate * 0.5 } else { 0.0 };
+                research_exp = if rrm { base_energy_shard * 0.5 } else { 0.0 };
                 today_research_exp = research_exp;
             }
-            let bonus_shard = today_shard * shard_bonus_count * 0.06 + today_research_exp * research_count * 0.09 * 0.5;
-            let shard_rate = (bonus_shard + skill_shard) / (energy_shard + research_exp);
+            let bonus_shard = today_shard * shard_bonus_count * 0.06 + today_research_exp * research_count * 0.09;
+            let event_shard = energy_shard - base_energy_shard;
+            let shard_rate = if base_energy_shard + research_exp > 0.0 {
+                (event_shard + bonus_shard + skill_shard) / (base_energy_shard + research_exp)
+            } else {
+                0.0
+            };
             let score = energy * (shard_rate * sim.shard_weight / 100.0 + 1.0);
 
             if border_score < score {
@@ -608,6 +618,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     energy,
                     raw_energy,
                     energy_shard,
+                    research_exp,
                     bonus_shard,
                     skill_shard,
                     today_shard,
@@ -742,7 +753,7 @@ pub fn run_team_simulation(
         config.simulation.shard_weight = 0.0;
     }
     if let Some(day) = request.target_day {
-        config.simulation.shard_to_energy = Some(config.select_evaluate.shard_energy_rate / (7.0 - day));
+        config.simulation.shard_to_energy = Some(config.research_shard_to_energy(7.0 - day));
         config.team_simulation.day = Some(day);
         config.team_simulation.time_length = if request.target_hour != 24.0 { Some(request.target_hour / 24.0) } else { None };
     }

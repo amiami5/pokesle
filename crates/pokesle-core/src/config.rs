@@ -233,6 +233,40 @@ impl Default for EventBonus {
 pub struct SkillEventBonus {
     pub berry_burst: f64,
     pub food_get: f64,
+    #[serde(default = "default_one")]
+    pub shard: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchEventBonus {
+    #[serde(default = "default_one")]
+    pub shard: f64,
+}
+
+impl Default for ResearchEventBonus {
+    fn default() -> Self {
+        Self { shard: 1.0 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSetting {
+    #[serde(default)]
+    pub bonus: f64,
+    #[serde(default = "default_shard_efficiency")]
+    pub shard_efficiency: f64,
+}
+
+fn default_shard_efficiency() -> f64 {
+    12000.0
+}
+
+impl Default for FieldSetting {
+    fn default() -> Self {
+        Self { bonus: 0.0, shard_efficiency: 12000.0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +294,8 @@ impl PotEventBonus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventBonusGlobal {
     pub skill: SkillEventBonus,
+    #[serde(default)]
+    pub research: ResearchEventBonus,
     #[serde(default)]
     pub food: Option<String>,
     #[serde(default)]
@@ -303,9 +339,8 @@ pub struct SimulationConfig {
     pub select_border: f64,
     pub field: String,
     pub field_ex: f64,
-    pub field_bonus: f64,
     #[serde(default)]
-    pub field_bonus_map: HashMap<String, f64>,
+    pub field_settings: HashMap<String, FieldSetting>,
     pub berry_list: Vec<String>,
     pub berry_energy_rate: HashMap<String, f64>,
     /// 空文字は「全カテゴリ」
@@ -766,6 +801,38 @@ impl ChecklistConfig {
     }
 }
 
+impl SimulationConfig {
+    /// 選択中フィールドの設定を返す（本家 `getFieldSetting`）
+    pub fn field_setting(&self) -> FieldSetting {
+        self.field_settings.get(&self.field).cloned().unwrap_or_else(|| FieldSetting {
+            bonus: 0.0,
+            shard_efficiency: if crate::data::master().field(&self.field).is_some_and(|f| f.ex) {
+                10000.0
+            } else {
+                12000.0
+            },
+        })
+    }
+
+    /// 選択中フィールドの設定への可変参照を返す
+    pub fn field_setting_mut(&mut self) -> &mut FieldSetting {
+        let field = self.field.clone();
+        self.field_settings.entry(field.clone()).or_insert_with(|| FieldSetting {
+            bonus: 0.0,
+            shard_efficiency: if crate::data::master().field(&field).is_some_and(|f| f.ex) {
+                10000.0
+            } else {
+                12000.0
+            },
+        })
+    }
+
+    /// 選択中フィールドのフィールドボーナス(%)を返す
+    pub fn field_bonus(&self) -> f64 {
+        self.field_setting().bonus
+    }
+}
+
 /// スレッド数の上限(画面の入力欄の最大値に合わせる)
 const MAX_THREAD_NUM: f64 = 100.0;
 
@@ -782,12 +849,19 @@ impl Config {
         crate::config_migrate::migrate_saved(&mut saved);
         let mut base = default_config_value();
         merge_object(&mut base, &saved);
-        if let Some(saved_map) = saved.get("simulation").and_then(|s| s.get("fieldBonusMap")).and_then(|v| v.as_object())
-            && let Some(sim) = base.get_mut("simulation").and_then(|s| s.as_object_mut())
-        {
-            sim.insert("fieldBonusMap".into(), Value::Object(saved_map.clone()));
-        }
         Self::from_value(&base)
+    }
+
+    /// 1エナジーあたりのリサーチゆめのかけら獲得量（本家 `getResearchShardRate`）
+    pub fn research_shard_rate(&self) -> f64 {
+        let sleep_score = (self.sleep_time / 8.5).clamp(0.0, 1.0) * 100.0;
+        sleep_score / self.simulation.field_setting().shard_efficiency
+    }
+
+    /// 1ゆめのかけらあたりのエナジー換算値（本家 `getResearchShardToEnergy`）
+    pub fn research_shard_to_energy(&self, day_rate: f64) -> f64 {
+        let rate = self.research_shard_rate();
+        if rate > 0.0 { 1.0 / rate / day_rate } else { 0.0 }
     }
 
     pub fn from_value(value: &Value) -> Result<Config, String> {
@@ -854,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn field_bonus_map_persists_across_from_saved() {
+    fn field_settings_migrate_from_legacy_field_bonus() {
         let saved = serde_json::json!({
             "simulation": {
                 "field": "シアンの砂浜",
@@ -867,8 +941,10 @@ mod tests {
         });
         let cfg = Config::from_saved(&saved).unwrap();
         assert_eq!(cfg.simulation.field, "シアンの砂浜");
-        assert_eq!(cfg.simulation.field_bonus, 75.0);
-        assert_eq!(cfg.simulation.field_bonus_map.get("ワカクサ本島").copied(), Some(85.0));
-        assert_eq!(cfg.simulation.field_bonus_map.get("シアンの砂浜").copied(), Some(75.0));
+        assert_eq!(cfg.simulation.field_bonus(), 75.0);
+        assert_eq!(cfg.simulation.field_settings.get("ワカクサ本島").map(|s| s.bonus), Some(85.0));
+        assert_eq!(cfg.simulation.field_settings.get("ワカクサ本島").map(|s| s.shard_efficiency), Some(12000.0));
+        assert_eq!(cfg.simulation.field_settings.get("ワカクサ本島EX").map(|s| s.shard_efficiency), Some(10000.0));
+        assert_eq!(cfg.simulation.field_settings.get("シアンの砂浜").map(|s| s.bonus), Some(75.0));
     }
 }

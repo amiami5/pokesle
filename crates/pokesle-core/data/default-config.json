@@ -1,5 +1,5 @@
 {
- "v": 20260928,
+ "v": 20261123,
  "sleepTime": 8.5,
  "checkFreq": 10,
  "initSetting": false,
@@ -96,8 +96,44 @@
   "field": "ワカクサ本島",
   "fieldEx": 1,
   "fieldExMainBerry": "",
-  "fieldBonus": 0,
-  "fieldBonusMap": {},
+  "fieldSettings": {
+   "ワカクサ本島": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "シアンの砂浜": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "トープ洞窟": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "ウノハナ雪原": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "ラピスラズリ湖畔": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "ゴールド旧発電所": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "アンバー渓谷": {
+    "bonus": 0,
+    "shardEfficiency": 12000
+   },
+   "ワカクサ本島EX": {
+    "bonus": 0,
+    "shardEfficiency": 10000
+   },
+   "シアンの砂浜EX": {
+    "bonus": 0,
+    "shardEfficiency": 10000
+   }
+  },
   "berryList": [
    "",
    "",
@@ -134,13 +170,13 @@
   "eventBonus": {
    "skill": {
     "berryBurst": 1,
-    "foodGet": 1
+    "foodGet": 1,
+    "shard": 1
    },
-   "food": null,
-   "pot": {
-    "add": 0,
-    "rate": 1
-   }
+   "research": {
+    "shard": 1
+   },
+   "food": null
   },
   "potSize": 87,
   "bagOverOperation": true,

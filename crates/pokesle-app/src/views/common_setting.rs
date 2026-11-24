@@ -62,7 +62,7 @@ fn field_label(c: &Config) -> Label {
         let b: Vec<String> = (0..3).map(|i| s.berry_list.get(i).filter(|x| !x.is_empty()).cloned().unwrap_or_else(|| "?".into())).collect();
         l.push((format!(" ({})", b.join(" ")), false));
     }
-    l.push((format!(" FB:{}", js_num(s.field_bonus)), false));
+    l.push((format!(" FB:{}", js_num(s.field_bonus())), false));
     if m.field(&s.field).is_some_and(|f| f.ex) {
         match s.field_ex as i32 {
             1 => l.push((" EXきのみ".into(), true)),
@@ -97,9 +97,7 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                     egui::Grid::new(("field_list", ex)).num_columns(3).spacing([16.0, 5.0]).show(ui, |ui| {
                         for (i, f) in m.fields.iter().filter(|f| f.ex == ex).enumerate() {
                             if ui.radio(s.field == f.name, &f.name).clicked() && s.field != f.name {
-                                s.field_bonus_map.insert(s.field.clone(), s.field_bonus);
                                 s.field = f.name.clone();
-                                s.field_bonus = s.field_bonus_map.get(&s.field).copied().unwrap_or(0.0);
                                 changed = true;
                             }
                             if i % 3 == 2 {
@@ -172,20 +170,32 @@ fn field_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
 
             th(ui, "フィールドボーナス");
             ui.horizontal(|ui| {
-                let mut fb_changed = number(ui, &mut s.field_bonus, 1.0, 40.0);
+                let bonus = &mut s.field_setting_mut().bonus;
+                let mut fb_changed = number(ui, bonus, 1.0, 40.0);
                 ui.label("%");
                 if ui.button("-5").clicked() {
-                    s.field_bonus = (s.field_bonus - 5.0).max(0.0);
+                    *bonus = (*bonus - 5.0).max(0.0);
                     fb_changed = true;
                 }
                 if ui.button("+5").clicked() {
-                    s.field_bonus += 5.0;
+                    *bonus += 5.0;
                     fb_changed = true;
                 }
                 if fb_changed {
-                    s.field_bonus_map.insert(s.field.clone(), s.field_bonus);
                     changed = true;
                 }
+            });
+            ui.end_row();
+
+            th(ui, "ゆめのかけら効率");
+            ui.horizontal(|ui| {
+                ui.label("1ゆめのかけら/");
+                let eff = &mut s.field_setting_mut().shard_efficiency;
+                if number(ui, eff, 100.0, 80.0) {
+                    *eff = eff.max(1.0);
+                    changed = true;
+                }
+                ui.label("ねむけパワー");
             });
             ui.end_row();
 
@@ -275,6 +285,12 @@ fn event_bonus_label(c: &Config) -> Label {
     }
     if s.event_bonus.skill.food_get != 1.0 {
         parts.push(format!("食材系スキルx{}", js_num(s.event_bonus.skill.food_get)));
+    }
+    if s.event_bonus.skill.shard != 1.0 {
+        parts.push(format!("スキルゆめかけx{}", js_num(s.event_bonus.skill.shard)));
+    }
+    if s.event_bonus.research.shard != 1.0 {
+        parts.push(format!("リサーチゆめかけx{}", js_num(s.event_bonus.research.shard)));
     }
     if let Some(food) = s.event_bonus.food.as_deref().filter(|f| !f.is_empty()) {
         parts.push(format!("{food}ボーナス"));
@@ -388,7 +404,30 @@ fn event_bonus_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
                         ui.label("倍");
                     });
                     ui.end_row();
+                    ui.label("ゆめのかけら獲得量");
+                    ui.horizontal(|ui| {
+                        if number(ui, &mut s.event_bonus.skill.shard, 0.1, 60.0) {
+                            s.event_bonus.skill.shard = s.event_bonus.skill.shard.max(0.0);
+                            changed = true;
+                        }
+                        ui.label("倍");
+                    });
+                    ui.end_row();
                 });
+            });
+            ui.end_row();
+
+            th(ui, "リサーチ");
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("ゆめのかけら獲得量");
+                    if number(ui, &mut s.event_bonus.research.shard, 0.1, 60.0) {
+                        s.event_bonus.research.shard = s.event_bonus.research.shard.max(0.0);
+                        changed = true;
+                    }
+                    ui.label("倍");
+                });
+                small(ui, "スキル獲得分・リサーチEXPからの変換分には適用しません。", 500.0);
             });
             ui.end_row();
 
@@ -432,6 +471,8 @@ fn event_bonus_setting(ui: &mut egui::Ui, c: &mut Config) -> bool {
             s.event_bonus_list.clear();
             s.event_bonus.skill.berry_burst = 1.0;
             s.event_bonus.skill.food_get = 1.0;
+            s.event_bonus.skill.shard = 1.0;
+            s.event_bonus.research.shard = 1.0;
             s.event_bonus.food = None;
             s.event_bonus.pot = Default::default();
             changed = true;
