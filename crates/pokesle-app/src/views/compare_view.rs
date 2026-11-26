@@ -6,16 +6,56 @@ use pokesle_core::data::master;
 use pokesle_core::sim_pokemon::BoxPokemon;
 use pokesle_core::team_sim::{simulate_tmp_compare, simulate_tmp_evaluate};
 
+use super::box_view::{keyword_match, sub_skill_chip};
 use super::pokemon_edit::{EditResult, PokemonEdit};
 use super::tmp_evaluate_view::{
     Evaluated, Evolution, LV_LIST, MintChartDisplay, SERIES, box_result_to_evaluated, chart, diagnostic_table, diff_info, food_options, food_requirement_rate, rate_table, reset_foods, tmp_setting_tab,
 };
-use super::{combo, fmt_fixed, food_icon, style};
+use super::{combo, fmt_fixed, food_icon, nature_label, style};
 use crate::app::Shared;
 use crate::job::Job;
 
 const COMPARE_COL_W: [f32; 7] = [150.0, 56.0, 68.0, 68.0, 68.0, 68.0, 68.0];
 const COMPARE_TABLE_W: f32 = 546.0;
+const BOX_PICKER_POPUP_ID: &str = "compare_box_picker";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PickerTarget {
+    A,
+    B,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PickerSort {
+    IndexAsc,
+    IndexDesc,
+    LvDesc,
+    LvAsc,
+    NameAsc,
+}
+
+impl PickerSort {
+    const ALL: [Self; 5] = [Self::IndexAsc, Self::IndexDesc, Self::LvDesc, Self::LvAsc, Self::NameAsc];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::IndexAsc => "No順 (昇順)",
+            Self::IndexDesc => "No順 (降順)",
+            Self::LvDesc => "Lv高い順",
+            Self::LvAsc => "Lv低い順",
+            Self::NameAsc => "名前順",
+        }
+    }
+}
+
+struct BoxPicker {
+    target: PickerTarget,
+    query: String,
+    only_favorite: bool,
+    same_tree_only: bool,
+    sort: PickerSort,
+    focus_search: bool,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -81,6 +121,16 @@ impl SideForm {
     fn clear(&mut self) {
         *self = Self::empty();
     }
+
+    fn load_box_pokemon(&mut self, idx: usize, bp: &BoxPokemon) {
+        self.pokemon = bp.clone();
+        self.search = bp.name.clone();
+        self.assist_text = assist::to_text(&self.pokemon);
+        self.selected_box_idx = Some(idx);
+        if !master().nature(&self.pokemon.nature).is_some_and(|n| n.good.is_some()) {
+            self.use_mint = false;
+        }
+    }
 }
 
 enum ViewResult {
@@ -105,6 +155,7 @@ pub struct CompareView {
     chart_series: usize,
     error: String,
     edit: Option<PokemonEdit>,
+    box_picker: Option<BoxPicker>,
 }
 
 impl Default for CompareView {
@@ -118,6 +169,7 @@ impl Default for CompareView {
             chart_series: 0,
             error: String::new(),
             edit: None,
+            box_picker: None,
         }
     }
 }
@@ -162,6 +214,226 @@ impl CompareView {
                     self.edit = None;
                 }
             }
+        }
+
+        self.box_picker_window(ui.ctx(), shared);
+    }
+
+    fn open_box_picker(&mut self, ctx: &egui::Context, target: PickerTarget) {
+        self.box_picker = Some(BoxPicker {
+            target,
+            query: String::new(),
+            only_favorite: false,
+            same_tree_only: false,
+            sort: PickerSort::IndexAsc,
+            focus_search: true,
+        });
+        style::open_popup(ctx, BOX_PICKER_POPUP_ID);
+    }
+
+    fn box_picker_window(&mut self, ctx: &egui::Context, shared: &Shared) {
+        if self.box_picker.is_none() {
+            return;
+        }
+        if !style::is_popup_open(ctx, BOX_PICKER_POPUP_ID) {
+            self.box_picker = None;
+            return;
+        }
+        let target = self.box_picker.as_ref().expect("checked").target;
+        let title = match target {
+            PickerTarget::A => "個体Aをボックスから選択",
+            PickerTarget::B => "個体Bをボックスから選択",
+        };
+        let ref_form = match target {
+            PickerTarget::A => if self.form_b.is_configured() { &self.form_b } else { &self.form_a },
+            PickerTarget::B => if self.form_a.is_configured() { &self.form_a } else { &self.form_b },
+        };
+        let ref_name = ref_form.is_configured().then_some(ref_form.pokemon.name.as_str());
+        let ref_seed = ref_name.and_then(seed_key);
+        let selected_idx = match target {
+            PickerTarget::A => self.form_a.selected_box_idx,
+            PickerTarget::B => self.form_b.selected_box_idx,
+        };
+
+        let mut chosen: Option<usize> = None;
+        let mut close = false;
+        let box_list = &shared.box_file.list;
+
+        style::popup_sized(ctx, BOX_PICKER_POPUP_ID, title, egui::vec2(920.0, 580.0), |ui| {
+            let Some(picker) = &mut self.box_picker else { return };
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                close = true;
+                return;
+            }
+
+            let mut enter_pressed = false;
+            ui.horizontal_wrapped(|ui| {
+                let search_resp = ui.add(
+                    egui::TextEdit::singleline(&mut picker.query)
+                        .hint_text("検索 (名前・メモ・食材(AAA等)・サブスキル・せいかく / 空白:AND, |:OR)")
+                        .desired_width(360.0),
+                );
+                if picker.focus_search {
+                    search_resp.request_focus();
+                    picker.focus_search = false;
+                }
+                if search_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    enter_pressed = true;
+                }
+                if !picker.query.is_empty() && ui.small_button("×").on_hover_text("検索をクリア").clicked() {
+                    picker.query.clear();
+                }
+                ui.checkbox(&mut picker.only_favorite, "★のみ");
+                if let (Some(name), Some(_)) = (ref_name, ref_seed) {
+                    ui.checkbox(&mut picker.same_tree_only, format!("同系統のみ ({name})"));
+                }
+                egui::ComboBox::from_id_salt("compare_box_picker_sort").selected_text(picker.sort.label()).width(120.0).show_ui(ui, |ui| {
+                    for s in PickerSort::ALL {
+                        ui.selectable_value(&mut picker.sort, s, s.label());
+                    }
+                });
+            });
+            ui.add_space(4.0);
+
+            let query = picker.query.trim();
+            let mut filtered: Vec<usize> = box_list
+                .iter()
+                .enumerate()
+                .filter(|(_, bp)| {
+                    if picker.only_favorite && !bp.favorite {
+                        return false;
+                    }
+                    if picker.same_tree_only
+                        && let Some(seed) = ref_seed
+                        && seed_key(&bp.name) != Some(seed)
+                    {
+                        return false;
+                    }
+                    query.is_empty() || keyword_match(bp, query)
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            filtered.sort_by(|&a, &b| {
+                let pa = &box_list[a];
+                let pb = &box_list[b];
+                match picker.sort {
+                    PickerSort::IndexAsc => pa.index.cmp(&pb.index),
+                    PickerSort::IndexDesc => pb.index.cmp(&pa.index),
+                    PickerSort::LvDesc => pb.lv.total_cmp(&pa.lv).then_with(|| pa.index.cmp(&pb.index)),
+                    PickerSort::LvAsc => pa.lv.total_cmp(&pb.lv).then_with(|| pa.index.cmp(&pb.index)),
+                    PickerSort::NameAsc => pa.name.cmp(&pb.name).then_with(|| pb.lv.total_cmp(&pa.lv)).then_with(|| pa.index.cmp(&pb.index)),
+                }
+            });
+
+            if enter_pressed && filtered.len() == 1 {
+                chosen = Some(filtered[0]);
+            }
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("{} / {} 匹表示（行をクリックして読込）", filtered.len(), box_list.len())).color(style::muted()));
+            });
+            ui.add_space(4.0);
+
+            if filtered.is_empty() {
+                ui.label("条件に一致するポケモンがボックスにいません。");
+                return;
+            }
+
+            // ヘッダ
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                ui.add_sized([46.0, 18.0], egui::Label::new(egui::RichText::new("No.").strong()));
+                ui.add_sized([124.0, 18.0], egui::Label::new(egui::RichText::new("ポケモン").strong()));
+                ui.add_sized([40.0, 18.0], egui::Label::new(egui::RichText::new("Lv").strong()));
+                ui.add_sized([74.0, 18.0], egui::Label::new(egui::RichText::new("食材").strong()));
+                ui.add_sized([300.0, 18.0], egui::Label::new(egui::RichText::new("サブスキル").strong()));
+                ui.add_sized([108.0, 18.0], egui::Label::new(egui::RichText::new("せいかく").strong()));
+                ui.label(egui::RichText::new("メモ").strong());
+            });
+            ui.separator();
+
+            let row_h = 28.0;
+            let list_h = (ui.available_height() - 8.0).max(240.0);
+            let hover_bg = style::pick(0xeaf2ff, 0x2b3648);
+            let selected_bg = style::pick(0xdce9ff, 0x324563);
+
+            egui::ScrollArea::vertical().id_salt("compare_box_picker_rows").max_height(list_h).auto_shrink([false, false]).show_rows(
+                ui,
+                row_h,
+                filtered.len(),
+                |ui, range| {
+                    for pos in range {
+                        let idx = filtered[pos];
+                        let bp = &box_list[idx];
+                        let is_selected = selected_idx == Some(idx);
+                        let row_id = ui.make_persistent_id(("cmp_picker_row", idx));
+                        let was_hovered = ui.ctx().data(|d| d.get_temp::<bool>(row_id)).unwrap_or(false);
+
+                        let frame_fill = if is_selected {
+                            selected_bg
+                        } else if was_hovered {
+                            hover_bg
+                        } else if pos % 2 == 1 {
+                            style::surface()
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+
+                        let resp = egui::Frame::new().fill(frame_fill).corner_radius(3).inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
+                            ui.set_height(row_h - 4.0);
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                let no_text = if bp.favorite { format!("{} ★", bp.index + 1) } else { format!("{}", bp.index + 1) };
+                                ui.add_sized([46.0, 22.0], egui::Label::new(no_text));
+                                let name_text = if bp.shiny { format!("{} (色)", bp.name) } else { bp.name.clone() };
+                                ui.add_sized([124.0, 22.0], egui::Label::new(egui::RichText::new(name_text).strong()).truncate());
+                                ui.add_sized([40.0, 22.0], egui::Label::new(format!("Lv{}", bp.lv as u32)));
+                                ui.allocate_ui_with_layout(egui::vec2(74.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    food_icon::food_list(ui, bp);
+                                });
+                                ui.allocate_ui_with_layout(egui::vec2(300.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.spacing_mut().item_spacing.x = 3.0;
+                                    for slot in 0..5 {
+                                        let s = bp.sub_skill_list.get(slot).map(|x| x.as_str()).unwrap_or("");
+                                        sub_skill_chip(ui, s, slot, bp);
+                                    }
+                                });
+                                ui.allocate_ui_with_layout(egui::vec2(108.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    nature_label(ui, &bp.nature);
+                                });
+                                let memo = bp.memo.as_deref().unwrap_or("");
+                                if !memo.is_empty() {
+                                    ui.add(egui::Label::new(memo).truncate()).on_hover_text(memo);
+                                }
+                            });
+                        });
+
+                        let click = ui.interact(resp.response.rect, row_id, egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let hovered = click.hovered();
+                        ui.ctx().data_mut(|d| d.insert_temp(row_id, hovered));
+                        if click.clicked() {
+                            chosen = Some(idx);
+                        }
+                    }
+                },
+            );
+        });
+
+        if let Some(idx) = chosen
+            && let Some(bp) = shared.box_file.list.get(idx)
+        {
+            match target {
+                PickerTarget::A => self.form_a.load_box_pokemon(idx, bp),
+                PickerTarget::B => self.form_b.load_box_pokemon(idx, bp),
+            }
+            close = true;
+        }
+        if close {
+            style::close_popup(ctx, BOX_PICKER_POPUP_ID);
+            self.box_picker = None;
         }
     }
 
@@ -208,6 +480,7 @@ impl CompareView {
         let color_a = style::pick(0x3d73c9, 0x6ea0f0);
         let color_b = style::pick(0xbf6575, 0xe87c8f);
 
+        let mut open_picker: Option<PickerTarget> = None;
         let avail = ui.available_width();
         if avail >= 920.0 {
             let card_w = (avail - 12.0) / 2.0;
@@ -215,17 +488,28 @@ impl CompareView {
                 ui.spacing_mut().item_spacing.x = 12.0;
                 ui.vertical(|ui| {
                     ui.set_width(card_w);
-                    side_form_ui(ui, "cmp_a", "個体A", color_a, &mut self.form_a, &shared.box_file.list);
+                    if side_form_ui(ui, "cmp_a", "個体A", color_a, &mut self.form_a, &shared.box_file.list) {
+                        open_picker = Some(PickerTarget::A);
+                    }
                 });
                 ui.vertical(|ui| {
                     ui.set_width(card_w);
-                    side_form_ui(ui, "cmp_b", "個体B", color_b, &mut self.form_b, &shared.box_file.list);
+                    if side_form_ui(ui, "cmp_b", "個体B", color_b, &mut self.form_b, &shared.box_file.list) {
+                        open_picker = Some(PickerTarget::B);
+                    }
                 });
             });
         } else {
-            side_form_ui(ui, "cmp_a", "個体A", color_a, &mut self.form_a, &shared.box_file.list);
+            if side_form_ui(ui, "cmp_a", "個体A", color_a, &mut self.form_a, &shared.box_file.list) {
+                open_picker = Some(PickerTarget::A);
+            }
             ui.add_space(8.0);
-            side_form_ui(ui, "cmp_b", "個体B", color_b, &mut self.form_b, &shared.box_file.list);
+            if side_form_ui(ui, "cmp_b", "個体B", color_b, &mut self.form_b, &shared.box_file.list) {
+                open_picker = Some(PickerTarget::B);
+            }
+        }
+        if let Some(target) = open_picker {
+            self.open_box_picker(ui.ctx(), target);
         }
         ui.add_space(6.0);
 
@@ -384,6 +668,10 @@ fn evo_selector(ui: &mut egui::Ui, id: &str, title: &str, color: egui::Color32, 
     });
 }
 
+fn seed_key(name: &str) -> Option<&'static str> {
+    master().pokemon(name).map(|p| p.seed.as_deref().unwrap_or(p.name.as_str()))
+}
+
 fn side_form_ui(
     ui: &mut egui::Ui,
     id_prefix: &str,
@@ -391,8 +679,9 @@ fn side_form_ui(
     accent: egui::Color32,
     form: &mut SideForm,
     box_list: &[BoxPokemon],
-) {
+) -> bool {
     let m = master();
+    let mut open_picker = false;
     egui::Frame::new()
         .fill(style::surface())
         .stroke(egui::Stroke::new(1.0, style::line_color()))
@@ -404,25 +693,14 @@ fn side_form_ui(
                 ui.label(egui::RichText::new(title).size(15.0).strong().color(accent));
                 ui.add_space(6.0);
                 if !box_list.is_empty() {
-                    let selected_text = form
+                    let btn_label = form
                         .selected_box_idx
                         .and_then(|i| box_list.get(i))
-                        .map(|p| format!("No.{} {} Lv{}", p.index + 1, p.name, p.lv as u32))
+                        .map(|p| format!("ボックス: No.{} {} Lv{}", p.index + 1, p.name, p.lv as u32))
                         .unwrap_or_else(|| "ボックスから読込…".to_string());
-                    egui::ComboBox::from_id_salt((id_prefix, "box_load")).selected_text(selected_text).width(180.0).show_ui(ui, |ui| {
-                        for (i, bp) in box_list.iter().enumerate() {
-                            let label = format!("No.{} {} Lv{} ({})", bp.index + 1, bp.name, bp.lv as u32, bp.nature);
-                            if ui.selectable_label(form.selected_box_idx == Some(i), label).clicked() {
-                                form.pokemon = bp.clone();
-                                form.search = bp.name.clone();
-                                form.assist_text = assist::to_text(&form.pokemon);
-                                form.selected_box_idx = Some(i);
-                                if !m.nature(&form.pokemon.nature).is_some_and(|n| n.good.is_some()) {
-                                    form.use_mint = false;
-                                }
-                            }
-                        }
-                    });
+                    if ui.button(btn_label).on_hover_text("ボックスから検索して読み込みます").clicked() {
+                        open_picker = true;
+                    }
                 }
                 if ui.small_button("クリア").clicked() {
                     form.clear();
@@ -528,6 +806,7 @@ fn side_form_ui(
                 ui.end_row();
             });
         });
+    open_picker
 }
 
 fn effective_rates(evo: &Evolution, has_mint: bool, series_idx: usize) -> Vec<Option<f64>> {

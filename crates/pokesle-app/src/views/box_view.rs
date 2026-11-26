@@ -167,7 +167,7 @@ fn split_keyword_groups(query: &str) -> Vec<Vec<&str>> {
 
 /// キーワード絞り込み(本家 index.vue の keyword)。
 /// `|` または ` OR ` で OR 分割し、各グループ内は空白または ` AND ` で AND 分割して評価する(AND 優先)。
-fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
+pub(crate) fn keyword_match(p: &BoxPokemon, query: &str) -> bool {
     let keyword_groups = split_keyword_groups(query);
     if keyword_groups.is_empty() {
         return true;
@@ -2222,6 +2222,11 @@ fn name_cell(ui: &mut egui::Ui, p: &BoxPokemon, result: Option<&BoxResult>, memo
         }
         None => name_line(ui),
     }
+}
+
+/// サブスキル1枠を省略名チップで表示する(他画面のボックス一覧用)
+pub(crate) fn sub_skill_chip(ui: &mut egui::Ui, name: &str, slot: usize, p: &BoxPokemon) {
+    sub_skill_label(ui, name, slot, p, None, true);
 }
 
 /// サブスキル(本家 sub-skill-label.vue): レア度で色分けし、まだ解放されていないものは薄く、
