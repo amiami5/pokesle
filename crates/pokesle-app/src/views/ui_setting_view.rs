@@ -140,6 +140,36 @@ impl UiSettingView {
 
         ui.add_space(16.0);
         ui.separator();
+        ui.add_space(6.0);
+        ui.heading("ボックス");
+        ui.add_space(4.0);
+        let mut list_setting = crate::views::box_view::ListSetting::load(shared);
+        let mut box_changed = false;
+        ui.horizontal(|ui| {
+            ui.label("1ページに表示するポケモン数:");
+            box_changed |= crate::views::style::opt_number(ui, "ui_setting_box_page_unit", &mut list_setting.page_unit, false, 60.0, "全件");
+            ui.label("匹");
+            for n in [20.0, 50.0, 100.0] {
+                if ui.button(format!("{}匹", n as usize)).clicked() {
+                    list_setting.page_unit = Some(n);
+                    box_changed = true;
+                }
+            }
+            if ui.button("すべて表示").clicked() {
+                list_setting.page_unit = None;
+                box_changed = true;
+            }
+        });
+        ui.label(
+            egui::RichText::new("空欄または 0 以下にすると、ページ分けせずすべてのポケモンを一覧に表示します。ボックス画面の「表示設定」と連動しています。")
+                .color(crate::views::style::muted()),
+        );
+        if box_changed {
+            list_setting.save(shared);
+        }
+
+        ui.add_space(16.0);
+        ui.separator();
         self.import_section(ui, shared);
         let Shared { ui_setting: setting, status, .. } = shared;
 

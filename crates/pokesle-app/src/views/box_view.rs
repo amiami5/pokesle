@@ -244,7 +244,7 @@ fn simulate_key(shared: &Shared, mode: Mode) -> u64 {
 /// ボックス一覧の表示設定(本家 `config.pokemonList`)
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-struct ListSetting {
+pub(crate) struct ListSetting {
     sub_skill_short: bool,
     memo: bool,
     /// 0: 非表示、1: 総合スコアのみ、2: 総合スコア＆とくい、3: 総合スコア＆きのみ＆食材＆スキル
@@ -256,7 +256,7 @@ struct ListSetting {
     food_info: bool,
     simulated_info: bool,
     fix_score: bool,
-    page_unit: Option<f64>,
+    pub(crate) page_unit: Option<f64>,
     cleaning: CleaningSetting,
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
@@ -300,11 +300,11 @@ impl Default for ListSetting {
 }
 
 impl ListSetting {
-    fn load(shared: &Shared) -> ListSetting {
+    pub(crate) fn load(shared: &Shared) -> ListSetting {
         shared.config.extra.get("pokemonList").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
     }
 
-    fn save(&self, shared: &mut Shared) {
+    pub(crate) fn save(&self, shared: &mut Shared) {
         shared.config.extra.insert("pokemonList".into(), serde_json::to_value(self).expect("表示設定"));
         shared.save_config();
     }
