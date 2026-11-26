@@ -683,17 +683,18 @@ impl PokemonSimulator {
             / camp)
             .floor();
         let sleep = pokemon.sleep_time.unwrap_or(f64::NAN);
-        if base.remain_evolve_lv == 1 && sleep >= 500.0 {
-            pokemon.speed *= 0.95;
-        }
-        if base.remain_evolve_lv == 1 && sleep >= 2000.0 {
-            pokemon.speed *= 0.88;
-        }
-        if base.remain_evolve_lv == 2 && sleep >= 500.0 {
-            pokemon.speed *= 0.89;
-        }
-        if base.remain_evolve_lv == 2 && sleep >= 2000.0 {
-            pokemon.speed *= 0.75;
+        if base.remain_evolve_lv == 1 {
+            if sleep >= 2000.0 {
+                pokemon.speed *= 0.88;
+            } else if sleep >= 500.0 {
+                pokemon.speed *= 0.95;
+            }
+        } else if base.remain_evolve_lv == 2 {
+            if sleep >= 2000.0 {
+                pokemon.speed *= 0.75;
+            } else if sleep >= 500.0 {
+                pokemon.speed *= 0.89;
+            }
         }
 
         // EXモードによるおてつだいスピードのバフ・デバフ
@@ -1562,4 +1563,43 @@ pub fn calc_food_prob_list(food_list: &[SimFood]) -> Vec<FoodProb> {
         list.push(FoodProb { food: f.food, num, energy: f.energy, weight: 1.0 / len });
     }
     list
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ribbon_2000h_does_not_stack_with_500h() {
+        let m = master();
+        let config = Config::default_config();
+        let mut sim = PokemonSimulator::new(config, Mode::About);
+        let pikachu = m.pokemon("ピカチュウ").unwrap(); // remain_evolve_lv == 1
+        let mut base_p = |sleep: f64| {
+            let mut p = sim
+                .from_box(
+                    &BoxPokemon {
+                        name: "ピカチュウ".into(),
+                        lv: 10.0,
+                        sleep_time: Some(sleep),
+                        food_list: vec!["とくせんリンゴ".into(); 3],
+                        sub_skill_list: vec![String::new(); 5],
+                        nature: "まじめ".into(),
+                        ..Default::default()
+                    },
+                    false,
+                    0.0,
+                    0.0,
+                )
+                .unwrap();
+            sim.calc_status(&mut p, 0.0, 0.0, None);
+            p.speed
+        };
+        let s0 = base_p(0.0);
+        let s500 = base_p(500.0);
+        let s2000 = base_p(2000.0);
+        assert!((s500 - s0 * 0.95).abs() < 1e-6);
+        assert!((s2000 - s0 * 0.88).abs() < 1e-6, "remain_evolve_lv=1 at 2000h should be 0.88x, got {s2000} vs {}", s0 * 0.88);
+        assert_eq!(pikachu.remain_evolve_lv, 1);
+    }
 }

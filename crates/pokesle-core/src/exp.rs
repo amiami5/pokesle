@@ -86,7 +86,7 @@ pub fn calc_require_info(pokemon: &BoxPokemon, nature: Option<&Nature>, candy: &
             }
             if tmp_lv < training {
                 let target_lv = js::min(training, border);
-                let target_total = total(target_lv as usize - 1);
+                let target_total = js::round(total(target_lv as usize - 1) * info.exp);
                 if let Some(tmp_min) = tmp_min_boost_candy_num
                     && use_boost < tmp_min
                 {
@@ -183,4 +183,31 @@ pub fn calc_require_info(pokemon: &BoxPokemon, nature: Option<&Nature>, candy: &
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn best_boost_applies_species_exp_multiplier() {
+        let mut candy = crate::config::Config::default_config().candy;
+        candy.boost_multiply = 2.0;
+        candy.boost_shard = 5.0;
+        candy.bag.insert("ミニリュウ".into(), 900.0);
+        let p = BoxPokemon {
+            name: "カイリュー".into(),
+            lv: 30.0,
+            training: Some(50.0),
+            nature: "まじめ".into(),
+            ..Default::default()
+        };
+        let r = calc_require_info(&p, None, &candy);
+        // 倍率1.5(カイリュー)で Lv30->50 は通常1081個程度必要。900個しかないのでブースト併用になる
+        let boost = r.best_boost_candy_num.expect("ブースト併用が必要になるはず");
+        let normal = r.best_normal_candy_num.expect("通常アメも使うはず");
+        assert!(boost > 0.0 && normal > 0.0);
+        assert!(boost + normal <= 900.0);
+        assert!(boost * 2.0 + normal >= 1080.0);
+    }
 }

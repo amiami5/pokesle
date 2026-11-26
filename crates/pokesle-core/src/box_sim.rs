@@ -266,7 +266,7 @@ impl BoxSimulator {
                             }
                         }
 
-                        // チェックリスト(本家は同じ項目でも別オブジェクトのため重複して積まれる)
+                        // チェックリスト(同じ項目の重複を除外する)
                         let this_check_hit = match &check_list {
                             Some(cl) => {
                                 let food_combination: String = food_index_list
@@ -275,9 +275,14 @@ impl BoxSimulator {
                                     .collect();
                                 let only = er.only(after, &lv_list);
                                 let hit = cl.get_checked(&CheckTarget { base_name: after, food_combination: &food_combination, evaluate_result: &only });
-                                let n = hit.len();
-                                check_list_hit.extend(hit);
-                                n
+                                let mut added = 0;
+                                for item in hit {
+                                    if !check_list_hit.contains(&item) {
+                                        check_list_hit.push(item);
+                                        added += 1;
+                                    }
+                                }
+                                added
                             }
                             None => 0,
                         };

@@ -698,10 +698,14 @@ impl crate::evaluate_table::Progress for ScaledProgress<'_> {
     }
 }
 
-fn tmp_evaluate_base_config(config: &Config, with_mint: bool) -> Config {
+fn tmp_evaluate_table_config(config: &Config) -> Config {
     let mut c = config.clone();
     // 簡易診断は設定画面の選択状態にかかわらず、常にグラフの5レベルを計算する
     c.tmp_evaluate.level_list = [(10, false), (25, false), (30, true), (50, true), (60, true), (70, true), (80, true)].into_iter().collect();
+    c
+}
+
+fn tmp_evaluate_box_config(mut c: Config, with_mint: bool) -> Config {
     c.select_evaluate = c.tmp_evaluate.clone();
     c.sleep_time = c.tmp_evaluate.sleep_time.unwrap_or(c.sleep_time);
     c.check_freq = c.tmp_evaluate.check_freq.unwrap_or(c.check_freq);
@@ -713,8 +717,9 @@ fn tmp_evaluate_base_config(config: &Config, with_mint: bool) -> Config {
 
 /// 簡易診断(本家 `pages/tmp-evaluate.vue` の `evaluate()`)。簡易診断表を作り、入力した個体だけを概算する
 pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, with_mint: bool, progress: &dyn crate::evaluate_table::Progress) -> Result<BoxResult, String> {
-    let c = tmp_evaluate_base_config(config, with_mint);
-    let table = crate::evaluate_table::simulate_temporary(&c, &pokemon.name, progress)?;
+    let tc = tmp_evaluate_table_config(config);
+    let table = crate::evaluate_table::simulate_temporary(&tc, &pokemon.name, progress)?;
+    let c = tmp_evaluate_box_config(tc, with_mint);
     progress.set(0.9, "選択したポケモンを評価しています…");
     let result = simulate_box(&c, std::slice::from_ref(pokemon), Some(&table), false)?;
     result.into_iter().next().ok_or_else(|| "評価できませんでした".to_string())
@@ -730,14 +735,15 @@ pub fn simulate_tmp_compare(
     progress: &dyn crate::evaluate_table::Progress,
 ) -> Result<(BoxResult, BoxResult), String> {
     if pokemon_a.name == pokemon_b.name {
-        let ca = tmp_evaluate_base_config(config, mint_a);
-        let table = crate::evaluate_table::simulate_temporary(&ca, &pokemon_a.name, &ScaledProgress { inner: progress, start: 0.0, span: 0.85 })?;
+        let tc = tmp_evaluate_table_config(config);
+        let table = crate::evaluate_table::simulate_temporary(&tc, &pokemon_a.name, &ScaledProgress { inner: progress, start: 0.0, span: 0.85 })?;
         progress.set(0.9, "個体A・個体Bを評価しています…");
+        let ca = tmp_evaluate_box_config(tc.clone(), mint_a);
         let a = simulate_box(&ca, std::slice::from_ref(pokemon_a), Some(&table), false)?
             .into_iter()
             .next()
             .ok_or_else(|| "個体Aを評価できませんでした".to_string())?;
-        let cb = tmp_evaluate_base_config(config, mint_b);
+        let cb = tmp_evaluate_box_config(tc, mint_b);
         let b = simulate_box(&cb, std::slice::from_ref(pokemon_b), Some(&table), false)?
             .into_iter()
             .next()
