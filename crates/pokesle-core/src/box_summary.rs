@@ -10,9 +10,9 @@ use crate::evaluate_table::{EvalLv, EvaluateTable};
 use crate::sim_pokemon::{BoxPokemon, SimPokemon};
 use crate::team_sim::simulate_box;
 
-/// 列ごとの育成仮定(固定Lvなし, Lv30, Lv50, Lv60, Lv70)。表の見出しは本家どおり 30/50/60/75
+/// 列ごとの育成仮定(固定Lvなし, Lv30, Lv50, Lv60, Lv70)
 pub const SETTINGS: [(bool, Option<f64>); 5] = [(false, None), (true, Some(30.0)), (true, Some(50.0)), (true, Some(60.0)), (true, Some(70.0))];
-pub const COLUMN_NAMES: [&str; 5] = ["", "Lv30仮定", "Lv50仮定", "Lv60仮定", "Lv75仮定"];
+pub const COLUMN_NAMES: [&str; 5] = ["", "Lv30仮定", "Lv50仮定", "Lv60仮定", "Lv70仮定"];
 
 /// 集計の1セル
 #[derive(Debug, Clone, Default)]
