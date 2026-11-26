@@ -1433,31 +1433,25 @@ impl PokemonSimulator {
         Ok(())
     }
 
-    /// 本家 `selectEvaluateToScore`
-    /// `apply_experience_bonus` が true のときは、睡眠EXPボーナス・性格(EXP獲得量)の補正も掛ける
-    pub fn select_evaluate_to_score(&self, pokemon: &SimPokemon, yumebo: bool, risabo: bool, apply_experience_bonus: bool) -> f64 {
+    /// 本家 `selectEvaluateToScore` の `(apply_experience_bonus=false, true)` を同時に計算する
+    #[inline]
+    pub fn select_evaluate_scores(&self, pokemon: &SimPokemon, yumebo: bool, risabo: bool) -> (f64, f64) {
         let se = &self.config.select_evaluate;
-        let mut score = pokemon.energy_per_day;
+        let mut raw = pokemon.energy_per_day;
         if yumebo {
-            score *= 1.0 + 0.06 * se.shard_bonus / 100.0;
+            raw *= 1.0 + 0.06 * se.shard_bonus / 100.0;
         }
         if risabo {
-            score *= 1.0 + 0.09 * se.shard_bonus / 100.0 / 2.0;
+            raw *= 1.0 + 0.09 * se.shard_bonus / 100.0 / 2.0;
         }
-        score += pokemon.shard * se.shard_energy * se.shard_bonus / 100.0;
-        if !apply_experience_bonus {
-            return score;
-        }
+        raw += pokemon.shard * se.shard_energy * se.shard_bonus / 100.0;
 
-        // 経験値系の評価はエナジー計算とは別の任意補正だが、基準テーブルと実個体で同じ値を使う
-        let m = master();
-        let raw = score;
-        let has_suimin = pokemon.sub_skill_list.iter().flatten().any(|&i| m.sub_skills[i].name == "睡眠EXPボーナス");
-        if has_suimin {
+        let mut score = raw;
+        if pokemon.has_sub_skill(SubSkillKind::SleepExpBonus) {
             score += se.sub_skill.suimin_exp_bonus.add;
             score += raw * (se.sub_skill.suimin_exp_bonus.rate - 1.0);
         }
-        let nature = pokemon.nature.map(|i| &m.natures[i]);
+        let nature = pokemon.nature();
         if nature.is_some_and(|n| n.good_stat == Some(NatureStat::Exp)) {
             score += se.nature.exp_up.add;
             score += raw * (se.nature.exp_up.rate - 1.0);
@@ -1466,7 +1460,14 @@ impl PokemonSimulator {
             score += se.nature.exp_down.add;
             score += raw * (se.nature.exp_down.rate - 1.0);
         }
-        score
+        (raw, score)
+    }
+
+    /// 本家 `selectEvaluateToScore`
+    /// `apply_experience_bonus` が true のときは、睡眠EXPボーナス・性格(EXP獲得量)の補正も掛ける
+    pub fn select_evaluate_to_score(&self, pokemon: &SimPokemon, yumebo: bool, risabo: bool, apply_experience_bonus: bool) -> f64 {
+        let (raw, score) = self.select_evaluate_scores(pokemon, yumebo, risabo);
+        if apply_experience_bonus { score } else { raw }
     }
 }
 

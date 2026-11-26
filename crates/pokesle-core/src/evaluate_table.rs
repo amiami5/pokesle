@@ -249,7 +249,7 @@ struct EvalContext<'a> {
 #[derive(Default)]
 struct EvalScratch {
     energy_list: Vec<[f64; 4]>,
-    common_list: Vec<[f64; 7]>,
+    common_cols: [Vec<(f64, f64)>; 6],
 }
 
 fn evaluate_single_food(
@@ -259,11 +259,13 @@ fn evaluate_single_food(
     ctx: &EvalContext<'_>,
     simulator: &mut PokemonSimulator,
     scratch: &mut EvalScratch,
-    mut progress: impl FnMut(),
+    mut progress: impl FnMut(usize),
 ) -> Result<(EvaluateOutput, Vec<f64>, Vec<f64>), String> {
     let m = master();
     scratch.energy_list.clear();
-    scratch.common_list.clear();
+    for col in &mut scratch.common_cols {
+        col.clear();
+    }
     let mut healer_scores = Vec::new();
     let mut support_scores = Vec::new();
 
@@ -272,27 +274,44 @@ fn evaluate_single_food(
     for (slot, name) in pokemon.food_name_list.iter().take(3).enumerate() {
         head_foods[slot] = m.food_index(name);
     }
+    let mut col_nonzero = [false; 6];
+    let mut steps = 0usize;
 
     for c in ctx.combos {
         for &nature in ctx.nature_list {
             let nature_weight = if nature.is_none() { 5.0 } else { 1.0 };
             simulator.select_evaluate(&mut simulated, &c.sub_skill_list, nature, ctx.healer, ctx.support)?;
             let r = &simulated;
-            let food_n = |k: usize| head_foods[k].map(|f| r.food_count[f]).unwrap_or(0.0);
             if r.energy_per_day.is_nan() {
                 return Err(format!("計算エラーが発生しました。({})", pokemon.name));
             }
+            let inv_avg_help = 1.0 / r.average_help_rate;
             let mut common_weight = 0.0;
             for w in &c.weights {
-                let raw = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, false);
-                let score = simulator.select_evaluate_to_score(r, w.yumebo, w.risabo, true);
-                scratch.energy_list.push([score, raw / r.average_help_rate, r.pickup_energy_per_help, w.weight * nature_weight]);
-                common_weight += w.weight * nature_weight;
+                let (raw, score) = simulator.select_evaluate_scores(r, w.yumebo, w.risabo);
+                let wt = w.weight * nature_weight;
+                scratch.energy_list.push([score, raw * inv_avg_help, r.pickup_energy_per_help, wt]);
+                common_weight += wt;
             }
-            scratch.common_list.push([r.berry_num_per_day, r.food_num_per_day, r.skill_per_day, food_n(0), food_n(1), food_n(2), common_weight]);
-            progress();
+            let vals = [
+                r.berry_num_per_day,
+                r.food_num_per_day,
+                r.skill_per_day,
+                head_foods[0].map(|f| r.food_count[f]).unwrap_or(0.0),
+                head_foods[1].map(|f| r.food_count[f]).unwrap_or(0.0),
+                head_foods[2].map(|f| r.food_count[f]).unwrap_or(0.0),
+            ];
+            for idx in 0..6 {
+                let v = vals[idx];
+                if v != 0.0 {
+                    col_nonzero[idx] = true;
+                }
+                scratch.common_cols[idx].push((v, common_weight));
+            }
+            steps += 1;
         }
     }
+    progress(steps);
 
     let mut result = EvaluateOutput::default();
     scratch.energy_list.sort_by(|a, b| js::cmp_num(a[0], b[0]));
@@ -314,7 +333,6 @@ fn evaluate_single_food(
     }
 
     for index in 0..6 {
-        scratch.common_list.sort_by(|a, b| js::cmp_num(a[index], b[index]));
         let target = match index {
             0 => &mut result.percentile.berry,
             1 => &mut result.percentile.food,
@@ -323,12 +341,20 @@ fn evaluate_single_food(
             4 => &mut result.percentile.food2,
             _ => &mut result.percentile.food3,
         };
+        if !col_nonzero[index] {
+            if !scratch.common_cols[index].is_empty() {
+                target.resize(101, 0.0);
+            }
+            continue;
+        }
+        let col = &mut scratch.common_cols[index];
+        col.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
         let mut weight_sum = 0.0;
         let mut next_index = 0.0;
-        for item in &scratch.common_list {
-            let next_weight_sum = weight_sum + item[6];
+        for &(val, wt) in col.iter() {
+            let next_weight_sum = weight_sum + wt;
             while weight_sum <= next_index && next_index < next_weight_sum && target.len() <= 100 {
-                target.push(item[index]);
+                target.push(val);
                 next_index = js::round((ctx.total_weight - 1.0) * target.len() as f64 / 100.0);
             }
             weight_sum = next_weight_sum;
@@ -372,7 +398,11 @@ pub fn evaluate_pokemon(
             else {
                 continue;
             };
-            let (result, healers, supports) = evaluate_single_food(lv, pokemon, &food_name_list, &ctx, &mut simulator, &mut scratch, &mut progress)?;
+            let (result, healers, supports) = evaluate_single_food(lv, pokemon, &food_name_list, &ctx, &mut simulator, &mut scratch, |n| {
+                for _ in 0..n {
+                    progress();
+                }
+            })?;
             out.score_for_healer_evaluate_list.extend(healers);
             out.score_for_support_evaluate_list.extend(supports);
             per_food.push((food_combination_list[fi].clone(), result));
@@ -517,7 +547,7 @@ fn evaluate_parallel(
                     else {
                         continue;
                     };
-                    let (result, healers, supports) = evaluate_single_food(lv, pokemon, &food_name_list, &ctx, simulator, scratch, || progress(1))?;
+                    let (result, healers, supports) = evaluate_single_food(lv, pokemon, &food_name_list, &ctx, simulator, scratch, |n| progress(n))?;
                     out.score_for_healer_evaluate_list.extend(healers);
                     out.score_for_support_evaluate_list.extend(supports);
                     per_food.push((foods[fi].clone(), result));
@@ -559,9 +589,7 @@ pub fn simulate_evaluate_table(config: &Config, progress: &dyn Progress) -> Resu
     let done = std::sync::atomic::AtomicUsize::new(0);
     let tick = |n: usize| {
         let d = done.fetch_add(n, std::sync::atomic::Ordering::Relaxed) + n;
-        if d.is_multiple_of(2000) {
-            progress.set(d as f64 / total_steps as f64, "厳選情報を作成しています…");
-        }
+        progress.set(d as f64 / total_steps as f64, "厳選情報を作成しています…");
     };
 
     let mut table = EvaluateTable {
@@ -698,7 +726,7 @@ pub fn simulate_temporary(config: &Config, pokemon_name: &str, progress: &dyn Pr
                     support: task.support,
                     support_border,
                 };
-                let (out, ..) = evaluate_single_food(task.lv, task.pokemon, &task.food_names, &ctx, simulator, scratch, || {})?;
+                let (out, ..) = evaluate_single_food(task.lv, task.pokemon, &task.food_names, &ctx, simulator, scratch, |_| {})?;
                 let mut p = out.percentile;
                 p.food1.clear();
                 p.food2.clear();
@@ -847,7 +875,7 @@ pub fn build_kaihou_overlay(config: &Config, box_list: &[BoxPokemon], table: &Ev
             };
             let mut simulator = PokemonSimulator::new(config.clone(), Mode::Select);
             let mut scratch = EvalScratch::default();
-            let (out, ..) = evaluate_single_food(lv, pokemon, &food_names, &ctx, &mut simulator, &mut scratch, || {})?;
+            let (out, ..) = evaluate_single_food(lv, pokemon, &food_names, &ctx, &mut simulator, &mut scratch, |_| {})?;
             Ok((after, lv, food_key, key, out.percentile))
         })
         .collect::<Result<Vec<_>, String>>()?;
