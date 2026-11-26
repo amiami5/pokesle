@@ -16,12 +16,12 @@ use super::{combo, fmt_fixed, food_icon, style};
 use crate::app::Shared;
 use crate::job::Job;
 
-const LV_LIST: [u32; 5] = [30, 50, 60, 70, 80];
+pub(crate) const LV_LIST: [u32; 5] = [30, 50, 60, 70, 80];
 const COL_W: [f32; 6] = [120.0, 56.0, 56.0, 56.0, 56.0, 56.0];
 const TABLE_W: f32 = 400.0;
 
 /// グラフの系列(キー, 表示名, 色, とくい)
-const SERIES: [(&str, &str, u32, Option<&str>); 4] = [
+pub(crate) const SERIES: [(&str, &str, u32, Option<&str>); 4] = [
     ("energy", "総合厳選度", 0xbf6575, None),
     ("berry", "きのみ厳選度", 0x6cbd7f, Some("きのみ")),
     ("food", "食材厳選度", 0xdf8650, Some("食材")),
@@ -35,33 +35,33 @@ enum Tab {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MintChartDisplay {
+pub(crate) enum MintChartDisplay {
     Both,
     Before,
     After,
 }
 
 /// 評価結果(進化先ごと)
-struct Evaluated {
+pub(crate) struct Evaluated {
     /// 評価した個体(食材の表示に使う)
-    pokemon: BoxPokemon,
-    has_mint: bool,
+    pub(crate) pokemon: BoxPokemon,
+    pub(crate) has_mint: bool,
     /// 進化先ごと: 名前, とくい, レベル別の(キー → 割合)と診断値
-    evolutions: Vec<Evolution>,
+    pub(crate) evolutions: Vec<Evolution>,
 }
 
-struct Evolution {
-    name: String,
-    specialty: String,
+pub(crate) struct Evolution {
+    pub(crate) name: String,
+    pub(crate) specialty: String,
     /// LV_LIST 順
-    rates: Vec<[Option<f64>; 4]>,
-    mint_rates: Vec<[Option<f64>; 4]>,
-    berry_energy: Vec<Option<f64>>,
-    mint_berry_energy: Vec<Option<f64>>,
-    skill_activation_num: Vec<Option<f64>>,
-    mint_skill_activation_num: Vec<Option<f64>>,
+    pub(crate) rates: Vec<[Option<f64>; 4]>,
+    pub(crate) mint_rates: Vec<[Option<f64>; 4]>,
+    pub(crate) berry_energy: Vec<Option<f64>>,
+    pub(crate) mint_berry_energy: Vec<Option<f64>>,
+    pub(crate) skill_activation_num: Vec<Option<f64>>,
+    pub(crate) mint_skill_activation_num: Vec<Option<f64>>,
     /// 食材名 → (ミント前, ミント後)
-    foods: Vec<(String, Vec<Option<f64>>, Vec<Option<f64>>)>,
+    pub(crate) foods: Vec<(String, Vec<Option<f64>>, Vec<Option<f64>>)>,
 }
 
 pub struct TmpEvaluateView {
@@ -103,7 +103,7 @@ impl Default for TmpEvaluateView {
 }
 
 /// 各食材枠で選べる食材(1枠目はA、2枠目はAかB、3枠目はA〜C。4種以上のポケモンは全て)
-fn food_options(name: &str, slot: usize) -> Vec<String> {
+pub(crate) fn food_options(name: &str, slot: usize) -> Vec<String> {
     let Some(base) = master().pokemon(name) else { return Vec::new() };
     base.food_name_list
         .iter()
@@ -114,7 +114,7 @@ fn food_options(name: &str, slot: usize) -> Vec<String> {
 }
 
 /// 食材を各枠の先頭の候補にする(本家はポケモンを変えたとき各枠の最初の食材にする)
-fn reset_foods(p: &mut BoxPokemon) {
+pub(crate) fn reset_foods(p: &mut BoxPokemon) {
     p.food_list = (0..3).map(|slot| food_options(&p.name, slot).into_iter().next().unwrap_or_default()).collect();
 }
 
@@ -326,55 +326,64 @@ impl TmpEvaluateView {
     }
 
     fn setting_tab(&mut self, ui: &mut egui::Ui, shared: &mut Shared) {
-        // 本家 EvaluateSetting に tmpEvaluate を渡す。画面側は通常設定と同じ入れ物に写して編集し、書き戻す
-        let tmp = shared.config.tmp_evaluate.clone();
-        let mut c = shared.config.clone();
-        c.select_evaluate = tmp.clone();
-        c.sleep_time = tmp.sleep_time.unwrap_or(c.sleep_time);
-        c.check_freq = tmp.check_freq.unwrap_or(c.check_freq);
-        c.worker_num = tmp.worker_num.unwrap_or(c.worker_num);
-        let before = serde_json::to_string(&c.select_evaluate).unwrap_or_default();
-        let before_basic = (c.sleep_time, c.check_freq, c.worker_num);
+        tmp_setting_tab(ui, shared);
+    }
+}
 
-        evaluate_setting(ui, &mut c, true);
+/// 簡易診断・A/B比較で共有する設定タブ
+pub(crate) fn tmp_setting_tab(ui: &mut egui::Ui, shared: &mut Shared) {
+    // 本家 EvaluateSetting に tmpEvaluate を渡す。画面側は通常設定と同じ入れ物に写して編集し、書き戻す
+    let tmp = shared.config.tmp_evaluate.clone();
+    let mut c = shared.config.clone();
+    c.select_evaluate = tmp.clone();
+    c.sleep_time = tmp.sleep_time.unwrap_or(c.sleep_time);
+    c.check_freq = tmp.check_freq.unwrap_or(c.check_freq);
+    c.worker_num = tmp.worker_num.unwrap_or(c.worker_num);
+    let before = serde_json::to_string(&c.select_evaluate).unwrap_or_default();
+    let before_basic = (c.sleep_time, c.check_freq, c.worker_num);
 
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new("簡易診断用の基準値").strong());
-        let mut healer = tmp.score_for_healer_evaluate.unwrap_or(0.0);
-        let mut support = tmp.score_for_support_evaluate.unwrap_or(0.0);
-        let mut changed = false;
-        egui::Grid::new("tmp_base").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-            style::th(ui, "ヒーラー評価基準");
-            ui.vertical(|ui| {
-                changed |= ui.add_sized([100.0, 22.0], egui::DragValue::new(&mut healer)).changed();
-                style::small(ui, "げんきオールなどの評価に使う、他のポケモンの1日エナジーです。", 400.0);
-            });
-            ui.end_row();
-            style::th(ui, "サポート評価基準");
-            ui.vertical(|ui| {
-                changed |= ui.add_sized([100.0, 22.0], egui::DragValue::new(&mut support)).changed();
-                style::small(ui, "おてつだいサポートなどの評価に使う、他のポケモンの1回のおてつだい価値です。", 400.0);
-            });
-            ui.end_row();
+    evaluate_setting(ui, &mut c, true);
+
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("簡易診断用の基準値").strong());
+    let mut healer = tmp.score_for_healer_evaluate.unwrap_or(0.0);
+    let mut support = tmp.score_for_support_evaluate.unwrap_or(0.0);
+    let mut changed = false;
+    egui::Grid::new("tmp_base").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+        style::th(ui, "ヒーラー評価基準");
+        ui.vertical(|ui| {
+            changed |= ui.add_sized([100.0, 22.0], egui::DragValue::new(&mut healer)).changed();
+            style::small(ui, "げんきオールなどの評価に使う、他のポケモンの1日エナジーです。", 400.0);
         });
+        ui.end_row();
+        style::th(ui, "サポート評価基準");
+        ui.vertical(|ui| {
+            changed |= ui.add_sized([100.0, 22.0], egui::DragValue::new(&mut support)).changed();
+            style::small(ui, "おてつだいサポートなどの評価に使う、他のポケモンの1回のおてつだい価値です。", 400.0);
+        });
+        ui.end_row();
+    });
 
-        let after = serde_json::to_string(&c.select_evaluate).unwrap_or_default();
-        if changed || before != after || before_basic != (c.sleep_time, c.check_freq, c.worker_num) {
-            let mut new = c.select_evaluate;
-            new.sleep_time = Some(c.sleep_time);
-            new.check_freq = Some(c.check_freq);
-            new.worker_num = Some(c.worker_num);
-            new.score_for_healer_evaluate = Some(healer);
-            new.score_for_support_evaluate = Some(support);
-            shared.config.tmp_evaluate = new;
-            shared.save_config();
-        }
+    let after = serde_json::to_string(&c.select_evaluate).unwrap_or_default();
+    if changed || before != after || before_basic != (c.sleep_time, c.check_freq, c.worker_num) {
+        let mut new = c.select_evaluate;
+        new.sleep_time = Some(c.sleep_time);
+        new.check_freq = Some(c.check_freq);
+        new.worker_num = Some(c.worker_num);
+        new.score_for_healer_evaluate = Some(healer);
+        new.score_for_support_evaluate = Some(support);
+        shared.config.tmp_evaluate = new;
+        shared.save_config();
     }
 }
 
 /// 本家 `evaluate()`: 簡易診断表を作ってから、入力した個体を評価する
 fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, with_mint: bool, progress: &crate::job::Progress) -> Result<Evaluated, String> {
     let r = simulate_tmp_evaluate(config, &pokemon, with_mint, progress)?;
+    box_result_to_evaluated(pokemon, r, with_mint)
+}
+
+pub(crate) fn box_result_to_evaluated(pokemon: BoxPokemon, r: pokesle_core::box_sim::BoxResult, with_mint: bool) -> Result<Evaluated, String> {
     let er = r.evaluate_result.ok_or("厳選度を評価できませんでした")?;
 
     let m = master();
@@ -438,7 +447,7 @@ fn evaluate(config: &pokesle_core::config::Config, pokemon: BoxPokemon, with_min
 }
 
 /// 折れ線グラフ(縦軸 0〜100%、横軸は Lv30〜80)
-fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartDisplay, all_sp: AllSpecialtyMode) {
+pub(crate) fn chart(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool, display: MintChartDisplay, all_sp: AllSpecialtyMode) {
     let show_legend_note = has_mint && display == MintChartDisplay::Both;
     let size = egui::vec2(TABLE_W, if show_legend_note { 246.0 } else { 230.0 });
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -568,7 +577,7 @@ fn header_cells<'a>() -> Vec<Box<dyn FnOnce(&mut egui::Ui) + 'a>> {
     cells
 }
 
-fn diff_info(before: Option<f64>, after: Option<f64>, digits: usize, suffix: &str) -> Option<(String, egui::Color32)> {
+pub(crate) fn diff_info(before: Option<f64>, after: Option<f64>, digits: usize, suffix: &str) -> Option<(String, egui::Color32)> {
     let (Some(b), Some(a)) = (before, after) else { return None };
     let diff = a - b;
     let sign = if diff > 0.0 { "+" } else { "" };
@@ -589,7 +598,7 @@ fn mint_label_cell<'a>() -> Box<dyn FnOnce(&mut egui::Ui) + 'a> {
     })
 }
 
-fn rate_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
+pub(crate) fn rate_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
     let old = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
     table_row(ui, RowBg::Header, header_cells());
     for (si, (_, label, ..)) in SERIES.iter().enumerate() {
@@ -624,7 +633,7 @@ fn rate_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
     ui.spacing_mut().item_spacing.y = old;
 }
 
-fn food_requirement_rate(value: Option<f64>, food_name: &str) -> String {
+pub(crate) fn food_requirement_rate(value: Option<f64>, food_name: &str) -> String {
     let Some(v) = value else { return String::new() };
     let required_num = master()
         .cookings
@@ -641,7 +650,7 @@ fn food_requirement_rate(value: Option<f64>, food_name: &str) -> String {
 }
 
 /// 診断用のエナジー・食材・スキル発動回数
-fn diagnostic_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
+pub(crate) fn diagnostic_table(ui: &mut egui::Ui, evo: &Evolution, has_mint: bool) {
     let show = |v: Option<f64>, digits: usize| v.map_or("－".to_string(), |v| fmt_fixed(v, digits));
     let old = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
     table_row(ui, RowBg::Header, header_cells());

@@ -2,6 +2,7 @@ pub mod box_summary_view;
 pub mod box_view;
 pub mod check_list_view;
 pub mod common_setting;
+pub mod compare_view;
 pub mod credit_view;
 pub mod data_page_view;
 pub mod evaluate_detail;

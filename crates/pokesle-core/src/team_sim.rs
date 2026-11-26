@@ -685,21 +685,71 @@ pub struct TeamSimulationResult {
     pub team_list: Vec<TeamResult>,
 }
 
-/// 簡易診断(本家 `pages/tmp-evaluate.vue` の `evaluate()`)。簡易診断表を作り、入力した個体だけを概算する
-pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, with_mint: bool, progress: &dyn crate::evaluate_table::Progress) -> Result<BoxResult, String> {
+struct ScaledProgress<'a> {
+    inner: &'a dyn crate::evaluate_table::Progress,
+    start: f64,
+    span: f64,
+}
+
+impl crate::evaluate_table::Progress for ScaledProgress<'_> {
+    fn set(&self, value: f64, message: &str) {
+        let v = (self.start + value.clamp(0.0, 1.0) * self.span).clamp(0.0, 1.0);
+        self.inner.set(v, message);
+    }
+}
+
+fn tmp_evaluate_base_config(config: &Config, with_mint: bool) -> Config {
     let mut c = config.clone();
     // 簡易診断は設定画面の選択状態にかかわらず、常にグラフの5レベルを計算する
     c.tmp_evaluate.level_list = [(10, false), (25, false), (30, true), (50, true), (60, true), (70, true), (80, true)].into_iter().collect();
-    let table = crate::evaluate_table::simulate_temporary(&c, &pokemon.name, progress)?;
     c.select_evaluate = c.tmp_evaluate.clone();
     c.sleep_time = c.tmp_evaluate.sleep_time.unwrap_or(c.sleep_time);
     c.check_freq = c.tmp_evaluate.check_freq.unwrap_or(c.check_freq);
     c.worker_num = c.tmp_evaluate.worker_num.unwrap_or(c.worker_num);
     c.pure_mint = with_mint;
     c.pure_mint_nature = Some("がんばりや".to_string());
+    c
+}
+
+/// 簡易診断(本家 `pages/tmp-evaluate.vue` の `evaluate()`)。簡易診断表を作り、入力した個体だけを概算する
+pub fn simulate_tmp_evaluate(config: &Config, pokemon: &BoxPokemon, with_mint: bool, progress: &dyn crate::evaluate_table::Progress) -> Result<BoxResult, String> {
+    let c = tmp_evaluate_base_config(config, with_mint);
+    let table = crate::evaluate_table::simulate_temporary(&c, &pokemon.name, progress)?;
     progress.set(0.9, "選択したポケモンを評価しています…");
     let result = simulate_box(&c, std::slice::from_ref(pokemon), Some(&table), false)?;
     result.into_iter().next().ok_or_else(|| "評価できませんでした".to_string())
+}
+
+/// 2個体のA/B比較。同じポケモン種の場合は簡易診断表の生成を1回で済ませる
+pub fn simulate_tmp_compare(
+    config: &Config,
+    pokemon_a: &BoxPokemon,
+    mint_a: bool,
+    pokemon_b: &BoxPokemon,
+    mint_b: bool,
+    progress: &dyn crate::evaluate_table::Progress,
+) -> Result<(BoxResult, BoxResult), String> {
+    if pokemon_a.name == pokemon_b.name {
+        let ca = tmp_evaluate_base_config(config, mint_a);
+        let table = crate::evaluate_table::simulate_temporary(&ca, &pokemon_a.name, &ScaledProgress { inner: progress, start: 0.0, span: 0.85 })?;
+        progress.set(0.9, "個体A・個体Bを評価しています…");
+        let a = simulate_box(&ca, std::slice::from_ref(pokemon_a), Some(&table), false)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "個体Aを評価できませんでした".to_string())?;
+        let cb = tmp_evaluate_base_config(config, mint_b);
+        let b = simulate_box(&cb, std::slice::from_ref(pokemon_b), Some(&table), false)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "個体Bを評価できませんでした".to_string())?;
+        progress.set(1.0, "");
+        Ok((a, b))
+    } else {
+        let a = simulate_tmp_evaluate(config, pokemon_a, mint_a, &ScaledProgress { inner: progress, start: 0.0, span: 0.5 })?;
+        let b = simulate_tmp_evaluate(config, pokemon_b, mint_b, &ScaledProgress { inner: progress, start: 0.5, span: 0.5 })?;
+        progress.set(1.0, "");
+        Ok((a, b))
+    }
 }
 
 /// ボックス概算(本家 `PokemonBox.simulation` の basic → assist)
@@ -859,4 +909,52 @@ pub fn run_team_simulation(
     team_list.truncate(ts.result_num.max(0.0) as usize);
     progress(1.0);
     Ok(TeamSimulationResult { target_day: ts.day, team_list })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::evaluate_table::{EvalLv, Progress};
+
+    struct NoopProgress;
+    impl Progress for NoopProgress {
+        fn set(&self, _: f64, _: &str) {}
+    }
+
+    #[test]
+    fn tmp_compare_same_species_matches_individual_evaluate() {
+        let mut config = Config::default_config();
+        config.kaihou_evaluate = true;
+        let a = BoxPokemon {
+            name: "ピカチュウ".into(),
+            lv: 10.0,
+            skill_lv: Some(1.0),
+            food_list: vec!["とくせんリンゴ".into(), "とくせんリンゴ".into(), "とくせんリンゴ".into()],
+            sub_skill_list: vec!["きのみの数S".into(), "おてつだいスピードM".into(), String::new(), String::new(), String::new()],
+            nature: "いじっぱり".into(),
+            ..Default::default()
+        };
+        let b = BoxPokemon {
+            name: "ピカチュウ".into(),
+            lv: 10.0,
+            skill_lv: Some(1.0),
+            food_list: vec!["とくせんリンゴ".into(), "あったかジンジャー".into(), "とくせんリンゴ".into()],
+            sub_skill_list: vec!["おてつだいボーナス".into(), "おてつだいスピードS".into(), String::new(), String::new(), String::new()],
+            nature: "さみしがり".into(),
+            ..Default::default()
+        };
+        let single_a = simulate_tmp_evaluate(&config, &a, false, &NoopProgress).unwrap();
+        let single_b = simulate_tmp_evaluate(&config, &b, true, &NoopProgress).unwrap();
+        let (cmp_a, cmp_b) = simulate_tmp_compare(&config, &a, false, &b, true, &NoopProgress).unwrap();
+
+        let er_sa = single_a.evaluate_result.as_ref().unwrap();
+        let er_ca = cmp_a.evaluate_result.as_ref().unwrap();
+        assert_eq!(er_sa.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().rate, er_ca.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().rate);
+
+        let er_sb = single_b.evaluate_result.as_ref().unwrap();
+        let er_cb = cmp_b.evaluate_result.as_ref().unwrap();
+        let m_sb = er_sb.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().pure_mint.as_ref().unwrap().rate;
+        let m_cb = er_cb.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().pure_mint.as_ref().unwrap().rate;
+        assert_eq!(m_sb, m_cb);
+    }
 }

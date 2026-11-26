@@ -7,7 +7,7 @@ use pokesle_core::evaluate_table::EvaluateTable;
 
 use crate::storage;
 use crate::views::style;
-use crate::views::{screenshot_import_view::ScreenshotImportView, tmp_evaluate_view::TmpEvaluateView, data_page_view::DataPageView, history_view, box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, credit_view, evaluate_table_view::EvaluateTableView, evaluate_view::EvaluateView, food_stock_view::FoodStockView, team_view::TeamView, ui_setting_view::{self, UiSettingView}};
+use crate::views::{box_summary_view::BoxSummaryView, box_view::BoxView, check_list_view::CheckListView, compare_view::CompareView, credit_view, data_page_view::DataPageView, evaluate_table_view::EvaluateTableView, evaluate_view::EvaluateView, food_stock_view::FoodStockView, history_view, screenshot_import_view::ScreenshotImportView, team_view::TeamView, tmp_evaluate_view::TmpEvaluateView, ui_setting_view::{self, UiSettingView}};
 
 /// 画面(本家のルーティング)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -22,6 +22,7 @@ enum Tab {
     Setting,
     EvaluateTable,
     TmpEvaluate,
+    Compare,
     Data,
     Faq,
     History,
@@ -36,7 +37,7 @@ type NavItem = (Tab, &'static str, bool);
 const NAV: [(&str, &[NavItem]); 4] = [
     ("ボックス", &[(Tab::Box, "ボックス", true), (Tab::CheckList, "チェック\nリスト", true), (Tab::Summary, "サマリー", true)]),
     ("シミュレーション", &[(Tab::Team, "チーム編成", true), (Tab::FoodStock, "食材準備", true)]),
-    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", true), (Tab::TmpEvaluate, "簡易診断", true)]),
+    ("厳選", &[(Tab::Setting, "基準生成", true), (Tab::EvaluateTable, "基準確認", true), (Tab::TmpEvaluate, "簡易診断", true), (Tab::Compare, "A/B比較", true)]),
     ("その他", &[(Tab::Data, "データ", true), (Tab::Faq, "FAQ", false), (Tab::History, "更新履歴", true), (Tab::Credit, "参考資料\nクレジット", true), (Tab::UiSetting, "設定", true)]),
 ];
 
@@ -112,6 +113,7 @@ pub struct App {
     box_summary_view: BoxSummaryView,
     data_page_view: DataPageView,
     tmp_evaluate_view: TmpEvaluateView,
+    compare_view: CompareView,
     team_view: TeamView,
     food_stock_view: FoodStockView,
     evaluate_view: EvaluateView,
@@ -143,6 +145,7 @@ impl App {
             Ok("summary") => Tab::Summary,
             Ok("data") => Tab::Data,
             Ok("tmp") => Tab::TmpEvaluate,
+            Ok("compare") => Tab::Compare,
             Ok("history") => Tab::History,
             Ok("setting") => Tab::Setting,
             Ok("evaluate") => Tab::EvaluateTable,
@@ -175,6 +178,7 @@ impl App {
             box_summary_view: BoxSummaryView::default(),
             data_page_view: DataPageView::default(),
             tmp_evaluate_view: TmpEvaluateView::default(),
+            compare_view: CompareView::default(),
             team_view: TeamView::default(),
             food_stock_view: FoodStockView::default(),
             evaluate_view: EvaluateView::default(),
@@ -291,6 +295,7 @@ impl eframe::App for App {
             }
             Tab::Summary => self.box_summary_view.ui(ui, &mut self.shared),
             Tab::TmpEvaluate => self.tmp_evaluate_view.ui(ui, &mut self.shared),
+            Tab::Compare => self.compare_view.ui(ui, &mut self.shared),
             Tab::Data => self.data_page_view.ui(ui, &mut self.shared),
             Tab::History => {
                 // 開いたら既読にする(本家 history.vue)
