@@ -285,6 +285,24 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
     let required_type_num: Vec<(String, f64)> = ts.require.type_num.iter().filter(|(_, n)| **n > 0.0).map(|(t, n)| (t.clone(), *n)).collect();
     let target_scores: Vec<f64> = input.target_pokemon_list.iter().map(|p| p.score).collect();
     let metronome_len = m.metronome_target.len() as f64;
+    let req = &ts.require;
+    let req_berry = req.specialty_num.get("きのみ").copied().unwrap_or(0.0);
+    let req_food = req.specialty_num.get("食材").copied().unwrap_or(0.0);
+    let req_skill = req.specialty_num.get("スキル").copied().unwrap_or(0.0);
+    let pool_candy_limit: Vec<f64> = pool
+        .iter()
+        .map(|p| config.candy.bag.get(&p.base().candy_name).copied().unwrap_or(0.0) + free_candy * 5.0)
+        .collect();
+    let mut foods_by_energy: Vec<(usize, f64)> = (0..food_len).map(|f| (f, m.foods[f].energy)).collect();
+    foods_by_energy.sort_by(|a, b| js::cmp_num(b.1, a.1));
+
+    // ホットループ内で使い回す作業用バッファ
+    let mut add_food_num = vec![0.0; food_len];
+    let mut food_num = vec![0.0; food_len];
+    let mut use_food_num = vec![0.0; food_len];
+    let mut cooking_results: Vec<CookingResult> = Vec::with_capacity(21);
+    let mut selected: Vec<Option<(&EvaluatedCooking, f64, f64, bool, usize)>> = Vec::with_capacity(21);
+    let mut remain: Vec<(usize, f64, f64)> = Vec::with_capacity(food_len);
     let mut count = 0usize;
 
     for fixed in &fixed_combination_list {
@@ -298,6 +316,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             members.clear();
             members.extend_from_slice(fixed);
             members.extend(combination.iter().map(|&i| i + target_offset));
+            let mlen = members.len();
 
             let mut help_bonus_count = 0.0;
             let mut genki_bonus_count = 0.0;
@@ -306,25 +325,42 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             let mut research_count = 0.0;
             let mut legend_num = 0;
             let mut use_total_shard = 0.0;
-            let mut use_candies: HashMap<&str, f64> = HashMap::new();
-            let mut type_set: HashMap<&str, HashSet<&str>> = HashMap::new();
-            let mut type_count: HashMap<&str, f64> = HashMap::new();
-            let mut no_dup: HashSet<Option<usize>> = HashSet::new();
+            let mut use_candies: [(&str, f64); 5] = [("", 0.0); 5];
+            let mut use_candies_len = 0usize;
+            let mut no_dup: [Option<usize>; 5] = [None; 5];
+            let mut no_dup_len = 0usize;
             let (mut sp_berry, mut sp_food, mut sp_skill) = (0.0, 0.0, 0.0);
 
             for &i in members.iter() {
                 let p = &pool[i];
                 let base = p.base();
+                // 通常といつ育モードは同じPTに入らない
+                let bidx = p.box_index();
+                if no_dup[..no_dup_len].contains(&bidx) {
+                    return Ok(());
+                }
+                no_dup[no_dup_len] = bidx;
+                no_dup_len += 1;
+
                 help_bonus_count += p.has_sub_skill(SubSkillKind::HelpBonus) as i32 as f64;
                 genki_bonus_count += p.has_sub_skill(SubSkillKind::GenkiBonus) as i32 as f64;
                 shard_bonus_count += p.has_sub_skill(SubSkillKind::ShardBonus) as i32 as f64;
                 suimin_count += p.has_sub_skill(SubSkillKind::SleepExpBonus) as i32 as f64;
                 legend_num += base.legend as i32;
                 use_total_shard += p.use_shard;
-                let used = use_candies.entry(base.candy_name.as_str()).or_insert(0.0);
-                *used += p.use_candy;
-                if *used > config.candy.bag.get(&base.candy_name).copied().unwrap_or(0.0) + free_candy * 5.0 {
-                    return Ok(());
+                if p.use_candy > 0.0 {
+                    let cname = base.candy_name.as_str();
+                    let used = if let Some(entry) = use_candies[..use_candies_len].iter_mut().find(|(n, _)| *n == cname) {
+                        entry.1 += p.use_candy;
+                        entry.1
+                    } else {
+                        use_candies[use_candies_len] = (cname, p.use_candy);
+                        use_candies_len += 1;
+                        p.use_candy
+                    };
+                    if used > pool_candy_limit[i] {
+                        return Ok(());
+                    }
                 }
                 match base.specialty {
                     Specialty::Berry => sp_berry += 1.0,
@@ -335,21 +371,14 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 if sim.research_rank_max && p.has_sub_skill(SubSkillKind::ResearchExpBonus) {
                     research_count += 1.0;
                 }
-                type_set.entry(base.type_name.as_str()).or_default().insert(base.name.as_str());
-                *type_count.entry(base.type_name.as_str()).or_insert(0.0) += 1.0;
-                // 通常といつ育モードは同じPTに入らない
-                if !no_dup.insert(p.box_index()) {
-                    return Ok(());
-                }
             }
 
-            let req = &ts.require;
-            let sp = |k: &str| req.specialty_num.get(k).copied().unwrap_or(0.0);
-            if suimin_count < req.suimin_exp || sp_berry < sp("きのみ") || sp_food < sp("食材") || sp_skill < sp("スキル") {
+            if suimin_count < req.suimin_exp || sp_berry < req_berry || sp_food < req_food || sp_skill < req_skill {
                 return Ok(());
             }
             for (t, n) in &required_type_num {
-                if type_count.get(t.as_str()).copied().unwrap_or(0.0) < *n {
+                let cnt = members.iter().filter(|&&i| pool[i].base().type_name == *t).count() as f64;
+                if cnt < *n {
                     return Ok(());
                 }
             }
@@ -367,8 +396,21 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             {
                 return Ok(());
             }
-            let help_boost_counts: Vec<f64> = members.iter().map(|&i| type_set[pool[i].base().type_name.as_str()].len() as f64).collect();
-            drop(type_set);
+            // 同タイプで異なるポケモン名の数(おてつだいブースト用)
+            let mut help_boost_counts = [0.0_f64; 5];
+            for (k, &i) in members.iter().enumerate() {
+                let ty = pool[i].base().type_name.as_str();
+                let mut names: [&str; 5] = [""; 5];
+                let mut nlen = 0usize;
+                for &j in &members {
+                    let b = pool[j].base();
+                    if b.type_name == ty && !names[..nlen].contains(&b.name.as_str()) {
+                        names[nlen] = b.name.as_str();
+                        nlen += 1;
+                    }
+                }
+                help_boost_counts[k] = nlen as f64;
+            }
 
             // 個々の評価
             for &i in members.iter() {
@@ -380,25 +422,33 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             help_rate.calc_team_heal(pool, &members, None);
 
             // ほっぺすりすりによる追加発動
-            let base_spd: Vec<f64> = members.iter().map(|&i| simulator.calc_skill_per_day(&pool[i])).collect();
-            let mut total_spd = base_spd.clone();
-            let togedemaru: Vec<usize> =
-                (0..members.len()).filter(|&k| pool[members[k]].skill().kind == SkillKind::Hoppesurisuri).collect();
-            if !togedemaru.is_empty() {
+            let mut base_spd = [0.0_f64; 5];
+            let mut togedemaru = [0usize; 5];
+            let mut togedemaru_len = 0usize;
+            for (k, &i) in members.iter().enumerate() {
+                base_spd[k] = simulator.calc_skill_per_day(&pool[i]);
+                if pool[i].skill().kind == SkillKind::Hoppesurisuri {
+                    togedemaru[togedemaru_len] = k;
+                    togedemaru_len += 1;
+                }
+            }
+            let mut total_spd = base_spd;
+            if togedemaru_len > 0 {
                 for _ in 0..10 {
-                    let mut next = base_spd.clone();
-                    for &e in &togedemaru {
+                    let mut next = base_spd;
+                    for &e in &togedemaru[..togedemaru_len] {
                         let executor_spd = total_spd[e];
-                        for t in 0..members.len() {
+                        let select_rate = 1.0 / (mlen as f64 - 1.0);
+                        let power = pool[members[e]].fixed_skill_lv + 1.0;
+                        for t in 0..mlen {
                             if e == t {
                                 continue;
                             }
-                            let select_rate = 1.0 / (members.len() as f64 - 1.0);
-                            let reactivate = 1.0 - (1.0 - pool[members[t]].skill_rate).powf(pool[members[e]].fixed_skill_lv + 1.0);
+                            let reactivate = 1.0 - (1.0 - pool[members[t]].skill_rate).powf(power);
                             next[t] += executor_spd * select_rate * reactivate;
                         }
                     }
-                    let diff = js::max_of((0..members.len()).map(|k| (next[k] - total_spd[k]).abs()));
+                    let diff = js::max_of((0..mlen).map(|k| (next[k] - total_spd[k]).abs()));
                     total_spd = next;
                     if diff < 1e-6 {
                         break;
@@ -408,8 +458,8 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
 
             let mut energy = 0.0;
             let mut skill_shard = 0.0;
-            let mut add_food_num = vec![0.0; food_len];
-            let mut cooking_power_up_effect_list = vec![0.0; 21];
+            add_food_num.fill(0.0);
+            let mut cooking_power_up_effect_list = [0.0_f64; 21];
             let mut total_cooking_chance_effect = 0.0;
             for (k, &i) in members.iter().enumerate() {
                 let mut p = std::mem::take(&mut pool[i]);
@@ -470,14 +520,16 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     *x *= 7.0;
                 }
             }
-            let mut food_num: Vec<f64> = default_food_num.iter().zip(&add_food_num).map(|(a, b)| a + b).collect();
-            let mut use_food_num = vec![0.0; food_len];
+            for f in 0..food_len {
+                food_num[f] = default_food_num[f] + add_food_num[f];
+            }
+            use_food_num.fill(0.0);
 
             // 料理
-            let mut cooking_results: Vec<CookingResult> = Vec::new();
+            cooking_results.clear();
             let mut remain_food_energy = 0.0;
             if sim.cooking_weight > 0.0 {
-                let mut selected: Vec<Option<(&EvaluatedCooking, f64, f64, bool, usize)>> = Vec::new();
+                selected.clear();
                 for (count, &(week, i)) in cooking_timing_list.iter().enumerate() {
                     let base_pot = if week == 6.0 { sim.pot_size * 2.0 } else { sim.pot_size };
                     let pot_size = sim.event_bonus.pot.apply(
@@ -503,12 +555,13 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 let key = js::num_key(total_cooking_chance_effect);
                 let chance = cooking_chance_cache
                     .entry(key)
-                    .or_insert_with(|| cooking::get_chance_week_effect(total_cooking_chance_effect, ts.day, initial_change))
-                    .clone();
+                    .or_insert_with(|| cooking::get_chance_week_effect(total_cooking_chance_effect, ts.day, initial_change));
 
-                // 余った食材(エナジーの高い順)
-                let mut remain: Vec<(usize, f64, f64)> = (0..food_len).map(|f| (f, food_num[f], m.foods[f].energy)).collect();
-                remain.sort_by(|a, b| js::cmp_num(b.2, a.2));
+                // 余った食材(エナジーの高い順: 事前ソート済みの順で詰めるだけ)
+                remain.clear();
+                for &(f, e) in &foods_by_energy {
+                    remain.push((f, food_num[f], e));
+                }
                 let mut remain_pos = 0usize;
                 for s in &selected {
                     let Some((c, _week, pot_size, sunday, index)) = *s else {
@@ -627,13 +680,13 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     shard_bonus_count,
                     research_exp_bonus_count: research_count,
                     pokemon_list: list,
-                    use_food_num,
-                    add_food_num,
+                    use_food_num: use_food_num.clone(),
+                    add_food_num: add_food_num.clone(),
                     default_food_num: default_food_num.clone(),
-                    food_num,
-                    cooking_power_up_effect_list,
+                    food_num: food_num.clone(),
+                    cooking_power_up_effect_list: cooking_power_up_effect_list.to_vec(),
                     remain_food_energy,
-                    cooking_list: cooking_results,
+                    cooking_list: cooking_results.clone(),
                 });
                 best_result.sort_by(|a, b| js::cmp_num(b.score, a.score));
                 best_result.truncate(10);

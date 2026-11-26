@@ -750,29 +750,29 @@ impl PokemonSimulator {
         );
 
         // げんき回復系スキル
-        if pokemon.bag > 0.0 {
-            let heal_list: Vec<SkillWeight> = pokemon.skill_weight_list.iter().filter(|x| x.skill().genki).copied().collect();
-            if !heal_list.is_empty() {
-                let plus_minus_count = team.map(|t| {
-                    t.each(pokemon)
-                        .filter(|(_, p)| matches!(p.skill().kind, SkillKind::Plus | SkillKind::Minus))
-                        .count()
-                });
-                let mut self_sum = 0.0;
-                let mut other_sum = 0.0;
-                for sw in heal_list {
-                    let s = sw.skill();
-                    // マイナスは条件を満たさないと追加効果を発動しない
-                    if s.kind == SkillKind::Minus && self.mode == Mode::Team && plus_minus_count.unwrap_or(0) < 2 {
-                        continue;
-                    }
-                    let effect = effect_at(s, pokemon.fixed_skill_lv);
-                    self_sum += effect.and_then(|e| e.self_).unwrap_or(0.0) * sw.weight;
-                    other_sum += effect.and_then(|e| e.other).unwrap_or(0.0) * sw.weight;
+        if pokemon.bag > 0.0 && pokemon.skill_weight_list.iter().any(|x| x.skill().genki) {
+            let plus_minus_count = team.map(|t| {
+                t.each(pokemon)
+                    .filter(|(_, p)| matches!(p.skill().kind, SkillKind::Plus | SkillKind::Minus))
+                    .count()
+            });
+            let mut self_sum = 0.0;
+            let mut other_sum = 0.0;
+            for sw in &pokemon.skill_weight_list {
+                let s = sw.skill();
+                if !s.genki {
+                    continue;
                 }
-                pokemon.self_heal = self_sum;
-                pokemon.other_heal = other_sum;
+                // マイナスは条件を満たさないと追加効果を発動しない
+                if s.kind == SkillKind::Minus && self.mode == Mode::Team && plus_minus_count.unwrap_or(0) < 2 {
+                    continue;
+                }
+                let effect = effect_at(s, pokemon.fixed_skill_lv);
+                self_sum += effect.and_then(|e| e.self_).unwrap_or(0.0) * sw.weight;
+                other_sum += effect.and_then(|e| e.other).unwrap_or(0.0) * sw.weight;
             }
+            pokemon.self_heal = self_sum;
+            pokemon.other_heal = other_sum;
         }
     }
 
@@ -851,17 +851,16 @@ impl PokemonSimulator {
         } else {
             pokemon.f_ep_d = 0.0;
             pokemon.food_num_per_day = 0.0;
-            for fp in pokemon.food_prob_list.clone() {
+            let food_probs = std::mem::take(&mut pokemon.food_prob_list);
+            for fp in &food_probs {
                 let num = self.prob_border.get(pokemon.food_rate * fp.weight, pokemon.normal_help_num) * fp.num;
                 pokemon.f_ep_d += num * fp.energy;
                 pokemon.food_num_per_day += num;
                 pokemon.food_count[fp.food] += num;
             }
             if let Some(ef_idx) = event_food_idx {
-                let food_get_num: f64 = pokemon
-                    .food_prob_list
-                    .clone()
-                    .into_iter()
+                let food_get_num: f64 = food_probs
+                    .iter()
                     .map(|fp| {
                         if fp.num != 0.0 && !fp.num.is_nan() {
                             self.prob_border.get(pokemon.food_rate * fp.weight, pokemon.normal_help_num)
@@ -874,6 +873,7 @@ impl PokemonSimulator {
                 pokemon.food_num_per_day += food_get_num;
                 pokemon.food_count[ef_idx] += food_get_num;
             }
+            pokemon.food_prob_list = food_probs;
         }
 
         pokemon.pickup_energy_per_day = pokemon.b_ep_d + pokemon.f_ep_d;
@@ -885,31 +885,36 @@ impl PokemonSimulator {
         pokemon.shard = 0.0;
         pokemon.skill_energy_map.clear();
         let mut total_cooking_power_up_effect = 0.0;
-        let sim = &self.config.simulation;
-        let event_berry_burst = sim.event_bonus.skill.berry_burst;
+        let event_berry_burst = self.config.simulation.event_bonus.skill.berry_burst;
+        let event_food_get = self.config.simulation.event_bonus.skill.food_get;
+        let sunday_prepare = self.config.simulation.sunday_prepare;
+        let cooking_weight = self.config.simulation.cooking_weight;
         let own_skill_kind = pokemon.skill().kind;
         let yache = m.berry("ヤチェ").map(|b| b.energy).unwrap_or(f64::NAN);
         let mago = m.berry("マゴ").map(|b| b.energy).unwrap_or(f64::NAN);
-        let all_foods: Vec<usize> = (0..m.foods.len()).collect();
+        static ALL_FOODS: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+        let all_foods: &[usize] = ALL_FOODS.get_or_init(|| (0..m.foods.len()).collect()).as_slice();
 
-        for sw in pokemon.skill_weight_list.clone() {
-            let skill = sw.skill();
-            let mut weight = sw.weight;
-            let copy = sw.copy.map(|i| &opt.team.as_ref().expect("コピー元にはチームが必要です").pool[i]);
-            let skill_lv_index: f64 = match sw.skill_lv {
-                None => (if (skill.max_lv() as f64) >= pokemon.fixed_skill_lv { pokemon.fixed_skill_lv } else { skill.max_lv() as f64 }) - 1.0,
-                Some(lv) => lv - 1.0,
-            };
-            let effect = effect_index(skill, skill_lv_index);
-            let ev = |f: fn(&crate::data::SkillEffect) -> Option<f64>| effect.and_then(f).unwrap_or(f64::NAN);
-            let mut energy_per_skill = 0.0;
-            let mut food_get: Option<f64> = None;
-            let mut food_get_list: Option<Vec<usize>> = None;
-            let mut cooking_power_up_effect = 0.0;
-            let mut cooking_chance: Option<f64> = None;
+        let sw_list = std::mem::take(&mut pokemon.skill_weight_list);
+        let skill_loop_res: Result<(), String> = (|| {
+            for &sw in &sw_list {
+                let skill = sw.skill();
+                let mut weight = sw.weight;
+                let copy = sw.copy.map(|i| &opt.team.as_ref().expect("コピー元にはチームが必要です").pool[i]);
+                let skill_lv_index: f64 = match sw.skill_lv {
+                    None => (if (skill.max_lv() as f64) >= pokemon.fixed_skill_lv { pokemon.fixed_skill_lv } else { skill.max_lv() as f64 }) - 1.0,
+                    Some(lv) => lv - 1.0,
+                };
+                let effect = effect_index(skill, skill_lv_index);
+                let ev = |f: fn(&crate::data::SkillEffect) -> Option<f64>| effect.and_then(f).unwrap_or(f64::NAN);
+                let mut energy_per_skill = 0.0;
+                let mut food_get: Option<f64> = None;
+                let mut food_get_list: Option<std::borrow::Cow<'_, [usize]>> = None;
+                let mut cooking_power_up_effect = 0.0;
+                let mut cooking_chance: Option<f64> = None;
 
             if self.mode != Mode::Select {
-                weight *= sim.skill_rate.get(&skill.name).copied().unwrap_or(f64::NAN);
+                weight *= self.config.simulation.skill_rate.get(&skill.name).copied().unwrap_or(f64::NAN);
             }
 
             match skill.kind {
@@ -1052,23 +1057,23 @@ impl PokemonSimulator {
                 },
                 SkillKind::FoodGetS => {
                     food_get = Some(ev(|e| e.value));
-                    food_get_list = Some(all_foods.clone());
+                    food_get_list = Some(std::borrow::Cow::Borrowed(all_foods));
                 }
                 SkillKind::Present => {
                     food_get = Some(ev(|e| e.value));
-                    food_get_list = Some(all_foods.clone());
+                    food_get_list = Some(std::borrow::Cow::Borrowed(all_foods));
                     if self.mode == Mode::Select {
                         energy_per_skill += self.config.select_evaluate.energy_per_candy * 4.0;
                     }
                 }
                 SkillKind::BuildUp => {
                     food_get = Some(ev(|e| e.main));
-                    food_get_list = Some(all_foods.clone());
+                    food_get_list = Some(std::borrow::Cow::Borrowed(all_foods));
                     cooking_chance = Some(ev(|e| e.sub));
                 }
                 SkillKind::Plus => {
                     food_get = Some(ev(|e| e.main));
-                    food_get_list = Some(all_foods.clone());
+                    food_get_list = Some(std::borrow::Cow::Borrowed(all_foods));
                     let sub = ev(|e| e.sub);
                     let energy_food_idx = pokemon.food_list.first().map(|f| f.food).ok_or("食材がありません")?;
                     let energy_food = &m.foods[energy_food_idx];
@@ -1105,10 +1110,10 @@ impl PokemonSimulator {
                     }
                     food_get = Some(ev(|e| e.food));
                     food_get_list = Some(match copy {
-                        Some(c) => c.base().food_list.iter().map(|f| f.food).collect(),
+                        Some(c) => std::borrow::Cow::Owned(c.base().food_list.iter().map(|f| f.food).collect()),
                         None => match &skill.food_list {
-                            Some(list) => list.clone(),
-                            None => pokemon.base().food_list.iter().map(|f| f.food).collect(),
+                            Some(list) => std::borrow::Cow::Borrowed(list.as_slice()),
+                            None => std::borrow::Cow::Owned(pokemon.base().food_list.iter().map(|f| f.food).collect()),
                         },
                     });
                 }
@@ -1185,7 +1190,7 @@ impl PokemonSimulator {
             }
 
             // 食材ゲットの処理
-            if let (Some(food_get), Some(list)) = (food_get, &food_get_list)
+            if let (Some(food_get), Some(list)) = (food_get, food_get_list.as_deref())
                 && food_get != 0.0
                 && !food_get.is_nan()
             {
@@ -1206,7 +1211,7 @@ impl PokemonSimulator {
                     }
                     Mode::About => {
                         if self.food_energy_weight > 0.0 {
-                            let one = food_get * sim.event_bonus.skill.food_get / len * ts.food_get_evaluate_rate;
+                            let one = food_get * event_food_get / len * ts.food_get_evaluate_rate;
                             let num = pokemon.skill_per_day * one * weight;
                             let mut food_energy = 0.0;
                             for &f in list {
@@ -1225,8 +1230,8 @@ impl PokemonSimulator {
                         }
                     }
                     Mode::Team => {
-                        if !sim.sunday_prepare {
-                            let one = food_get * sim.event_bonus.skill.food_get / len * ts.food_get_evaluate_rate;
+                        if !sunday_prepare {
+                            let one = food_get * event_food_get / len * ts.food_get_evaluate_rate;
                             if ty == 1.0 {
                                 let num = pokemon.skill_per_day * one * weight;
                                 for &f in list {
@@ -1287,7 +1292,6 @@ impl PokemonSimulator {
                 && chance != 0.0
                 && !chance.is_nan()
             {
-                let sim = &self.config.simulation;
                 match self.mode {
                     Mode::Select => {
                         let total = chance / 100.0 * pokemon.skill_per_day * weight * 7.0;
@@ -1297,17 +1301,17 @@ impl PokemonSimulator {
                             / weight;
                     }
                     Mode::About => {
-                        if !sim.sunday_prepare && pokemon.skill_per_day != 0.0 && !pokemon.skill_per_day.is_nan() {
+                        if !sunday_prepare && pokemon.skill_per_day != 0.0 && !pokemon.skill_per_day.is_nan() {
                             let total = chance / 100.0 * pokemon.skill_per_day * weight * 7.0;
                             let default = self.default_best_cooking.map(|b| b.last_energy).unwrap_or(f64::NAN);
                             energy_per_skill += (cooking::get_chance_week_effect(total, None, 0.0).total - 24.6) / 7.0 * default
                                 / pokemon.skill_per_day
-                                * sim.cooking_weight
+                                * cooking_weight
                                 / weight;
                         }
                     }
                     Mode::Team => {
-                        if !sim.sunday_prepare {
+                        if !sunday_prepare {
                             pokemon.cooking_chance_effect = chance / 100.0 * pokemon.skill_per_day * weight;
                         }
                     }
@@ -1319,7 +1323,11 @@ impl PokemonSimulator {
                 pokemon.set_skill_energy(skill.index, energy_per_skill);
                 pokemon.skill_energy += energy_per_skill;
             }
-        }
+            }
+            Ok(())
+        })();
+        pokemon.skill_weight_list = sw_list;
+        skill_loop_res?;
         pokemon.cooking_power_up_effect = total_cooking_power_up_effect;
 
         // コピーやゆびをふるを含め、全スキルの獲得分へイベント倍率を一度だけ適用する。
@@ -1361,8 +1369,7 @@ impl PokemonSimulator {
     }
 
     pub fn calc_team_heal(&mut self, pool: &mut [SimPokemon], members: &[usize]) {
-        let add_heal = self.add_heal.clone();
-        self.help_rate.calc_team_heal(pool, members, add_heal.as_deref());
+        self.help_rate.calc_team_heal(pool, members, self.add_heal.as_deref());
     }
 
     pub fn get_help_rate(&mut self, heal_list: &[HealEvent]) -> HelpRateResult {

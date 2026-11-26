@@ -6,12 +6,27 @@ use crate::js;
 
 pub struct ProbBorder {
     reverse_border: f64,
-    cache: HashMap<String, f64>,
+    get_cache: HashMap<(u64, u64), f64>,
+    skill_cache: HashMap<(u64, u64, u64, u64), f64>,
+}
+
+#[inline]
+fn f64_key(x: f64) -> u64 {
+    if x == 0.0 { 0.0_f64.to_bits() } else if x.is_nan() { f64::NAN.to_bits() } else { x.to_bits() }
+}
+
+#[inline]
+fn p4_key(p: f64) -> u64 {
+    if p.is_finite() {
+        f64_key(js::round(p * 10000.0))
+    } else {
+        f64_key(p)
+    }
 }
 
 impl ProbBorder {
     pub fn new(border: f64) -> ProbBorder {
-        ProbBorder { reverse_border: 1.0 - border, cache: HashMap::new() }
+        ProbBorder { reverse_border: 1.0 - border, get_cache: HashMap::new(), skill_cache: HashMap::new() }
     }
 
     /// 確率 `p` の試行を `n` 回行ったとき、成功回数が下振れ基準を満たす境界値
@@ -24,8 +39,8 @@ impl ProbBorder {
         }
 
         let n = n.floor();
-        let key = format!("{}_{}", js::to_fixed(p, 4), n);
-        if let Some(&v) = self.cache.get(&key) {
+        let key = (p4_key(p), f64_key(n));
+        if let Some(&v) = self.get_cache.get(&key) {
             return v;
         }
 
@@ -43,14 +58,14 @@ impl ProbBorder {
 
             if sum_p + this_p >= self.reverse_border {
                 let v = i + (self.reverse_border - sum_p) / this_p;
-                self.cache.insert(key, v);
+                self.get_cache.insert(key, v);
                 return v;
             }
             sum_p += this_p;
             i += 1.0;
         }
 
-        self.cache.insert(key, n);
+        self.get_cache.insert(key, n);
         n
     }
 
@@ -67,8 +82,8 @@ impl ProbBorder {
         let n2 = n2.floor();
         let limit = limit.floor();
 
-        let key = format!("{}_{}_{}_{}", js::to_fixed(p, 4), n1, n2, limit);
-        if let Some(&v) = self.cache.get(&key) {
+        let key = (p4_key(p), f64_key(n1), f64_key(n2), f64_key(limit));
+        if let Some(&v) = self.skill_cache.get(&key) {
             return v;
         }
 
@@ -116,13 +131,13 @@ impl ProbBorder {
             if cumulative + d >= target {
                 let denom = if d == 0.0 { 1e-18 } else { d };
                 let v = i as f64 + (target - cumulative) / denom;
-                self.cache.insert(key, v);
+                self.skill_cache.insert(key, v);
                 return v;
             }
             cumulative += d;
         }
         let v = current_max as f64;
-        self.cache.insert(key, v);
+        self.skill_cache.insert(key, v);
         v
     }
 }
