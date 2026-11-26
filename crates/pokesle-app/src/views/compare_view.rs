@@ -32,20 +32,7 @@ enum PickerSort {
     LvDesc,
     LvAsc,
     NameAsc,
-}
-
-impl PickerSort {
-    const ALL: [Self; 5] = [Self::IndexAsc, Self::IndexDesc, Self::LvDesc, Self::LvAsc, Self::NameAsc];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::IndexAsc => "No順 (昇順)",
-            Self::IndexDesc => "No順 (降順)",
-            Self::LvDesc => "Lv高い順",
-            Self::LvAsc => "Lv低い順",
-            Self::NameAsc => "名前順",
-        }
-    }
+    NameDesc,
 }
 
 struct BoxPicker {
@@ -225,7 +212,7 @@ impl CompareView {
             query: String::new(),
             only_favorite: false,
             same_tree_only: false,
-            sort: PickerSort::IndexAsc,
+            sort: PickerSort::LvDesc,
             focus_search: true,
         });
         style::open_popup(ctx, BOX_PICKER_POPUP_ID);
@@ -287,11 +274,6 @@ impl CompareView {
                 if let (Some(name), Some(_)) = (ref_name, ref_seed) {
                     ui.checkbox(&mut picker.same_tree_only, format!("同系統のみ ({name})"));
                 }
-                egui::ComboBox::from_id_salt("compare_box_picker_sort").selected_text(picker.sort.label()).width(120.0).show_ui(ui, |ui| {
-                    for s in PickerSort::ALL {
-                        ui.selectable_value(&mut picker.sort, s, s.label());
-                    }
-                });
             });
             ui.add_space(4.0);
 
@@ -323,6 +305,7 @@ impl CompareView {
                     PickerSort::LvDesc => pb.lv.total_cmp(&pa.lv).then_with(|| pa.index.cmp(&pb.index)),
                     PickerSort::LvAsc => pa.lv.total_cmp(&pb.lv).then_with(|| pa.index.cmp(&pb.index)),
                     PickerSort::NameAsc => pa.name.cmp(&pb.name).then_with(|| pb.lv.total_cmp(&pa.lv)).then_with(|| pa.index.cmp(&pb.index)),
+                    PickerSort::NameDesc => pb.name.cmp(&pa.name).then_with(|| pb.lv.total_cmp(&pa.lv)).then_with(|| pa.index.cmp(&pb.index)),
                 }
             });
 
@@ -340,12 +323,48 @@ impl CompareView {
                 return;
             }
 
-            // ヘッダ
+            // ヘッダ（「No.」「ポケモン」「Lv」のクリックでソート切替）
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add_sized([46.0, 18.0], egui::Label::new(egui::RichText::new("No.").strong()));
-                ui.add_sized([124.0, 18.0], egui::Label::new(egui::RichText::new("ポケモン").strong()));
-                ui.add_sized([40.0, 18.0], egui::Label::new(egui::RichText::new("Lv").strong()));
+                let no_label = match picker.sort {
+                    PickerSort::IndexAsc => "No. ▲",
+                    PickerSort::IndexDesc => "No. ▼",
+                    _ => "No.",
+                };
+                if ui
+                    .add_sized([54.0, 18.0], egui::Label::new(egui::RichText::new(no_label).strong()).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("クリックでNo.順にソート")
+                    .clicked()
+                {
+                    picker.sort = if picker.sort == PickerSort::IndexAsc { PickerSort::IndexDesc } else { PickerSort::IndexAsc };
+                }
+                let name_label = match picker.sort {
+                    PickerSort::NameAsc => "ポケモン ▲",
+                    PickerSort::NameDesc => "ポケモン ▼",
+                    _ => "ポケモン",
+                };
+                if ui
+                    .add_sized([124.0, 18.0], egui::Label::new(egui::RichText::new(name_label).strong()).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("クリックでポケモン名順にソート")
+                    .clicked()
+                {
+                    picker.sort = if picker.sort == PickerSort::NameAsc { PickerSort::NameDesc } else { PickerSort::NameAsc };
+                }
+                let lv_label = match picker.sort {
+                    PickerSort::LvDesc => "Lv ▼",
+                    PickerSort::LvAsc => "Lv ▲",
+                    _ => "Lv",
+                };
+                if ui
+                    .add_sized([48.0, 18.0], egui::Label::new(egui::RichText::new(lv_label).strong()).sense(egui::Sense::click()))
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("クリックでLv順にソート")
+                    .clicked()
+                {
+                    picker.sort = if picker.sort == PickerSort::LvDesc { PickerSort::LvAsc } else { PickerSort::LvDesc };
+                }
                 ui.add_sized([74.0, 18.0], egui::Label::new(egui::RichText::new("食材").strong()));
                 ui.add_sized([300.0, 18.0], egui::Label::new(egui::RichText::new("サブスキル").strong()));
                 ui.add_sized([108.0, 18.0], egui::Label::new(egui::RichText::new("せいかく").strong()));
@@ -386,10 +405,10 @@ impl CompareView {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 8.0;
                                 let no_text = if bp.favorite { format!("{} ★", bp.index + 1) } else { format!("{}", bp.index + 1) };
-                                ui.add_sized([46.0, 22.0], egui::Label::new(no_text));
+                                ui.add_sized([54.0, 22.0], egui::Label::new(no_text));
                                 let name_text = if bp.shiny { format!("{} (色)", bp.name) } else { bp.name.clone() };
                                 ui.add_sized([124.0, 22.0], egui::Label::new(egui::RichText::new(name_text).strong()).truncate());
-                                ui.add_sized([40.0, 22.0], egui::Label::new(format!("Lv{}", bp.lv as u32)));
+                                ui.add_sized([48.0, 22.0], egui::Label::new(format!("Lv{}", bp.lv as u32)));
                                 ui.allocate_ui_with_layout(egui::vec2(74.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                     food_icon::food_list(ui, bp);
                                 });
