@@ -1021,3 +1021,20 @@ impl EvaluateResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simulate_temporary_is_deterministic_across_parallel_runs() {
+        let config = Config::default_config();
+        let t1 = simulate_temporary(&config, "イーブイ", &()).unwrap();
+        let t2 = simulate_temporary(&config, "イーブイ", &()).unwrap();
+        assert_eq!(t1.pokemon.len(), t2.pokemon.len());
+        for (name, by_lv1) in &t1.pokemon {
+            let by_lv2 = &t2.pokemon[name];
+            assert_eq!(by_lv1, by_lv2, "進化先 {name} の結果が並列実行間で不一致");
+        }
+    }
+}
