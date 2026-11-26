@@ -726,6 +726,7 @@ pub fn simulate_temporary(config: &Config, pokemon_name: &str, progress: &dyn Pr
                     support: task.support,
                     support_border,
                 };
+                simulator.clear_select_caches();
                 let (out, ..) = evaluate_single_food(task.lv, task.pokemon, &task.food_names, &ctx, simulator, scratch, |_| {})?;
                 let mut p = out.percentile;
                 p.food1.clear();

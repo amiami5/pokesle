@@ -1376,6 +1376,12 @@ impl PokemonSimulator {
         self.help_rate.get_help_rate(heal_list)
     }
 
+    /// 並列タスク間で計算結果が直前の評価順に依存しないよう、丸めキーを使うキャッシュを初期化する
+    pub fn clear_select_caches(&mut self) {
+        self.prob_border.clear_cache();
+        self.help_rate.clear_team_heal_cache();
+    }
+
     /// 厳選用評価(本家 `selectEvaluate`)。`pokemon` を書き換えて結果を入れる。
     pub fn select_evaluate(
         &mut self,

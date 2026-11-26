@@ -66,6 +66,11 @@ impl HelpRate {
         }
     }
 
+    pub fn clear_team_heal_cache(&mut self) {
+        self.team_heal_cache.key.clear();
+        self.team_heal_cache.cache.clear();
+    }
+
     fn is_select(&self) -> bool {
         self.mode == Some(Mode::Select)
     }

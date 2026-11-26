@@ -29,6 +29,11 @@ impl ProbBorder {
         ProbBorder { reverse_border: 1.0 - border, get_cache: HashMap::new(), skill_cache: HashMap::new() }
     }
 
+    pub fn clear_cache(&mut self) {
+        self.get_cache.clear();
+        self.skill_cache.clear();
+    }
+
     /// 確率 `p` の試行を `n` 回行ったとき、成功回数が下振れ基準を満たす境界値
     pub fn get(&mut self, p: f64, n: f64) -> f64 {
         if self.reverse_border <= 0.0 {
