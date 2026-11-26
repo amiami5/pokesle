@@ -754,8 +754,8 @@ fn box_summary_matches_upstream() {
         assert_eq!(berry.len(), expected.len());
         for (r, e) in berry.iter().zip(expected) {
             assert_eq!(r.name, e["name"].as_str().unwrap());
-            for (i, c) in r.cols.iter().enumerate() {
-                check(format!("{name} berry {} col{i}", r.name), c, &e["cols"][i]);
+            for (i, ec) in e["cols"].as_array().unwrap().iter().enumerate() {
+                check(format!("{name} berry {} col{i}", r.name), &r.cols[i], ec);
             }
         }
 
@@ -770,8 +770,8 @@ fn box_summary_matches_upstream() {
             assert_eq!(mp.as_deref(), e["maxPokemon"].as_str(), "{name} food {} maxPokemon", r.name);
             let fl: Vec<String> = serde_json::from_value(e["maxFoodList"].clone()).unwrap();
             assert_eq!(r.max_food_list, fl, "{name} food {} maxFoodList", r.name);
-            for (i, c) in r.cols.iter().enumerate() {
-                check(format!("{name} food {} col{i}", r.name), c, &e["cols"][i]);
+            for (i, ec) in e["cols"].as_array().unwrap().iter().enumerate() {
+                check(format!("{name} food {} col{i}", r.name), &r.cols[i], ec);
             }
         }
 
@@ -782,8 +782,8 @@ fn box_summary_matches_upstream() {
             assert_eq!(r.name, e["name"].as_str().unwrap());
             assert!(close(r.max, expected_num(&e["max"]).unwrap()), "{name} skill {} max {} vs {}", r.name, r.max, e["max"]);
             assert_eq!(r.max_pokemon.as_deref(), e["maxPokemon"].as_str(), "{name} skill {} maxPokemon", r.name);
-            for (i, c) in r.cols.iter().enumerate() {
-                check(format!("{name} skill {} col{i}", r.name), c, &e["cols"][i]);
+            for (i, ec) in e["cols"].as_array().unwrap().iter().enumerate() {
+                check(format!("{name} skill {} col{i}", r.name), &r.cols[i], ec);
             }
         }
 
