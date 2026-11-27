@@ -22,7 +22,7 @@ OUT = pathlib.Path(__file__).resolve().parents[2] / "crates" / "pokesle-app" / "
 
 # 本家の画像名 → Noto のコードポイント、または自作("draw:...")
 MAPPING = {
-    "largeleek.png": "1f96c",            # ふといながねぎ: 🥬
+    "largeleek.png": "draw:leek",         # ふといながねぎ: 自作
     "tastymushroom.png": "1f344_200d_1f7eb",  # あじわいキノコ: 🍄‍🟫
     "fancyegg.png": "white:1f95a",       # とくせんエッグ: 🥚 を白く塗り替え
     "softpotato.png": "1f954",           # ほっこりポテト: 🥔
@@ -242,6 +242,130 @@ def draw_nuts() -> Image.Image:
     return im.resize((128, 128), Image.LANCZOS)
 
 
+def draw_leek() -> Image.Image:
+    """ふといながねぎの自作アイコン(斜め配置、白い茎＋分かれた緑の葉)"""
+    im = Image.new("RGBA", (128 * S, 128 * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    outline = (42, 94, 34)
+
+    ux, uy = 1.0 / math.sqrt(2.0), -1.0 / math.sqrt(2.0)  # 左下→右上
+    vx, vy = -1.0 / math.sqrt(2.0), -1.0 / math.sqrt(2.0)  # 左上(幅方向)
+    bx, by = 27.0, 101.0  # 根元
+
+    def pt(along: float, across: float) -> tuple[float, float]:
+        return bx + ux * along + vx * across, by + uy * along + vy * across
+
+    def stroke(fn, n, color_fn, r_fn):
+        for i in range(n + 1):
+            t = i / n
+            cx, cy = fn(t)
+            r = r_fn(t) * S
+            d.ellipse([cx * S - r, cy * S - r, cx * S + r, cy * S + r], fill=color_fn(t))
+
+    def lerp_rgb(c1, c2, k):
+        k = max(0.0, min(1.0, k))
+        return tuple(int(c1[i] + (c2[i] - c1[i]) * k) for i in range(3))
+
+    def main_pt(t):
+        return pt(12.0 + 86.0 * t, 0.0)
+
+    def main_r(t):
+        return 14.5 - 3.5 * t
+
+    def upper_leaf_pt(t):
+        return pt(42.0 + 54.0 * t, 3.0 + 15.0 * (t ** 0.9))
+
+    def upper_leaf_r(t):
+        return 9.5 - 2.2 * t
+
+    def lower_leaf_pt(t):
+        return pt(48.0 + 40.0 * t, -3.0 - 13.0 * (t ** 0.9))
+
+    def lower_leaf_r(t):
+        return 8.5 - 2.0 * t
+
+    # 1. 全体の縁取り
+    stroke(upper_leaf_pt, 80, lambda _: outline, lambda t: upper_leaf_r(t) + 3.8)
+    stroke(lower_leaf_pt, 70, lambda _: outline, lambda t: lower_leaf_r(t) + 3.8)
+    stroke(main_pt, 120, lambda _: outline, lambda t: main_r(t) + 3.8)
+
+    # 2. 奥側・手前側の分かれた葉
+    stroke(upper_leaf_pt, 80, lambda _: (68, 152, 54), upper_leaf_r)
+    stroke(
+        lambda t: (upper_leaf_pt(t)[0] + vx * 2.2, upper_leaf_pt(t)[1] + vy * 2.2),
+        60,
+        lambda _: (108, 192, 76),
+        lambda t: upper_leaf_r(t) * 0.48,
+    )
+
+    stroke(lower_leaf_pt, 70, lambda _: (64, 146, 50), lower_leaf_r)
+    stroke(
+        lambda t: (lower_leaf_pt(t)[0] + vx * 1.8, lower_leaf_pt(t)[1] + vy * 1.8),
+        50,
+        lambda _: (102, 184, 72),
+        lambda t: lower_leaf_r(t) * 0.45,
+    )
+
+    # 3. メインの茎〜葉
+    white = (248, 250, 240)
+    lime = (156, 210, 82)
+    green = (84, 174, 60)
+
+    def main_color(t):
+        if t < 0.36:
+            return white
+        if t < 0.54:
+            return lerp_rgb(white, lime, (t - 0.36) / 0.18)
+        if t < 0.68:
+            return lerp_rgb(lime, green, (t - 0.54) / 0.14)
+        return green
+
+    stroke(main_pt, 140, main_color, main_r)
+
+    # 影とハイライト
+    def shadow_color(t):
+        if t < 0.36:
+            return (222, 232, 214)
+        if t < 0.54:
+            return lerp_rgb((222, 232, 214), (122, 178, 64), (t - 0.36) / 0.18)
+        return (64, 144, 48)
+
+    stroke(
+        lambda t: pt(12.0 + 86.0 * t, -main_r(t) * 0.45),
+        100,
+        shadow_color,
+        lambda t: main_r(t) * 0.42,
+    )
+
+    def hi_color(t):
+        if t < 0.36:
+            return (255, 255, 255)
+        if t < 0.54:
+            return lerp_rgb((255, 255, 255), (188, 232, 112), (t - 0.36) / 0.18)
+        return (132, 212, 88)
+
+    stroke(
+        lambda t: pt(12.0 + 86.0 * t, main_r(t) * 0.42),
+        100,
+        hi_color,
+        lambda t: main_r(t) * 0.36,
+    )
+
+    # 葉の重なり(茎から葉へ分かれる V 字ライン)
+    v1 = [pt(44, 13), pt(54, 0), pt(48, -11)]
+    d.line([(x * S, y * S) for x, y in v1], fill=(56, 128, 44), width=3 * S)
+
+    # 根元の切り口
+    cut_pts = []
+    for i in range(36):
+        a = 2 * math.pi * i / 36
+        px, py = pt(10.0 + 4.5 * math.cos(a), 14.0 * math.sin(a))
+        cut_pts.append((px * S, py * S))
+    d.polygon(cut_pts, fill=(230, 236, 202), outline=(170, 186, 140), width=2 * S)
+
+    return im.resize((128, 128), Image.LANCZOS)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, src in MAPPING.items():
@@ -253,6 +377,8 @@ def main():
             im = draw_tail()
         elif src == "draw:nuts":
             im = draw_nuts()
+        elif src == "draw:leek":
+            im = draw_leek()
         elif src.startswith("cream:"):
             im = cream(noto(src.removeprefix("cream:")))
         elif src.startswith("hue:"):
