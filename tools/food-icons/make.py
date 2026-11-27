@@ -39,7 +39,7 @@ MAPPING = {
     "greengrasssoybeans.png": "cream:1fad8",  # ワカクサ大豆: 🫘 を本家に近いクリーム色に塗り替え
     "greengrasscorn.png": "1f33d",       # ワカクサコーン: 🌽
     "coffee.png": "2615",                # めざましコーヒー: ☕
-    "pumpkin.png": "1f383",              # ずっしりカボチャ: 🎃
+    "pumpkin.png": "draw:pumpkin",       # ずっしりカボチャ: 自作(顔なしのカボチャ)
     "avocado.png": "1f951",              # つやつやアボカド: 🥑
     "nuts.png": "draw:nuts",             # ひとくちナッツ: 自作(ミックスナッツ)
 }
@@ -457,6 +457,63 @@ def draw_cacao() -> Image.Image:
     return im.resize((128, 128), Image.LANCZOS)
 
 
+def draw_pumpkin() -> Image.Image:
+    """ずっしりカボチャの自作アイコン(顔なしのかぼちゃ)"""
+    im = Image.new("RGBA", (128 * S, 128 * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    outline = (146, 54, 10)
+    groove = (192, 78, 12)
+    cy = 75.0
+
+    def lobe_ellipse(cx: float, rx: float, ry: float, color, edge=None, edge_w=3.2):
+        if edge is not None:
+            ew = edge_w
+            d.ellipse(
+                [(cx - rx - ew) * S, (cy - ry - ew) * S, (cx + rx + ew) * S, (cy + ry + ew) * S],
+                fill=edge,
+            )
+        d.ellipse(
+            [(cx - rx) * S, (cy - ry) * S, (cx + rx) * S, (cy + ry) * S],
+            fill=color,
+        )
+
+    # 1. カボチャのヘタ(短めで先が細く、切り口のある形)
+    stem_outline = (38, 68, 22)
+    stem_pts = [
+        (57.5, 43.0),
+        (58.5, 34.0),
+        (55.0, 26.0),
+        (61.5, 24.0),
+        (66.5, 33.0),
+        (70.5, 43.0),
+    ]
+    # 縁取り付きヘタ
+    d.polygon([(x * S, y * S) for x, y in stem_pts], fill=(76, 128, 44), outline=stem_outline, width=4 * S)
+    # 先端の切り口
+    d.ellipse([54.5 * S, 23.0 * S, 62.5 * S, 27.5 * S], fill=(154, 186, 84), outline=stem_outline, width=2 * S)
+    # 縦の筋(ヘタのゴツゴツ感)
+    d.line([(61.5 * S, 27.5 * S), (63.5 * S, 41.0 * S)], fill=(52, 94, 30), width=2 * S)
+
+    # 2. 外側のシルエット縁取り
+    for cx, rx, ry in [(64 - 24, 24, 32), (64 + 24, 24, 32), (64 - 14, 22, 35), (64 + 14, 22, 35), (64, 18, 36)]:
+        lobe_ellipse(cx, rx, ry, outline, edge=outline, edge_w=4.0)
+
+    # 3. 各房を奥から手前へ重ねて塗る
+    lobe_ellipse(64 - 24, 24, 32, (218, 98, 14))
+    lobe_ellipse(64 + 24, 24, 32, (206, 88, 12))
+
+    lobe_ellipse(64 - 14, 22, 35, (238, 122, 18), edge=groove, edge_w=2.4)
+    lobe_ellipse(64 + 14, 22, 35, (228, 110, 16), edge=groove, edge_w=2.4)
+
+    lobe_ellipse(64, 18, 36, (250, 144, 32), edge=groove, edge_w=2.4)
+
+    # 4. ツヤ(左上の房と中央の房)
+    d.ellipse([30 * S, 50 * S, 42 * S, 68 * S], fill=(255, 184, 72))
+    d.ellipse([54 * S, 46 * S, 64 * S, 64 * S], fill=(255, 198, 92))
+
+    return im.resize((128, 128), Image.LANCZOS)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, src in MAPPING.items():
@@ -472,6 +529,8 @@ def main():
             im = draw_leek()
         elif src == "draw:cacao":
             im = draw_cacao()
+        elif src == "draw:pumpkin":
+            im = draw_pumpkin()
         elif src.startswith("cream:"):
             im = cream(noto(src.removeprefix("cream:")))
         elif src.startswith("hue:"):
