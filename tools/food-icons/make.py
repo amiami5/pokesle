@@ -34,7 +34,7 @@ MAPPING = {
     "pureoil.png": "draw:oil",           # ピュアなオイル: 自作
     "warmingginger.png": "1fada",        # あったかジンジャー: 🫚
     "snoozytomato.png": "1f345",         # あんみんトマト: 🍅
-    "soothingcacao.png": "1f36b",        # リラックスカカオ: 🍫
+    "soothingcacao.png": "draw:cacao",     # リラックスカカオ: 自作(カカオポッド)
     "slowpoketail.png": "draw:tail",     # おいしいシッポ: 自作
     "greengrasssoybeans.png": "cream:1fad8",  # ワカクサ大豆: 🫘 を本家に近いクリーム色に塗り替え
     "greengrasscorn.png": "1f33d",       # ワカクサコーン: 🌽
@@ -366,6 +366,97 @@ def draw_leek() -> Image.Image:
     return im.resize((128, 128), Image.LANCZOS)
 
 
+def draw_cacao() -> Image.Image:
+    """リラックスカカオの自作アイコン(縦筋のあるカカオポッド＋小さな葉)"""
+    im = Image.new("RGBA", (128 * S, 128 * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    outline = (76, 32, 16)
+
+    cx0, cy0 = 64.0, 68.0
+    ang = math.radians(26.0)
+    ca, sa = math.cos(ang), math.sin(ang)
+
+    def pod_pt(along: float, across: float) -> tuple[float, float]:
+        # along: -1(上・ヘタ側) 〜 +1(下・先端側), across: 左右方向
+        x = cx0 + across * ca - along * 44.0 * sa
+        y = cy0 + across * sa + along * 44.0 * ca
+        return x, y
+
+    def pod_w(t: float) -> float:
+        base = max(0.0, 1.0 - t * t) ** 0.62
+        return 27.5 * base * (1.0 - 0.14 * t)
+
+    def pod_poly(expand: float = 0.0, shift_x: float = 0.0, scale_w: float = 1.0) -> list[tuple[float, float]]:
+        n = 60
+        left, right = [], []
+        for i in range(n + 1):
+            t = -1.0 + 2.0 * i / n
+            w = pod_w(t) * scale_w + expand
+            lx, ly = pod_pt(t, -w + shift_x)
+            rx, ry = pod_pt(t, w + shift_x)
+            left.append((lx * S, ly * S))
+            right.append((rx * S, ry * S))
+        return left + list(reversed(right))
+
+    # 1. 小さな葉(左上・奥側)
+    def leaf_poly(expand: float = 0.0) -> list[tuple[float, float]]:
+        pts = []
+        n = 48
+        lang = math.radians(-52.0)
+        lca, lsa = math.cos(lang), math.sin(lang)
+        lx0, ly0 = pod_pt(-0.92, -16.0)
+        for i in range(n):
+            th = 2 * math.pi * i / n
+            u = math.sin(th) * (10.5 + expand)
+            v = -math.cos(th) * (18.5 + expand)
+            pts.append(((lx0 + u * lca - v * lsa) * S, (ly0 + u * lsa + v * lca) * S))
+        return pts
+
+    d.polygon(leaf_poly(3.6), fill=(38, 86, 30))
+    d.polygon(leaf_poly(0.0), fill=(86, 172, 60))
+    # 葉脈
+    l_start = pod_pt(-0.88, -6.0)
+    l_end = pod_pt(-0.96, -28.0)
+    d.line([(l_start[0] * S, l_start[1] * S), (l_end[0] * S, l_end[1] * S)], fill=(134, 210, 92), width=2 * S)
+
+    # 2. ヘタ(右上)
+    stem_pts = [pod_pt(-0.88, -4.5), pod_pt(-1.18, -3.0), pod_pt(-1.18, 3.0), pod_pt(-0.88, 4.5)]
+    d.line([(pod_pt(-0.88, 0.0)[0] * S, pod_pt(-0.88, 0.0)[1] * S), (pod_pt(-1.18, 0.0)[0] * S, pod_pt(-1.18, 0.0)[1] * S)], fill=outline, width=13 * S)
+    d.polygon([(x * S, y * S) for x, y in stem_pts], fill=(128, 76, 40))
+
+    # 3. カカオポッド本体の縁取りとベース
+    d.polygon(pod_poly(expand=4.0), fill=outline)
+    d.polygon(pod_poly(expand=0.0), fill=(156, 78, 42))
+
+    # 左上側の明るい立体面と右下の影面
+    d.polygon(pod_poly(expand=0.0, shift_x=-3.5, scale_w=0.76), fill=(182, 98, 54))
+    d.polygon(pod_poly(expand=0.0, shift_x=-6.0, scale_w=0.45), fill=(198, 114, 66))
+
+    # 4. 縦のうね(溝とハイライトのペア)
+    for k in (-0.56, -0.18, 0.22, 0.60):
+        groove_pts = []
+        hi_pts = []
+        for i in range(41):
+            t = -0.88 + 1.76 * i / 40
+            w = pod_w(t)
+            gx, gy = pod_pt(t, k * w)
+            hx, hy = pod_pt(t, k * w - 2.6)
+            groove_pts.append((gx * S, gy * S))
+            hi_pts.append((hx * S, hy * S))
+        d.line(hi_pts, fill=(214, 134, 82), width=2 * S)
+        d.line(groove_pts, fill=(102, 44, 20), width=3 * S)
+
+    # 5. 左上のツヤ
+    shine_pts = []
+    for i in range(25):
+        t = -0.58 + 0.72 * i / 24
+        sx, sy = pod_pt(t, -pod_w(t) * 0.74)
+        shine_pts.append((sx * S, sy * S))
+    d.line(shine_pts, fill=(236, 172, 124), width=3 * S)
+
+    return im.resize((128, 128), Image.LANCZOS)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for name, src in MAPPING.items():
@@ -379,6 +470,8 @@ def main():
             im = draw_nuts()
         elif src == "draw:leek":
             im = draw_leek()
+        elif src == "draw:cacao":
+            im = draw_cacao()
         elif src.startswith("cream:"):
             im = cream(noto(src.removeprefix("cream:")))
         elif src.startswith("hue:"):

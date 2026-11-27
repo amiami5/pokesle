@@ -5,7 +5,7 @@
 
 | ファイル | 元 | ライセンス |
 |---|---|---|
-| `pureoil.png` / `slowpoketail.png` / `moomoomilk.png` / `nuts.png` / `largeleek.png` | このリポジトリで描いたもの | MIT(このリポジトリの [LICENSE](../../../../LICENSE)) |
+| `pureoil.png` / `slowpoketail.png` / `moomoomilk.png` / `nuts.png` / `largeleek.png` / `soothingcacao.png` | このリポジトリで描いたもの | MIT(このリポジトリの [LICENSE](../../../../LICENSE)) |
 | `fancyegg.png` | Noto Emoji 🥚 (U+1F95A) の色を白に変更 | OFL-1.1 |
 | `greengrasssoybeans.png` | Noto Emoji 🫘 (U+1FAD8) の色をクリーム色に変更 | OFL-1.1 |
 | 上記以外 | Noto Emoji をそのまま縮小 | OFL-1.1 |
