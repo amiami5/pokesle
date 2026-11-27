@@ -363,7 +363,23 @@ def draw_leek() -> Image.Image:
         cut_pts.append((px * S, py * S))
     d.polygon(cut_pts, fill=(230, 236, 202), outline=(170, 186, 140), width=2 * S)
 
-    return im.resize((128, 128), Image.LANCZOS)
+    return fit_icon(im)
+
+
+def fit_icon(im: Image.Image, pad: int = 2) -> Image.Image:
+    """余白を詰めて 128x128 の中央に揃える(既存 Noto Emoji とサイズ感を合わせる)"""
+    bbox = im.getbbox()
+    if bbox is None:
+        return im
+    cropped = im.crop(bbox)
+    w, h = cropped.size
+    target = 128 - pad * 2
+    scale = min(target / w, target / h)
+    nw, nh = max(1, round(w * scale)), max(1, round(h * scale))
+    resized = cropped.resize((nw, nh), Image.LANCZOS)
+    out = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    out.paste(resized, ((128 - nw) // 2, (128 - nh) // 2))
+    return out
 
 
 def draw_cacao() -> Image.Image:
@@ -454,7 +470,7 @@ def draw_cacao() -> Image.Image:
         shine_pts.append((sx * S, sy * S))
     d.line(shine_pts, fill=(236, 172, 124), width=3 * S)
 
-    return im.resize((128, 128), Image.LANCZOS)
+    return fit_icon(im)
 
 
 def draw_pumpkin() -> Image.Image:
@@ -511,7 +527,7 @@ def draw_pumpkin() -> Image.Image:
     d.ellipse([30 * S, 50 * S, 42 * S, 68 * S], fill=(255, 184, 72))
     d.ellipse([54 * S, 46 * S, 64 * S, 64 * S], fill=(255, 198, 92))
 
-    return im.resize((128, 128), Image.LANCZOS)
+    return fit_icon(im)
 
 
 def main():

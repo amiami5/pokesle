@@ -182,6 +182,8 @@ fn result_ui(ui: &mut egui::Ui, result: &FoodStockResult, shared: &mut Shared, l
                 cell(ui, W_NUM, false, &mut head("回数"));
                 for food in &m.foods {
                     cell(ui, W_FOOD, false, &mut |ui| {
+                        let pad = ((ui.available_width() - 22.0) * 0.5).max(0.0);
+                        ui.add_space(pad);
                         food_icon::food_icon(ui, &food.name, 22.0);
                     });
                 }
