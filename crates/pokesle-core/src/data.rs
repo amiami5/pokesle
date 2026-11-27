@@ -419,9 +419,9 @@ impl Skill {
         self.effect.len()
     }
 
-    /// 本家の `copyable` は未指定なら undefined(偽)
+    /// 本家の `copyable === false` のみ偽（未指定なら true）
     pub fn is_copyable(&self) -> bool {
-        self.copyable.unwrap_or(false)
+        self.copyable.unwrap_or(true)
     }
 }
 
