@@ -543,7 +543,7 @@ impl Col {
             Col::Index => (36.0, 24.0),
             Col::Name => (150.0, 80.0),
             Col::Memo => (120.0, 40.0),
-            Col::Lv => (64.0, 58.0),
+            Col::Lv => (74.0, 62.0),
             Col::SkillLv => (40.0, 24.0),
             Col::Food => (84.0, 40.0),
             Col::Sub(_) => (if setting.sub_skill_short { 72.0 } else { 150.0 }, 32.0),
@@ -602,6 +602,19 @@ enum TableEvent {
     Cell(CellEdit),
     /// 厳選詳細を開く(ボックス位置, 進化先, レベル)
     Detail(usize, String, u32),
+    /// 列フィルタのポップアップを開く
+    OpenFilter(FilterCol, egui::Pos2),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FilterCol {
+    Lv,
+    Berry,
+}
+
+enum FilterPopup {
+    Lv { min: u32, max: u32, pos: egui::Pos2 },
+    Berry { selected: HashSet<String>, pos: egui::Pos2 },
 }
 
 /// 列の並びと幅の保存場所(本家に無い項目なので、設定ではなくウインドウ位置と同じ window.ron に入れる)
@@ -778,6 +791,12 @@ pub struct BoxView {
     sort_lv: HashMap<usize, f64>,
     /// 前回この画面を描いた egui のパス番号(他の画面から戻ったかの判定)
     last_pass: u64,
+    /// Lv 列のフィルタ(最小, 最大)
+    lv_filter: Option<(u32, u32)>,
+    /// きのみ列のフィルタ(空なら絞り込みなし)
+    berry_filter: HashSet<String>,
+    /// 開いている列フィルタの編集状態
+    filter_popup: Option<FilterPopup>,
 }
 
 /// 一覧の操作列でのクリック
@@ -1051,6 +1070,7 @@ impl BoxView {
                 }
             }
         }
+        self.show_filter_popup(ui.ctx());
     }
 
     /// 本家 sortable-table の pager(Prev 1 2 3 … Next)
@@ -1100,14 +1120,26 @@ impl BoxView {
         }
     }
 
-    /// キーワードで絞り込み、並べ替えたボックス位置の一覧
+    /// キーワード・列フィルタで絞り込み、並べ替えたボックス位置の一覧
     fn sorted_rows(&self, shared: &Shared) -> Vec<usize> {
+        let m = master();
         let query = self.search.trim().to_string();
         let result = |i: usize| self.results.get(i).and_then(|r| r.as_ref());
         let mut rows: Vec<usize> = (0..shared.box_file.list.len())
             .filter(|&i| {
+                let p = &shared.box_file.list[i];
+                if let Some((min, max)) = self.lv_filter
+                    && !(p.lv >= min as f64 && p.lv <= max as f64)
+                {
+                    return false;
+                }
+                if !self.berry_filter.is_empty()
+                    && !base_of(p, result(i)).is_some_and(|b| self.berry_filter.contains(&m.berries[b.berry].name))
+                {
+                    return false;
+                }
                 if self.mode != Mode::CleaningDetail {
-                    return query.is_empty() || keyword_match(&shared.box_file.list[i], &query);
+                    return query.is_empty() || keyword_match(p, &query);
                 }
                 // ボックス整理(詳細)はキーワードではなく、サマリー情報で選んだポケモン・種ポケで絞り込む
                 match (&self.detail_seed, &self.detail_pokemon) {
@@ -1162,6 +1194,8 @@ impl BoxView {
         let has_hit = columns.contains(&Col::HitCheck);
         // 本家: 絞り込みが無く、並び順が「No」だけ(または並べ替え無し)のときだけ上下に動かせる
         let movable_dir: Option<i32> = (self.search.trim().is_empty()
+            && self.lv_filter.is_none()
+            && self.berry_filter.is_empty()
             && self.detail_seed.is_none()
             && self.detail_pokemon.is_none()
             && (sort.is_empty() || (sort.len() == 1 && sort[0].0 == Col::Index.key())))
@@ -1246,18 +1280,37 @@ impl BoxView {
             }
             let title = col.title(setting);
             let mark = sort_mark(&key);
+            let filter_col = match col {
+                Col::Lv => Some(FilterCol::Lv),
+                Col::Base(2) => Some(FilterCol::Berry),
+                _ => None,
+            };
+            // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする。
+            // フィルタボタンが後からクリックを優先して受け取れるよう、先に interact を登録する
+            let rect = ui.max_rect();
+            let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
             if let Col::FoodNum(n) = col {
                 ui.vertical(|ui| {
                     food_icon::food_icon(ui, &m.foods[n].name, 20.0);
                     ui.add(egui::Label::new(egui::RichText::new(mark.clone()).strong()).selectable(false));
                 });
+            } else if let Some(fc) = filter_col {
+                let active = match fc {
+                    FilterCol::Lv => self.lv_filter.is_some(),
+                    FilterCol::Berry => !self.berry_filter.is_empty(),
+                };
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false));
+                    let btn = filter_icon_button(ui, active, &title.replace('\n', ""));
+                    if btn.clicked() {
+                        ev.push(TableEvent::OpenFilter(fc, btn.rect.left_bottom()));
+                    }
+                });
             } else {
                 // 2行の見出しは、切り詰める設定だと1行目の後ろが「…」になる
                 ui.add(egui::Label::new(egui::RichText::new(format!("{title}{mark}")).strong()).selectable(false).extend());
             }
-            // 文字の横の空いたところも含めて、見出しのマス全体をクリック・ドラッグできるようにする
-            let rect = ui.max_rect();
-            let mut r = ui.interact(rect, egui::Id::new(("box_sort", &key)), egui::Sense::click_and_drag());
             r = if r.dragged() { r.on_hover_cursor(egui::CursorIcon::Grabbing) } else { r.on_hover_cursor(egui::CursorIcon::PointingHand) };
             if let Some(help) = detail_help(&title) {
                 r = r.on_hover_text(help);
@@ -1678,6 +1731,7 @@ impl BoxView {
         let mut select_all: Option<bool> = None;
         let mut edits: Vec<CellEdit> = Vec::new();
         let mut open_detail = None;
+        let mut open_filter = None;
         for e in events {
             match e {
                 TableEvent::Sort(key, shift) => {
@@ -1691,8 +1745,13 @@ impl BoxView {
                 TableEvent::ResetOrder => reset_order = true,
                 TableEvent::Hide(key) => {
                     if !hidden_now.contains(&key) {
-                        hidden_now.push(key);
+                        hidden_now.push(key.clone());
                         hidden_changed = true;
+                    }
+                    if key == "lv" {
+                        self.lv_filter = None;
+                    } else if key == "berryName" {
+                        self.berry_filter.clear();
                     }
                 }
                 TableEvent::Show(key) => {
@@ -1708,6 +1767,24 @@ impl BoxView {
                 TableEvent::Action(a) => action = Some(a),
                 TableEvent::Cell(c) => edits.push(c),
                 TableEvent::Detail(i, after, lv) => open_detail = Some((i, after, lv)),
+                TableEvent::OpenFilter(fc, pos) => open_filter = Some((fc, pos)),
+            }
+        }
+        if let Some((fc, pos)) = open_filter {
+            let same = matches!(
+                (&self.filter_popup, fc),
+                (Some(FilterPopup::Lv { .. }), FilterCol::Lv) | (Some(FilterPopup::Berry { .. }), FilterCol::Berry)
+            );
+            if same {
+                self.filter_popup = None;
+            } else {
+                self.filter_popup = Some(match fc {
+                    FilterCol::Lv => {
+                        let (min, max) = self.lv_filter.unwrap_or((1, 100));
+                        FilterPopup::Lv { min, max, pos }
+                    }
+                    FilterCol::Berry => FilterPopup::Berry { selected: self.berry_filter.clone(), pos },
+                });
             }
         }
         // 本家 evaluate-result.vue の showSelectDetail: 食材は概算したポケモンの食材の並びの位置
@@ -2510,6 +2587,125 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, color: egui::Color32) -
         }
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+impl BoxView {
+    /// 列フィルタのポップアップ(本家 table-column-filter.vue)
+    fn show_filter_popup(&mut self, ctx: &egui::Context) {
+        let Some(mut popup) = self.filter_popup.take() else {
+            return;
+        };
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            return;
+        }
+        let pos = match &popup {
+            FilterPopup::Lv { pos, .. } | FilterPopup::Berry { pos, .. } => *pos,
+        };
+        let mut close = false;
+        let area = egui::Area::new(egui::Id::new("box_col_filter"))
+            .fixed_pos(pos)
+            .constrain(true)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).inner_margin(10.0).show(ui, |ui| {
+                    ui.set_width(240.0);
+                    match &mut popup {
+                        FilterPopup::Lv { min, max, .. } => {
+                            ui.label(egui::RichText::new("Lvのフィルタ").strong());
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label("最小値");
+                                ui.add(egui::Slider::new(min, 1..=100));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("最大値");
+                                ui.add(egui::Slider::new(max, 1..=100));
+                            });
+                            let valid = *min <= *max;
+                            if !valid {
+                                ui.label(egui::RichText::new("最小値は最大値以下にしてください。").color(style::danger_color()));
+                            }
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                if style::form_button(ui, "クリア", style::ButtonKind::Normal).clicked() {
+                                    self.lv_filter = None;
+                                    self.page = 0;
+                                    close = true;
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.add_enabled_ui(valid, |ui| style::form_button(ui, "決定", style::ButtonKind::Execute)).inner.clicked() {
+                                        self.lv_filter = Some((*min, *max));
+                                        self.page = 0;
+                                        close = true;
+                                    }
+                                });
+                            });
+                        }
+                        FilterPopup::Berry { selected, .. } => {
+                            ui.label(egui::RichText::new("きのみのフィルタ").strong());
+                            ui.add_space(4.0);
+                            let m = master();
+                            egui::Grid::new("box_berry_filter_grid").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+                                for (idx, berry) in m.berries.iter().enumerate() {
+                                    let mut checked = selected.contains(&berry.name);
+                                    if ui.checkbox(&mut checked, &berry.name).changed() {
+                                        if checked {
+                                            selected.insert(berry.name.clone());
+                                        } else {
+                                            selected.remove(&berry.name);
+                                        }
+                                    }
+                                    if idx % 2 == 1 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                if style::form_button(ui, "クリア", style::ButtonKind::Normal).clicked() {
+                                    self.berry_filter.clear();
+                                    self.page = 0;
+                                    close = true;
+                                }
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if style::form_button(ui, "決定", style::ButtonKind::Execute).clicked() {
+                                        self.berry_filter = selected.clone();
+                                        self.page = 0;
+                                        close = true;
+                                    }
+                                });
+                            });
+                        }
+                    }
+                });
+            });
+        let outside_click = ctx.input(|i| i.pointer.any_pressed()) && !area.response.contains_pointer();
+        if !close && !outside_click {
+            self.filter_popup = Some(popup);
+        }
+    }
+}
+
+/// 表見出しの列フィルタアイコン(14×14)
+fn filter_icon_button(ui: &mut egui::Ui, active: bool, title: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 2.0, ui.visuals().widgets.hovered.bg_fill);
+        }
+        let color = if active {
+            style::mint()
+        } else {
+            ui.visuals().text_color().gamma_multiply(if response.hovered() { 0.85 } else { 0.45 })
+        };
+        let at = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 100.0);
+        let poly = |pts: &[(f32, f32)]| egui::Shape::convex_polygon(pts.iter().map(|&(x, y)| at(x, y)).collect(), color, egui::Stroke::NONE);
+        // 漏斗の形: 上の台形＋下の脚
+        ui.painter().add(poly(&[(10.0, 18.0), (90.0, 18.0), (58.0, 54.0), (42.0, 54.0)]));
+        ui.painter().add(poly(&[(42.0, 54.0), (58.0, 54.0), (58.0, 84.0), (42.0, 76.0)]));
+    }
+    let tip = if active { format!("{title}のフィルタ（絞り込み中）") } else { format!("{title}のフィルタ") };
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip)
 }
 
 fn shift_set_on_remove(set: &mut HashSet<usize>, removed: usize) {
