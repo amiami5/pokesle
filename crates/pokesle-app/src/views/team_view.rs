@@ -19,6 +19,8 @@ const DAYS: [&str; 7] = ["月曜", "火曜", "水曜", "木曜", "金曜", "土�
 pub struct TeamView {
     /// -1 は1週間
     target_day: i32,
+    /// true のときは曜日選択を無効化し、1日(最大24時間・初期3食)のみを計算する
+    one_day_only: bool,
     target_hour: f64,
     cooking_num: f64,
     initial_cooking_change: f64,
@@ -42,6 +44,7 @@ impl Default for TeamView {
     fn default() -> Self {
         TeamView {
             target_day: -1,
+            one_day_only: false,
             target_hour: 24.0,
             cooking_num: 3.0,
             initial_cooking_change: 0.0,
@@ -112,19 +115,43 @@ impl TeamView {
                 style::number(ui, &mut self.before_energy, 100.0, 100.0);
                 ui.end_row();
                 style::th(ui, "曜日");
-                egui::ComboBox::from_id_salt("day")
-                    .selected_text(if self.target_day < 0 { "1週間".to_string() } else { DAYS[self.target_day as usize].to_string() })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.target_day, -1, "1週間");
-                        for (i, d) in DAYS.iter().enumerate() {
-                            ui.selectable_value(&mut self.target_day, i as i32, *d);
-                        }
+                ui.horizontal(|ui| {
+                    let prev_day = self.target_day;
+                    ui.add_enabled_ui(!self.one_day_only, |ui| {
+                        egui::ComboBox::from_id_salt("day")
+                            .selected_text(if self.target_day < 0 { "1週間".to_string() } else { DAYS[self.target_day as usize].to_string() })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.target_day, -1, "1週間");
+                                for (i, d) in DAYS.iter().enumerate() {
+                                    ui.selectable_value(&mut self.target_day, i as i32, *d);
+                                }
+                            });
                     });
+                    if self.target_day != prev_day && self.target_day >= 0 {
+                        let rem_days = (7 - self.target_day) as f64;
+                        self.target_hour = rem_days * 24.0;
+                        self.cooking_num = rem_days * 3.0;
+                    }
+                    ui.add_space(8.0);
+                    if ui.checkbox(&mut self.one_day_only, "1日のみモード").changed() {
+                        if self.one_day_only {
+                            self.target_hour = 24.0;
+                            self.cooking_num = 3.0;
+                        } else if self.target_day >= 0 {
+                            let rem_days = (7 - self.target_day) as f64;
+                            self.target_hour = rem_days * 24.0;
+                            self.cooking_num = rem_days * 3.0;
+                        }
+                    }
+                });
                 ui.end_row();
                 style::th(ui, "時間");
                 ui.horizontal(|ui| {
-                    if self.target_day >= 0 {
-                        ui.add_sized([40.0, 22.0], egui::DragValue::new(&mut self.target_hour).range(1.0..=24.0));
+                    if self.one_day_only {
+                        ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut self.target_hour).range(1.0..=24.0));
+                    } else if self.target_day >= 0 {
+                        let max_hour = (7 - self.target_day) as f64 * 24.0;
+                        ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut self.target_hour).range(1.0..=max_hour));
                     } else {
                         let mut v = 168.0;
                         ui.add_enabled(false, egui::DragValue::new(&mut v));
@@ -135,7 +162,7 @@ impl TeamView {
                 style::th(ui, "料理");
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        if self.target_day >= 0 {
+                        if self.one_day_only || self.target_day >= 0 {
                             ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut self.cooking_num).range(0.0..=21.0));
                         } else {
                             let mut v = 21.0;
@@ -143,12 +170,17 @@ impl TeamView {
                         }
                         ui.label("食分");
                     });
-                    if self.target_day >= 0 {
+                    if self.one_day_only {
                         style::small(ui, "その1日で作る食数（通常は3、翌朝分も集めたい場合は+1）", 260.0);
+                    } else if self.target_day >= 0 {
+                        let msg = format!("{}〜日曜の食数（昼・夜スタート時は減らして調整可）", DAYS[self.target_day as usize]);
+                        style::small(ui, &msg, 300.0);
                     }
                 });
                 ui.end_row();
-                let first_meal_label = if self.target_day < 0 {
+                let first_meal_label = if self.one_day_only {
+                    "1食目".to_string()
+                } else if self.target_day < 0 {
                     "月曜1食目".to_string()
                 } else {
                     format!("{}1食目", DAYS[self.target_day as usize])
@@ -166,7 +198,7 @@ impl TeamView {
                     style::number(ui, &mut self.initial_cooking_power_up, 1.0, 50.0);
                     self.initial_cooking_power_up = self.initial_cooking_power_up.max(0.0);
                     let sim = &shared.config.simulation;
-                    let base_pot = if self.target_day == 6 { sim.pot_size * 2.0 } else { sim.pot_size };
+                    let base_pot = if !self.one_day_only && self.target_day == 6 { sim.pot_size * 2.0 } else { sim.pot_size };
                     let normal_pot = sim.event_bonus.pot.apply(base_pot, 0.0, sim.camp_ticket);
                     let first_pot = normal_pot + self.initial_cooking_power_up;
                     let note = if self.initial_cooking_power_up > 0.0 {
@@ -262,7 +294,8 @@ impl TeamView {
                     let list = shared.box_file.list.clone();
                     let table = shared.usable_evaluate_table().cloned();
                     let request = TeamSimulationRequest {
-                        target_day: (self.target_day >= 0).then_some(self.target_day as f64),
+                        target_day: if self.one_day_only { Some(0.0) } else { (self.target_day >= 0).then_some(self.target_day as f64) },
+                        until_sunday: !self.one_day_only && self.target_day >= 0,
                         target_hour: self.target_hour,
                         initial_cooking_change: self.initial_cooking_change,
                         initial_cooking_power_up: self.initial_cooking_power_up,

@@ -190,6 +190,48 @@ pub fn get_chance_week_effect(effect: f64, day: Option<f64>, initial: f64) -> Ch
     ChanceWeekEffect { total: result, success_probability_list: p_list[1..].to_vec() }
 }
 
+/// 任意の食スケジュール(`is_sunday`: 各食が日曜かどうか)に対する料理チャンスの効果
+pub fn get_chance_effect_for_meals(effect: f64, is_sunday: &[bool], initial: f64) -> ChanceWeekEffect {
+    let n = is_sunday.len();
+    if n == 0 {
+        return ChanceWeekEffect { total: 0.0, success_probability_list: Vec::new() };
+    }
+    let initial = if initial.is_nan() { 0.0 } else { initial.max(0.0) };
+    if effect == 0.0 && initial == 0.0 {
+        let mut list = Vec::with_capacity(n);
+        let mut total = 0.0;
+        for &sun in is_sunday {
+            let p = if sun { 0.3 } else { 0.1 };
+            let mult = if sun { 2.0 } else { 1.0 };
+            list.push(p);
+            total += p * mult + 1.0;
+        }
+        return ChanceWeekEffect { total, success_probability_list: list };
+    }
+
+    let p = js::min(effect / n as f64, 0.7);
+    let mut result = 0.0;
+    let mut p_list = vec![1.0];
+    for i in 1..=n {
+        let sun = is_sunday[i - 1];
+        let base = if sun { 0.3 } else { 0.1 };
+        let mut this_p = 0.0;
+        for j in 1..=i {
+            let jf = j as f64;
+            let boost = if i == j { p * jf + initial } else { p * jf };
+            let mut rate = (base + js::min(boost, 0.7)) * p_list[i - j];
+            for k in (i - j + 1)..i {
+                rate *= 1.0 - p_list[k];
+            }
+            this_p += rate;
+        }
+        let mult = if sun { 2.0 } else { 1.0 };
+        result += this_p * mult + 1.0;
+        p_list.push(this_p);
+    }
+    ChanceWeekEffect { total: result, success_probability_list: p_list[1..].to_vec() }
+}
+
 /// 料理の種類で絞り込む
 pub fn of_type(list: &[EvaluatedCooking], cooking_type: CookingType) -> impl Iterator<Item = &EvaluatedCooking> {
     list.iter().filter(move |c| c.cooking().cooking_type == cooking_type)

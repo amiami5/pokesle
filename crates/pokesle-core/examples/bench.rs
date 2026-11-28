@@ -18,7 +18,7 @@ fn main() {
     println!("threads={} box={}", config.worker_num, box_list.len());
 
     let t = Instant::now();
-    let request = TeamSimulationRequest { target_day: None, target_hour: 24.0, initial_cooking_change: 0.0, initial_cooking_power_up: 0.0, before_energy: 0.0 };
+    let request = TeamSimulationRequest { target_day: None, until_sunday: false, target_hour: 24.0, initial_cooking_change: 0.0, initial_cooking_power_up: 0.0, before_energy: 0.0 };
     let r = run_team_simulation(&config, &box_list, None, &request, &|_| {}).unwrap();
     println!("team: {:.2}s best={:.0}", t.elapsed().as_secs_f64(), r.team_list[0].score);
 

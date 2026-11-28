@@ -283,6 +283,7 @@ fn team_simulation_matches_upstream() {
         let day = req["targetDay"].as_f64().unwrap();
         let request = TeamSimulationRequest {
             target_day: if day == -1.0 { None } else { Some(day) },
+            until_sunday: false,
             target_hour: req["targetHour"].as_f64().unwrap(),
             initial_cooking_change: req["initialCookingChange"].as_f64().unwrap(),
             initial_cooking_power_up: req["initialCookingPowerUp"].as_f64().unwrap(),

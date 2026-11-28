@@ -460,6 +460,12 @@ pub struct TeamSimulationConfig {
     /// 曜日(0:月曜～6:日曜)。None は1週間
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_num")]
     pub day: Option<f64>,
+    /// 指定曜日から日曜終了までの残り期間を通しで計算するか(false は従来どおり1日のみ)
+    #[serde(default, deserialize_with = "de_truthy", skip_serializing_if = "std::ops::Not::not")]
+    pub until_sunday: bool,
+    /// 週末まで通し計算時の日数(時間/24)
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_num")]
+    pub day_length: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_num")]
     pub time_length: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_opt_num")]

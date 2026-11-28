@@ -229,6 +229,15 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
 
     let mut cooking_timing_list: Vec<(f64, usize)> = Vec::new();
     match ts.day {
+        Some(day) if ts.until_sunday => {
+            let total_slots = ((7.0 - day).max(1.0) * 3.0) as usize;
+            let num = ts.cooking_num.max(0.0).ceil() as usize;
+            let offset = total_slots.saturating_sub(num);
+            for k in 0..num {
+                let slot = offset + k;
+                cooking_timing_list.push(((day + (slot / 3) as f64) % 7.0, slot % 3));
+            }
+        }
         Some(day) => {
             let mut i = 0.0;
             while i < ts.cooking_num {
@@ -242,6 +251,7 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             }
         }
     }
+    let is_sunday_list: Vec<bool> = cooking_timing_list.iter().map(|&(w, _)| w == 6.0).collect();
 
     let mut food_common_rate = match ts.day {
         None => ((2.0 * 0.1 + 0.9) * 6.0 + (3.0 * 0.3 + 0.7)) / 7.0,
@@ -280,7 +290,14 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
     let mut simulator = PokemonSimulator::new(config.clone(), Mode::Team);
     let mut help_rate = HelpRate::new(config, None);
 
-    let day_length = if ts.day.is_some() { 1.0 } else { 7.0 };
+    let multi_day = ts.day.is_none() || (ts.until_sunday && ts.day_length.is_some_and(|d| d > 1.0));
+    let day_length = if ts.day.is_none() {
+        7.0
+    } else if ts.until_sunday {
+        ts.day_length.unwrap_or(1.0).max(1.0)
+    } else {
+        1.0
+    };
     let mut default_food_num = vec![0.0; food_len];
     for (name, &v) in &config.food_default_num {
         if let Some(i) = m.food_index(name) {
@@ -499,7 +516,11 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 let skill_num = (p.skill_per_day / if p.skill().kind == SkillKind::Metronome { metronome_len } else { 1.0 }).floor();
                 let mut j = 0.0;
                 while j < skill_num {
-                    let slot = (j / skill_num * 3.0 * day_length).floor() as usize;
+                    let slot = if ts.until_sunday && !cooking_timing_list.is_empty() {
+                        (j / skill_num * cooking_timing_list.len() as f64).floor() as usize
+                    } else {
+                        (j / skill_num * 3.0 * day_length).floor() as usize
+                    };
                     if let Some(s) = cooking_power_up_effect_list.get_mut(slot) {
                         *s += p.cooking_power_up_effect;
                     }
@@ -513,12 +534,12 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 }
             }
 
-            if ts.day.is_none() {
-                energy *= 7.0;
-                skill_shard *= 7.0;
-                total_cooking_chance_effect *= 7.0;
+            if day_length != 1.0 {
+                energy *= day_length;
+                skill_shard *= day_length;
+                total_cooking_chance_effect *= day_length;
                 for x in &mut add_food_num {
-                    *x *= 7.0;
+                    *x *= day_length;
                 }
             }
             for f in 0..food_len {
@@ -558,9 +579,13 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 }
 
                 let key = js::num_key(total_cooking_chance_effect);
-                let chance = cooking_chance_cache
-                    .entry(key)
-                    .or_insert_with(|| cooking::get_chance_week_effect(total_cooking_chance_effect, ts.day, initial_change));
+                let chance = cooking_chance_cache.entry(key).or_insert_with(|| {
+                    if ts.until_sunday {
+                        cooking::get_chance_effect_for_meals(total_cooking_chance_effect, &is_sunday_list, initial_change)
+                    } else {
+                        cooking::get_chance_week_effect(total_cooking_chance_effect, ts.day, initial_change)
+                    }
+                });
 
                 // 余った食材(エナジーの高い順: 事前ソート済みの順で詰めるだけ)
                 remain.clear();
@@ -568,13 +593,20 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     remain.push((f, food_num[f], e));
                 }
                 let mut remain_pos = 0usize;
-                for s in &selected {
+                for (meal_idx, s) in selected.iter().enumerate() {
                     let Some((c, _week, pot_size, sunday, index)) = *s else {
                         return Err("料理が見つかりません".into());
                     };
                     let cooking = c.cooking();
                     let mut pot_remain = pot_size - cooking.food_num;
-                    if ts.day.is_none() {
+                    let prob_idx = if ts.until_sunday {
+                        meal_idx
+                    } else if ts.day.is_none() {
+                        index
+                    } else {
+                        index % 3
+                    };
+                    if multi_day {
                         let mut add_food_power = 0.0;
                         if sim.remain_food_mode == 0.0 {
                             while pot_remain > 0.0 && remain_pos < remain.len() {
@@ -588,12 +620,12 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                                 }
                             }
                         }
-                        let sp = chance.success_probability_list.get(index).copied().unwrap_or(f64::NAN) * if sunday { 2.0 } else { 1.0 } + 1.0;
+                        let sp = chance.success_probability_list.get(prob_idx).copied().unwrap_or(f64::NAN) * if sunday { 2.0 } else { 1.0 } + 1.0;
                         let e = (c.fix_energy + add_food_power) * sp * sim.cooking_weight;
                         cooking_results.push(CookingResult { cooking: c.index, fix_energy: c.fix_energy, energy: e, success_power: sp, add_energy: add_food_power, pot_size });
                         energy += e;
                     } else {
-                        let sp = chance.success_probability_list.get(index % 3).copied().unwrap_or(f64::NAN) * if sunday { 2.0 } else { 1.0 } + 1.0;
+                        let sp = chance.success_probability_list.get(prob_idx).copied().unwrap_or(f64::NAN) * if sunday { 2.0 } else { 1.0 } + 1.0;
                         let e = c.fix_energy * sp * sim.cooking_weight;
                         cooking_results.push(CookingResult { cooking: c.index, fix_energy: c.fix_energy, energy: e, success_power: sp, add_energy: 0.0, pot_size });
                         energy += e;
@@ -619,14 +651,25 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
             let rrm = sim.research_rank_max;
             let (base_energy_shard, energy_shard, research_exp, today_shard, today_research_exp);
             if let Some(day) = ts.day {
-                let shard_energy = energy * (7.0 - day);
-                base_energy_shard = shard_energy * research_shard_per_energy;
-                energy_shard = base_energy_shard * research_shard_rate;
-                research_exp = if rrm { base_energy_shard * 0.5 } else { 0.0 };
-                let before = ts.before_energy.unwrap_or(0.0);
-                let base_today_shard = (before + energy) * research_shard_per_energy;
-                today_shard = base_today_shard * research_shard_rate;
-                today_research_exp = if rrm { base_today_shard * 0.5 } else { 0.0 };
+                if multi_day {
+                    let avg_days = (day_length + 1.0) / 2.0;
+                    base_energy_shard = energy * avg_days * research_shard_per_energy;
+                    energy_shard = base_energy_shard * research_shard_rate;
+                    research_exp = if rrm { base_energy_shard * 0.5 } else { 0.0 };
+                    let before = ts.before_energy.unwrap_or(0.0);
+                    let base_today_shard = (before * day_length.ceil() + energy * avg_days) * research_shard_per_energy;
+                    today_shard = base_today_shard * research_shard_rate;
+                    today_research_exp = if rrm { base_today_shard * 0.5 } else { 0.0 };
+                } else {
+                    let shard_energy = energy * (7.0 - day);
+                    base_energy_shard = shard_energy * research_shard_per_energy;
+                    energy_shard = base_energy_shard * research_shard_rate;
+                    research_exp = if rrm { base_energy_shard * 0.5 } else { 0.0 };
+                    let before = ts.before_energy.unwrap_or(0.0);
+                    let base_today_shard = (before + energy) * research_shard_per_energy;
+                    today_shard = base_today_shard * research_shard_rate;
+                    today_research_exp = if rrm { base_today_shard * 0.5 } else { 0.0 };
+                }
             } else {
                 base_energy_shard = energy * 4.0 * research_shard_per_energy;
                 energy_shard = base_energy_shard * research_shard_rate;
@@ -651,9 +694,9 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                         p.self_heal_list.clear();
                         p.other_heal_list.clear();
                         p.sanitize_non_finite();
-                        if ts.day.is_none() {
+                        if day_length != 1.0 {
                             for x in &mut p.food_count {
-                                *x *= 7.0;
+                                *x *= day_length;
                             }
                         }
                         let shard_bonus = p.shard
@@ -664,9 +707,9 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     .collect();
                 if let Some(nc) = &night_cap {
                     let mut nc = nc.clone();
-                    if ts.day.is_none() {
+                    if day_length != 1.0 {
                         for x in &mut nc.food_count {
-                            *x *= 7.0;
+                            *x *= day_length;
                         }
                     }
                     list.push(TeamMember::NightCapPikachu(nc));
@@ -734,7 +777,9 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
 pub struct TeamSimulationRequest {
     /// 曜日(0:月曜～6:日曜)、None は1週間
     pub target_day: Option<f64>,
-    /// 何時間分を計算するか(24 は1日すべて)
+    /// 指定曜日から日曜終了までの残り期間を通しで計算するか(false は従来どおり1日のみ)
+    pub until_sunday: bool,
+    /// 何時間分を計算するか(1日モードは 24 が1日すべて、週末までモードは残り日数×24)
     pub target_hour: f64,
     /// 初期の料理チャンス(%)
     pub initial_cooking_change: f64,
@@ -873,9 +918,18 @@ pub fn run_team_simulation(
         config.simulation.shard_weight = 0.0;
     }
     if let Some(day) = request.target_day {
-        config.simulation.shard_to_energy = Some(config.research_shard_to_energy(7.0 - day));
         config.team_simulation.day = Some(day);
-        config.team_simulation.time_length = if request.target_hour != 24.0 { Some(request.target_hour / 24.0) } else { None };
+        config.team_simulation.until_sunday = request.until_sunday;
+        if request.until_sunday && request.target_hour > 24.0 {
+            let days = request.target_hour / 24.0;
+            config.simulation.shard_to_energy = Some(config.research_shard_to_energy((days + 1.0) / 2.0));
+            config.team_simulation.day_length = Some(days);
+            config.team_simulation.time_length = None;
+        } else {
+            config.simulation.shard_to_energy = Some(config.research_shard_to_energy(7.0 - day));
+            config.team_simulation.day_length = None;
+            config.team_simulation.time_length = if request.target_hour != 24.0 { Some(request.target_hour / 24.0) } else { None };
+        }
     }
     config.team_simulation.initial_cooking_change = Some(request.initial_cooking_change / 100.0);
     config.team_simulation.initial_cooking_power_up = Some(request.initial_cooking_power_up);
@@ -1052,6 +1106,7 @@ mod tests {
             .collect();
         let req = TeamSimulationRequest {
             target_day: None,
+            until_sunday: false,
             target_hour: 24.0,
             initial_cooking_change: 70.0,
             initial_cooking_power_up: 200.0,
@@ -1065,5 +1120,60 @@ mod tests {
         assert!((team.cooking_list[1].pot_size - 131.0).abs() < 1e-9);
         // 月曜1食目の大成功倍率: 1.0 + (0.1 + 0.7) = 1.8 (料理チャンス持ちがいなくても効く)
         assert!((team.cooking_list[0].success_power - 1.8).abs() < 1e-9);
+    }
+
+    #[test]
+    fn until_sunday_simulates_remaining_days_and_sunday_bonus() {
+        let mut config = Config::default_config();
+        config.simulation.pot_size = 69.0;
+        config.simulation.camp_ticket = false;
+        config.simulation.cooking_type = Some("カレー".into());
+        config.team_simulation.cooking_num = 9.0;
+        config.food_unlimited = true;
+
+        let box_list: Vec<BoxPokemon> = (0..5)
+            .map(|i| BoxPokemon {
+                index: i,
+                name: "ピカチュウ".into(),
+                lv: 30.0,
+                skill_lv: Some(1.0),
+                food_list: vec!["とくせんリンゴ".into(), "とくせんリンゴ".into(), "とくせんリンゴ".into()],
+                sub_skill_list: vec![String::new(); 5],
+                nature: "まじめ".into(),
+                fix: Some(1.0),
+                ..Default::default()
+            })
+            .collect();
+
+        // 金曜(4)〜日曜(6) = 3日(72時間・9食分)
+        let req = TeamSimulationRequest {
+            target_day: Some(4.0),
+            until_sunday: true,
+            target_hour: 72.0,
+            initial_cooking_change: 0.0,
+            initial_cooking_power_up: 0.0,
+            before_energy: 0.0,
+        };
+        let res = run_team_simulation(&config, &box_list, None, &req, &|_| {}).unwrap();
+        let team = &res.team_list[0];
+        assert_eq!(team.cooking_list.len(), 9);
+        // 平日6食(金3・土3)は鍋69・大成功倍率1.1、日曜3食は鍋138・大成功倍率1.6
+        for i in 0..6 {
+            assert!((team.cooking_list[i].pot_size - 69.0).abs() < 1e-9);
+            assert!((team.cooking_list[i].success_power - 1.1).abs() < 1e-9);
+        }
+        for i in 6..9 {
+            assert!((team.cooking_list[i].pot_size - 138.0).abs() < 1e-9);
+            assert!((team.cooking_list[i].success_power - 1.6).abs() < 1e-9);
+        }
+
+        // 金曜昼スタート(8食分)なら平日5食＋日曜3食になる
+        config.team_simulation.cooking_num = 8.0;
+        let req_noon = TeamSimulationRequest { target_hour: 60.0, ..req };
+        let res_noon = run_team_simulation(&config, &box_list, None, &req_noon, &|_| {}).unwrap();
+        let team_noon = &res_noon.team_list[0];
+        assert_eq!(team_noon.cooking_list.len(), 8);
+        assert!((team_noon.cooking_list[4].pot_size - 69.0).abs() < 1e-9);
+        assert!((team_noon.cooking_list[5].pot_size - 138.0).abs() < 1e-9);
     }
 }
