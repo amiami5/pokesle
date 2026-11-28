@@ -164,16 +164,25 @@ impl TeamView {
                     ui.horizontal(|ui| {
                         if self.one_day_only || self.target_day >= 0 {
                             ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut self.cooking_num).range(0.0..=21.0));
+                            ui.label("食分");
+                            if ui.add_enabled(self.cooking_num > 0.0, egui::Button::new("-1").min_size(egui::vec2(28.0, 22.0))).clicked() {
+                                self.cooking_num = (self.cooking_num - 1.0).clamp(0.0, 21.0);
+                            }
+                            if ui.add_enabled(self.cooking_num < 21.0, egui::Button::new("+1").min_size(egui::vec2(28.0, 22.0))).clicked() {
+                                self.cooking_num = (self.cooking_num + 1.0).clamp(0.0, 21.0);
+                            }
                         } else {
                             let mut v = 21.0;
                             ui.add_enabled(false, egui::DragValue::new(&mut v));
+                            ui.label("食分");
                         }
-                        ui.label("食分");
                     });
                     if self.one_day_only {
                         style::small(ui, "その1日で作る食数（通常は3、翌朝分も集めたい場合は+1）", 260.0);
+                    } else if self.target_day == 6 {
+                        style::small(ui, "日曜の食数（昼・夜スタート時は-1で調整可）", 300.0);
                     } else if self.target_day >= 0 {
-                        let msg = format!("{}〜日曜の食数（昼・夜スタート時は減らして調整可）", DAYS[self.target_day as usize]);
+                        let msg = format!("{}から日曜までの食数（昼・夜スタート時は-1で調整可）", DAYS[self.target_day as usize]);
                         style::small(ui, &msg, 300.0);
                     }
                 });
