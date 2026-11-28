@@ -20,6 +20,7 @@ pub struct TeamView {
     /// -1 は1週間
     target_day: i32,
     target_hour: f64,
+    cooking_num: f64,
     initial_cooking_change: f64,
     initial_cooking_power_up: f64,
     before_energy: f64,
@@ -42,6 +43,7 @@ impl Default for TeamView {
         TeamView {
             target_day: -1,
             target_hour: 24.0,
+            cooking_num: 3.0,
             initial_cooking_change: 0.0,
             initial_cooking_power_up: 0.0,
             before_energy: 0.0,
@@ -134,14 +136,16 @@ impl TeamView {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         if self.target_day >= 0 {
-                            changed |= ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut shared.config.team_simulation.cooking_num).range(0.0..=21.0)).changed();
+                            ui.add_sized([50.0, 22.0], egui::DragValue::new(&mut self.cooking_num).range(0.0..=21.0));
                         } else {
                             let mut v = 21.0;
                             ui.add_enabled(false, egui::DragValue::new(&mut v));
                         }
                         ui.label("食分");
                     });
-                    style::small(ui, "翌朝の料理分も集めておきたい場合は4にしてください", 150.0);
+                    if self.target_day >= 0 {
+                        style::small(ui, "その1日で作る食数（通常は3、翌朝分も集めたい場合は+1）", 260.0);
+                    }
                 });
                 ui.end_row();
                 let first_meal_label = if self.target_day < 0 {
@@ -252,7 +256,8 @@ impl TeamView {
             ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
             ui.add_enabled_ui(can_run, |ui| {
                 if style::form_button(ui, "シミュレーション実行", style::ButtonKind::Execute).clicked() {
-                    let config = shared.sim_config();
+                    let mut config = shared.sim_config();
+                    config.team_simulation.cooking_num = self.cooking_num;
                     self.job_config = Some(config.clone());
                     let list = shared.box_file.list.clone();
                     let table = shared.usable_evaluate_table().cloned();
