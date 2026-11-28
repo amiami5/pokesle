@@ -144,14 +144,34 @@ impl TeamView {
                     style::small(ui, "翌朝の料理分も集めておきたい場合は4にしてください", 150.0);
                 });
                 ui.end_row();
+                let first_meal_label = if self.target_day < 0 {
+                    "月曜1食目".to_string()
+                } else {
+                    format!("{}1食目", DAYS[self.target_day as usize])
+                };
                 style::th(ui, "料理チャンス");
                 ui.horizontal(|ui| {
                     style::number(ui, &mut self.initial_cooking_change, 1.0, 50.0);
+                    self.initial_cooking_change = self.initial_cooking_change.clamp(0.0, 70.0);
                     ui.label("%");
+                    style::small(ui, &format!("{first_meal_label}から適用（大成功まで持ち越し・最大70%）"), 320.0);
                 });
                 ui.end_row();
                 style::th(ui, "料理パワーアップ");
-                style::number(ui, &mut self.initial_cooking_power_up, 1.0, 50.0);
+                ui.horizontal(|ui| {
+                    style::number(ui, &mut self.initial_cooking_power_up, 1.0, 50.0);
+                    self.initial_cooking_power_up = self.initial_cooking_power_up.max(0.0);
+                    let sim = &shared.config.simulation;
+                    let base_pot = if self.target_day == 6 { sim.pot_size * 2.0 } else { sim.pot_size };
+                    let normal_pot = sim.event_bonus.pot.apply(base_pot, 0.0, sim.camp_ticket);
+                    let first_pot = normal_pot + self.initial_cooking_power_up;
+                    let note = if self.initial_cooking_power_up > 0.0 {
+                        format!("{first_meal_label}の鍋容量: {}（通常: {}）", js_num(first_pot), js_num(normal_pot))
+                    } else {
+                        format!("{first_meal_label}の鍋容量: {}", js_num(normal_pot))
+                    };
+                    style::small(ui, &note, 320.0);
+                });
                 ui.end_row();
                 let sim = &mut shared.config.simulation;
                 style::th(ui, "余った食材の評価");

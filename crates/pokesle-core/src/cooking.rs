@@ -145,7 +145,8 @@ pub struct ChanceWeekEffect {
 }
 
 pub fn get_chance_week_effect(effect: f64, day: Option<f64>, initial: f64) -> ChanceWeekEffect {
-    if effect == 0.0 {
+    let initial = if initial.is_nan() { 0.0 } else { initial.max(0.0) };
+    if effect == 0.0 && initial == 0.0 {
         return match day {
             None => {
                 let mut list = vec![0.1; 18];
@@ -192,4 +193,22 @@ pub fn get_chance_week_effect(effect: f64, day: Option<f64>, initial: f64) -> Ch
 /// 料理の種類で絞り込む
 pub fn of_type(list: &[EvaluatedCooking], cooking_type: CookingType) -> impl Iterator<Item = &EvaluatedCooking> {
     list.iter().filter(move |c| c.cooking().cooking_type == cooking_type)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_chance_works_without_skill_effect() {
+        let none = get_chance_week_effect(0.0, None, 0.0);
+        assert!((none.total - 24.6).abs() < 1e-9);
+        assert!((none.success_probability_list[0] - 0.1).abs() < 1e-9);
+
+        // チームに料理チャンス持ちがいなくても初期料理チャンス(+70%)が効くこと
+        let with_initial = get_chance_week_effect(0.0, None, 0.7);
+        assert!((with_initial.success_probability_list[0] - 0.8).abs() < 1e-9);
+        // 2食目: 1食目成功(0.8)*0.1 + 1食目失敗(0.2)*0.8 = 0.24
+        assert!((with_initial.success_probability_list[1] - 0.24).abs() < 1e-9);
+    }
 }

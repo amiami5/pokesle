@@ -249,14 +249,19 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
         Some(_) => 1.1,
     };
     let initial_change = ts.initial_cooking_change.unwrap_or(0.0);
+    let initial_pot_up = ts.initial_cooking_power_up.filter(|v| *v != 0.0 && !v.is_nan()).unwrap_or(0.0);
+    let has_initial_buff = (initial_change != 0.0 && !initial_change.is_nan()) || initial_pot_up != 0.0;
     if initial_change != 0.0 && !initial_change.is_nan() {
         food_common_rate = 0.0;
         let length = if ts.day.is_some() { 3 } else { 21 };
+        let capped_initial = js::min(initial_change.max(0.0), 0.7);
         let mut no_success = 1.0;
         for i in 0..length {
-            let success = (if i >= 18 || ts.day == Some(6.0) { 0.3 } else { 0.1 }) + initial_change * no_success;
+            let sunday = i >= 18 || ts.day == Some(6.0);
+            let base = if sunday { 0.3 } else { 0.1 };
+            let success = js::min(base + capped_initial * no_success, 1.0);
             no_success *= 1.0 - success;
-            food_common_rate += success;
+            food_common_rate += 1.0 + success * if sunday { 2.0 } else { 1.0 };
         }
         food_common_rate /= length as f64;
     }
@@ -310,7 +315,9 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
         let mut members: Vec<usize> = Vec::with_capacity(5);
 
         let mut body = |combination: &[usize], about_score: f64, pool: &mut Vec<SimPokemon>| -> Result<(), String> {
-            if (about_score + fixed_about) * day_length < border_score {
+            // 初期バフ(1食目の鍋拡張・料理チャンス)があると単体概算スコア合計より実スコアが大きく跳ねるため、
+            // 枝刈りで料理シナジーの高いチームを取りこぼさないよう無効化する
+            if !has_initial_buff && (about_score + fixed_about) * day_length < border_score {
                 return Ok(());
             }
             members.clear();
@@ -500,12 +507,6 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 }
                 total_cooking_chance_effect += p.cooking_chance_effect;
             }
-            if let Some(v) = ts.initial_cooking_power_up
-                && v != 0.0
-                && !v.is_nan()
-            {
-                cooking_power_up_effect_list[0] += v;
-            }
             if let Some(nc) = &night_cap {
                 for f in 0..food_len {
                     add_food_num[f] += nc.food_count[f];
@@ -532,11 +533,15 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                 selected.clear();
                 for (count, &(week, i)) in cooking_timing_list.iter().enumerate() {
                     let base_pot = if week == 6.0 { sim.pot_size * 2.0 } else { sim.pot_size };
-                    let pot_size = sim.event_bonus.pot.apply(
+                    let mut pot_size = sim.event_bonus.pot.apply(
                         base_pot,
                         cooking_power_up_effect_list.get(count).copied().unwrap_or(f64::NAN),
                         sim.camp_ticket,
                     );
+                    if count == 0 && initial_pot_up != 0.0 {
+                        // 日曜仕込み等の初期鍋拡張は、いいキャンプチケット(1.5倍)の対象外として加算する
+                        pot_size += initial_pot_up;
+                    }
                     let mut best = None;
                     for c in &target_cooking_list {
                         let cooking = c.cooking();
@@ -684,7 +689,13 @@ pub fn simulate_team(input: &TeamInput, progress: &(dyn Fn(usize) + Sync)) -> Re
                     add_food_num: add_food_num.clone(),
                     default_food_num: default_food_num.clone(),
                     food_num: food_num.clone(),
-                    cooking_power_up_effect_list: cooking_power_up_effect_list.to_vec(),
+                    cooking_power_up_effect_list: {
+                        let mut v = cooking_power_up_effect_list.to_vec();
+                        if initial_pot_up != 0.0 {
+                            v[0] += initial_pot_up;
+                        }
+                        v
+                    },
                     remain_food_energy,
                     cooking_list: cooking_results.clone(),
                 });
@@ -1015,5 +1026,44 @@ mod tests {
         let m_sb = er_sb.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().pure_mint.as_ref().unwrap().rate;
         let m_cb = er_cb.get(EvalLv::Lv(50), "ライチュウ").unwrap().get("energy").unwrap().pure_mint.as_ref().unwrap().rate;
         assert_eq!(m_sb, m_cb);
+    }
+
+    #[test]
+    fn initial_sunday_buffs_apply_to_monday_first_meal() {
+        let mut config = Config::default_config();
+        config.simulation.pot_size = 87.0;
+        config.simulation.camp_ticket = true;
+        config.simulation.cooking_type = Some("カレー".into());
+        config.food_unlimited = true;
+
+        // 料理パワーアップも料理チャンスも持たない5匹固定でテスト
+        let box_list: Vec<BoxPokemon> = (0..5)
+            .map(|i| BoxPokemon {
+                index: i,
+                name: "ピカチュウ".into(),
+                lv: 30.0,
+                skill_lv: Some(1.0),
+                food_list: vec!["とくせんリンゴ".into(), "とくせんリンゴ".into(), "とくせんリンゴ".into()],
+                sub_skill_list: vec![String::new(); 5],
+                nature: "まじめ".into(),
+                fix: Some(1.0),
+                ..Default::default()
+            })
+            .collect();
+        let req = TeamSimulationRequest {
+            target_day: None,
+            target_hour: 24.0,
+            initial_cooking_change: 70.0,
+            initial_cooking_power_up: 200.0,
+            before_energy: 0.0,
+        };
+        let res = run_team_simulation(&config, &box_list, None, &req, &|_| {}).unwrap();
+        let team = &res.team_list[0];
+        // 月曜1食目: round(87 * 1.5) + 200 = 131 + 200 = 331 (キャンチケ1.5倍は初期拡張にかからない)
+        assert!((team.cooking_list[0].pot_size - 331.0).abs() < 1e-9);
+        // 月曜2食目: 131
+        assert!((team.cooking_list[1].pot_size - 131.0).abs() < 1e-9);
+        // 月曜1食目の大成功倍率: 1.0 + (0.1 + 0.7) = 1.8 (料理チャンス持ちがいなくても効く)
+        assert!((team.cooking_list[0].success_power - 1.8).abs() < 1e-9);
     }
 }

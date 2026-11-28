@@ -131,11 +131,14 @@ impl PokemonSimulator {
         if initial_change != 0.0 && !initial_change.is_nan() && mode != Mode::Select {
             food_common_rate = 0.0;
             let length = if day.is_some() { 3 } else { 21 };
+            let capped_initial = js::min(initial_change.max(0.0), 0.7);
             let mut no_success_rate = 1.0;
             for i in 0..length {
-                let success = (if i >= 18 || day == Some(6.0) { 0.3 } else { 0.1 }) + initial_change * no_success_rate;
+                let sunday = i >= 18 || day == Some(6.0);
+                let base = if sunday { 0.3 } else { 0.1 };
+                let success = js::min(base + capped_initial * no_success_rate, 1.0);
                 no_success_rate *= 1.0 - success;
-                food_common_rate += success;
+                food_common_rate += 1.0 + success * if sunday { 2.0 } else { 1.0 };
             }
             food_common_rate /= length as f64;
         }
